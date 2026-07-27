@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: malita-payfast-webhook
+    env: python
+    # Deliberately NOT "free": free web services on Render sleep after 15
+    # minutes of no traffic, with a 30-60s cold start on the next request.
+    # This service exists solely to receive PayFast's payment webhooks — if
+    # it's asleep the moment PayFast tries to notify you of a payment, a
+    # learner could get charged without their account actually upgrading.
+    # "starter" (~$7/month) keeps it always-on. If you'd rather start on
+    # $0 and accept that risk while validating demand, change this to
+    # "free" and see the note in README.md section 4.3.
+    plan: free #starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn webhook_server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # set this manually to your Supabase/Postgres connection string
+      - key: PAYFAST_MERCHANT_ID
+        sync: false
+      - key: PAYFAST_MERCHANT_KEY
+        sync: false
+      - key: PAYFAST_PASSPHRASE
+        sync: false
+      - key: PAYFAST_SANDBOX
+        value: "false"

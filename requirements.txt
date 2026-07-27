@@ -1,0 +1,16 @@
+#streamlit run app.py #another option
+streamlit==1.38.0
+sympy==1.13.2
+numpy==1.26.4
+matplotlib==3.9.2
+opencv-python-headless==4.10.0.84
+pytesseract==0.3.13
+Pillow==10.4.0
+PyMuPDF==1.24.10
+SQLAlchemy==2.0.32
+psycopg2-binary==2.9.9
+bcrypt==4.2.0
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+requests==2.32.3
+python-dotenv==1.0.1

@@ -28,7 +28,7 @@ import random
 from backend.db import init_db, SA_PROVINCES
 from backend.auth import (
     register_user, login_user, get_user_tier, is_user_admin, AuthError,
-    create_password_reset, reset_password,
+    create_password_reset, reset_password, cancel_subscription,
 )
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, daily_limit
@@ -388,27 +388,79 @@ section[data-testid="stSidebar"] * {
 # OCR FUNCTIONS
 # =====================================================
 def preprocess_image(pil_image):
+    """Upscale + adaptively threshold before OCR. Tesseract badly misreads
+    the tiny superscript exponents typical of maths photos (e.g. dropping
+    or misreading the "2"/"6" in y=x^2-4x^6) unless the text is reasonably
+    large and the threshold is tuned per-image rather than a fixed cutoff."""
     img = np.array(pil_image.convert("L"))
-    _, img_bin = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY_INV)
+
+    # Scale up small images — tiny exponents are the single biggest cause
+    # of OCR misreads on maths photos.
+    img = cv2.resize(img, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+
+    # Otsu's method picks the threshold from each image's own brightness
+    # distribution instead of a fixed cutoff, which holds up far better
+    # across photos taken in different lighting than a flat "150".
+    _, img_bin = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     return img_bin
 
+# Restrict recognition to characters that actually appear in maths
+# expressions, so Tesseract can't "correct" a faint digit into an
+# unrelated symbol (e.g. misreading a small "6" as "®"). No space in the
+# whitelist — spaces are stripped afterwards anyway, and a literal space
+# here would get split into a separate command-line argument.
+_OCR_WHITELIST = (
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "+-*/=()[]{}.,^<>≤≥√π"
+)
+_TESSERACT_CONFIG = f"--psm 6 -c tessedit_char_whitelist={_OCR_WHITELIST}"
+
 def ocr_with_exponents(img):
-    data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-    result, prev_bottom, prev_text = "", 0, ""
-    for i in range(len(data["text"])):
-        text = data["text"][i].strip()
-        if not text:
+    """Character-level OCR (not word-level) so superscript exponents get
+    stitched into the right place in the output. This matters because
+    Tesseract's word/line segmentation often puts a raised exponent into a
+    DIFFERENT internal "line" than the baseline text it belongs to — a
+    word-level pass then emits the exponents in the wrong order entirely
+    (e.g. "26y=x-4x" instead of "y=x^2-4x^6"). Sorting individual
+    characters by their horizontal position avoids that, and comparing
+    each digit's vertical position only against the last ALPHANUMERIC
+    baseline (not operators like "=", "-", which have unreliable vertical
+    extents of their own) avoids false-positive exponents."""
+    img_height = img.shape[0]
+    boxes_str = pytesseract.image_to_boxes(img, config=_TESSERACT_CONFIG)
+
+    chars = []
+    for line in boxes_str.splitlines():
+        parts = line.split()
+        if len(parts) < 5:
             continue
-        top, height = data["top"][i], data["height"][i]
-        if prev_text and top + height < prev_bottom - 5:
+        ch, left, bottom, _right, top = parts[0], int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])
+        # image_to_boxes uses a bottom-left origin; flip to top-left so
+        # "smaller value = higher up the page", matching normal intuition.
+        top_px = img_height - top
+        bottom_px = img_height - bottom
+        chars.append({"char": ch, "left": left, "bottom": bottom_px, "height": bottom_px - top_px})
+    chars.sort(key=lambda c: c["left"])
+
+    result = ""
+    prev_char = ""
+    prev_bottom, prev_height, have_baseline = 0, 0, False
+    for c in chars:
+        text = c["char"]
+        is_alnum = text.isalnum()
+
+        if is_alnum and text.isdigit() and have_baseline and c["bottom"] < prev_bottom - max(5, prev_height * 0.3):
             result += "^" + text
+        elif prev_char and re.match(r"[a-zA-Z]", prev_char) and re.match(r"\d", text):
+            result += "*" + text
         else:
-            if prev_text and re.match(r"[a-zA-Z]", prev_text) and re.match(r"\d", text):
-                result += "*" + text
-            else:
-                result += text
-        prev_bottom = top + height
-        prev_text = text
+            result += text
+
+        prev_char = text
+        if is_alnum:
+            prev_bottom = c["bottom"]
+            prev_height = c["height"]
+            have_baseline = True
     return result.replace(" ", "").replace("\n", "")
 
 def clean_for_sympy(text):
@@ -1224,6 +1276,32 @@ with st.sidebar.expander("💳 Upgrade / Manage Plan"):
             continue
         if tier_key == current_tier:
             st.success(f"✅ You're on {cfg['label']} (R{cfg['price_zar']}/month)")
+
+            confirm_key = f"confirm_cancel_{tier_key}"
+            if st.session_state.get(confirm_key):
+                st.warning("Are you sure? This stops your subscription and downgrades your account.")
+                col_yes, col_no = st.columns(2)
+                with col_yes:
+                    if st.button("Yes, cancel", key=f"cancel_yes_{tier_key}"):
+                        result = cancel_subscription(auth_user["id"])
+                        if result["payfast_notified"]:
+                            st.success("Subscription cancelled — you won't be billed again.")
+                        else:
+                            st.warning(
+                                "Your account has been downgraded, but we couldn't confirm "
+                                "the cancellation with PayFast automatically. Please also "
+                                "check your PayFast dashboard (or contact PayFast support) "
+                                "to make sure the recurring payment is stopped."
+                            )
+                        st.session_state[confirm_key] = False
+                with col_no:
+                    if st.button("Never mind", key=f"cancel_no_{tier_key}"):
+                        st.session_state[confirm_key] = False
+                        st.rerun()
+            else:
+                if st.button("Cancel Subscription", key=f"cancel_{tier_key}"):
+                    st.session_state[confirm_key] = True
+                    st.rerun()
             continue
         st.markdown(f"**{cfg['label']} — R{cfg['price_zar']}/month**")
         if st.button(f"Upgrade to {cfg['label']}", key=f"upgrade_{tier_key}"):
@@ -1410,7 +1488,37 @@ elif mode == "🧮 AI Tutor":
         for ex in EXAMPLE_QUESTIONS.get(topic, []):
             st.code(ex, language=None)
 
-    question = st.text_input("Enter your expression or type your question in words:", st.session_state.copied_text)
+    # A plain `value=` text_input "locks in" whatever the learner types and
+    # ignores value= on later reruns — so a Clear button that only resets
+    # copied_text wouldn't actually clear text already typed. Using an
+    # explicit key lets both Clear and OCR/PDF "Transfer to Solver" update
+    # the box reliably: copied_text is treated as a one-shot pending value,
+    # adopted into the keyed widget then immediately consumed (reset to
+    # "") so it can't re-overwrite a later manual edit or Clear.
+    QUESTION_KEY = "ai_tutor_question_input"
+    if QUESTION_KEY not in st.session_state:
+        st.session_state[QUESTION_KEY] = st.session_state.copied_text
+    if st.session_state.copied_text and st.session_state.copied_text != st.session_state[QUESTION_KEY]:
+        st.session_state[QUESTION_KEY] = st.session_state.copied_text
+    st.session_state.copied_text = ""
+
+    # Create the Clear button (and apply its effect) BEFORE the text_input
+    # below is instantiated — Streamlit raises an exception if a keyed
+    # widget's session_state is written to AFTER that same widget has
+    # already been created in this run, so the write order here matters
+    # even though the button renders visually to the right of the input.
+    col_input, col_clear = st.columns([6, 1])
+    with col_clear:
+        st.write("")  # spacer so the button lines up with the input box, not its label
+        clear_clicked = st.button("🗑️ Clear")
+    if clear_clicked:
+        st.session_state[QUESTION_KEY] = ""
+
+    with col_input:
+        question = st.text_input(
+            "Enter your expression or type your question in words:",
+            key=QUESTION_KEY,
+        )
     x = sp.symbols("x")
 
     solve_clicked = st.button("Solve")

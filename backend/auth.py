@@ -13,6 +13,7 @@ import datetime as dt
 import bcrypt
 
 from .db import get_session, User, Subscription, PasswordReset
+from .payfast import cancel_payfast_subscription
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_TOKEN_VALID_MINUTES = 60
@@ -137,6 +138,27 @@ def create_password_reset(email: str):
             expires_at=dt.datetime.utcnow() + dt.timedelta(minutes=RESET_TOKEN_VALID_MINUTES),
         ))
         return token
+
+
+def cancel_subscription(user_id: int) -> dict:
+    """Cancel a user's paid subscription. Always downgrades access in our
+    own system immediately (status -> 'cancelled', which get_user_tier()
+    already treats as free), and best-effort tells PayFast to stop the
+    recurring billing too. Returns a dict the UI uses to tell the learner
+    exactly what happened:
+      had_subscription: was there anything to cancel at all
+      payfast_notified: did PayFast confirm the recurring billing stopped
+    If payfast_notified is False, the learner should be told to also check
+    directly with PayFast — we never want someone to believe they've
+    stopped paying when the recurring charge might still be active."""
+    with get_session() as db:
+        sub = db.query(Subscription).filter(Subscription.user_id == user_id).first()
+        if not sub or sub.tier == "free" or sub.status != "active":
+            return {"had_subscription": False, "payfast_notified": False}
+
+        payfast_notified = cancel_payfast_subscription(sub.payfast_token)
+        sub.status = "cancelled"
+        return {"had_subscription": True, "payfast_notified": payfast_notified}
 
 
 def reset_password(token: str, new_password: str) -> None:

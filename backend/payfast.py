@@ -25,6 +25,7 @@ import os
 import socket
 import hashlib
 import urllib.parse
+import datetime as dt
 from collections import OrderedDict
 
 import requests
@@ -175,13 +176,47 @@ def verify_with_payfast(post_data: dict, timeout: int = 15) -> bool:
         return False
 
 
-"""
-DATABASE_URL = "postgresql+psycopg2://postgres.xdzhlpuejbaqhmhkkcib:MtnJse212Ukzn@aws-0-eu-central-1.pooler.supabase.com:5432/postgres"
-APP_BASE_URL = "https://malita-maths.streamlit.app"
-APP_WEBHOOK_URL = "https://malita.onrender.com/payfast/notify"
-PAYFAST_MERCHANT_ID = "14006256"
-PAYFAST_MERCHANT_KEY = "m5ne6hlhz1wak"
-PAYFAST_PASSPHRASE = "MtnJse212535942Ukzn_Sb"
-PAYFAST_SANDBOX = "false"
+# ---------------------------------------------------------------------------
+# OUTGOING: cancel a recurring subscription
+# ---------------------------------------------------------------------------
+# IMPORTANT — VERIFY BEFORE RELYING ON THIS: this follows PayFast's
+# documented Subscriptions API (api.payfast.co.za), signing sorted
+# `merchant-id`/`version`/`timestamp` params the same way as the ITN
+# signature above. As with the checkout signature (see module docstring),
+# confirm this against a real PayFast sandbox subscription before trusting
+# it in production — if it ever returns False, tell the user to also
+# cancel directly from their PayFast dashboard so they're never stuck
+# still being billed.
+PAYFAST_API_URL = "https://api.payfast.co.za"
 
-"""
+
+def cancel_payfast_subscription(token: str, timeout: int = 15) -> bool:
+    """Best-effort call to PayFast's subscription-cancel endpoint. Returns
+    True only on a confirmed 200 response — any error/exception returns
+    False so the caller can warn the user rather than assume it worked."""
+    if not token:
+        return False
+
+    timestamp = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    params = {
+        "merchant-id": PAYFAST_MERCHANT_ID,
+        "version": "v1",
+        "timestamp": timestamp,
+    }
+    signature_string = "&".join(
+        f"{k}={_payfast_urlencode(v)}" for k, v in sorted(params.items())
+    )
+    if PAYFAST_PASSPHRASE:
+        signature_string += f"&passphrase={_payfast_urlencode(PAYFAST_PASSPHRASE)}"
+    signature = hashlib.md5(signature_string.encode("utf-8")).hexdigest()
+
+    headers = {**params, "signature": signature}
+    url = f"{PAYFAST_API_URL}/subscriptions/{token}/cancel"
+    if PAYFAST_SANDBOX:
+        url += "?testing=true"
+
+    try:
+        resp = requests.put(url, headers=headers, timeout=timeout)
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False

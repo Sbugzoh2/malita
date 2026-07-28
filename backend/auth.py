@@ -105,3 +105,12 @@ def get_user_tier(user_id: int) -> str:
         if user.subscription.status != "active":
             return "free"
         return user.subscription.tier
+
+
+def is_user_admin(user_id: int) -> bool:
+    """Live lookup of the is_admin flag — checked fresh on every run (same
+    reasoning as get_user_tier) so a change made via set_admin.py takes
+    effect immediately without needing to log out and back in."""
+    with get_session() as db:
+        user = db.query(User).get(user_id)
+        return bool(user and user.is_admin)

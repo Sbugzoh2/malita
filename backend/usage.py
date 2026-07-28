@@ -37,3 +37,15 @@ def record_solve(user_id: int) -> None:
             row.solve_count += 1
         else:
             db.add(UsageLog(user_id=user_id, usage_date=today, solve_count=1))
+
+
+def reset_today_usage(user_id: int) -> None:
+    """Zero out today's AI Tutor solve count — used by the admin 'Reset my
+    daily usage' button so testers aren't stuck waiting for midnight."""
+    today = dt.date.today()
+    with get_session() as db:
+        row = db.query(UsageLog).filter(
+            UsageLog.user_id == user_id, UsageLog.usage_date == today
+        ).first()
+        if row:
+            row.solve_count = 0

@@ -173,3 +173,15 @@ def verify_with_payfast(post_data: dict, timeout: int = 15) -> bool:
         return resp.text.strip() == "VALID"
     except requests.RequestException:
         return False
+
+
+"""
+DATABASE_URL = "postgresql+psycopg2://postgres.xdzhlpuejbaqhmhkkcib:MtnJse212Ukzn@aws-0-eu-central-1.pooler.supabase.com:5432/postgres"
+APP_BASE_URL = "https://malita-maths.streamlit.app"
+APP_WEBHOOK_URL = "https://malita.onrender.com/payfast/notify"
+PAYFAST_MERCHANT_ID = "14006256"
+PAYFAST_MERCHANT_KEY = "m5ne6hlhz1wak"
+PAYFAST_PASSPHRASE = "MtnJse212535942Ukzn_Sb"
+PAYFAST_SANDBOX = "false"
+
+"""

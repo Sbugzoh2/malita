@@ -59,6 +59,12 @@ class User(Base):
     usage_logs = relationship(
         "UsageLog", back_populates="user", cascade="all, delete-orphan"
     )
+    solved_questions = relationship(
+        "SolvedQuestion", back_populates="user", cascade="all, delete-orphan"
+    )
+    password_resets = relationship(
+        "PasswordReset", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Subscription(Base):
@@ -88,6 +94,39 @@ class UsageLog(Base):
     solve_count = Column(Integer, default=0)
 
     user = relationship("User", back_populates="usage_logs")
+
+
+class SolvedQuestion(Base):
+    """One row per question a learner solves, from either the AI Tutor or
+    Practice Questions mode — kept for progress tracking / reporting
+    (e.g. which topics a learner struggles with or practises most)."""
+    __tablename__ = "solved_questions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    source = Column(String(20), nullable=False)  # "ai_tutor" | "practice"
+    paper = Column(String(20), nullable=True)     # "Paper 1" | "Paper 2"
+    topic = Column(String(60), nullable=True)
+    question = Column(String, nullable=True)      # the question text/expression
+    solved_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    user = relationship("User", back_populates="solved_questions")
+
+
+class PasswordReset(Base):
+    """One-time password-reset tokens. A row is created when a learner
+    requests a reset and consumed (used=True) the first time it's redeemed;
+    expires_at bounds how long a link stays valid."""
+    __tablename__ = "password_resets"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+
+    user = relationship("User", back_populates="password_resets")
 
 
 class WebhookEvent(Base):

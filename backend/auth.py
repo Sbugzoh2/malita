@@ -8,11 +8,14 @@ and lookup here.
 """
 
 import re
+import secrets
+import datetime as dt
 import bcrypt
 
-from .db import get_session, User, Subscription
+from .db import get_session, User, Subscription, PasswordReset
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+RESET_TOKEN_VALID_MINUTES = 60
 
 
 class AuthError(Exception):
@@ -114,3 +117,42 @@ def is_user_admin(user_id: int) -> bool:
     with get_session() as db:
         user = db.query(User).get(user_id)
         return bool(user and user.is_admin)
+
+
+def create_password_reset(email: str):
+    """Generate a one-time reset token for this email, valid for one hour.
+    Returns the token, or None if no account matches — callers should show
+    the SAME message either way so this can't be used to enumerate which
+    emails are registered."""
+    email = (email or "").strip().lower()
+    with get_session() as db:
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            return None
+
+        token = secrets.token_urlsafe(32)
+        db.add(PasswordReset(
+            user_id=user.id,
+            token=token,
+            expires_at=dt.datetime.utcnow() + dt.timedelta(minutes=RESET_TOKEN_VALID_MINUTES),
+        ))
+        return token
+
+
+def reset_password(token: str, new_password: str) -> None:
+    """Consume a reset token and set a new password. Raises AuthError on any
+    invalid/expired/already-used token, or a too-short new password."""
+    if len(new_password) < 8:
+        raise AuthError("Password must be at least 8 characters long.")
+
+    with get_session() as db:
+        reset = db.query(PasswordReset).filter(PasswordReset.token == token).first()
+        if not reset or reset.used or reset.expires_at < dt.datetime.utcnow():
+            raise AuthError("This reset link is invalid or has expired. Please request a new one.")
+
+        user = db.query(User).get(reset.user_id)
+        if not user:
+            raise AuthError("This reset link is invalid or has expired. Please request a new one.")
+
+        user.password_hash = _hash_password(new_password)
+        reset.used = True

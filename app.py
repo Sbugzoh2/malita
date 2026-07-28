@@ -26,9 +26,14 @@ import random
 #from frontend import *
 
 from backend.db import init_db, SA_PROVINCES
-from backend.auth import register_user, login_user, get_user_tier, is_user_admin, AuthError
+from backend.auth import (
+    register_user, login_user, get_user_tier, is_user_admin, AuthError,
+    create_password_reset, reset_password,
+)
+from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, daily_limit
 from backend.usage import can_solve, record_solve, get_today_count, reset_today_usage
+from backend.records import record_solved_question, get_recent_solved
 from backend.payfast import build_checkout_payload, build_checkout_url
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -87,6 +92,26 @@ if st.session_state.auth_user is None:
     st.title("🎓 Malita — Matric Maths Master")
     st.caption("AI-powered Grade 12 Mathematics tutoring, built for South African learners 🇿🇦")
 
+    reset_token = st.query_params.get("reset_token")
+
+    if reset_token:
+        st.subheader("Set a new password")
+        with st.form("reset_password_form"):
+            new_password = st.text_input("New password", type="password")
+            new_password_confirm = st.text_input("Confirm new password", type="password")
+            submitted_reset = st.form_submit_button("Update Password")
+            if submitted_reset:
+                if new_password != new_password_confirm:
+                    st.error("Passwords don't match.")
+                else:
+                    try:
+                        reset_password(reset_token, new_password)
+                        st.query_params.clear()
+                        st.success("Password updated! You can now log in with your new password.")
+                    except AuthError as e:
+                        st.error(str(e))
+        st.stop()
+
     login_tab, register_tab = st.tabs(["Log In", "Create Account"])
 
     with login_tab:
@@ -101,6 +126,30 @@ if st.session_state.auth_user is None:
                     st.rerun()
                 except AuthError as e:
                     st.error(str(e))
+
+        with st.expander("Forgot your password?"):
+            with st.form("forgot_password_form"):
+                forgot_email = st.text_input("Email", key="forgot_email")
+                submitted_forgot = st.form_submit_button("Send reset link")
+                if submitted_forgot:
+                    token = create_password_reset(forgot_email)
+                    if token:
+                        reset_url = f"{APP_BASE_URL}/?reset_token={token}"
+                        sent = send_email(
+                            forgot_email,
+                            "Reset your Malita password",
+                            f"Click the link below to set a new password (valid for 1 hour):\n\n{reset_url}",
+                        )
+                        if sent:
+                            st.success("Check your email for a password reset link (valid for 1 hour).")
+                        else:
+                            st.info(
+                                "Email sending isn't configured yet, so here's your reset link directly "
+                                "(valid for 1 hour) — click it to set a new password:"
+                            )
+                            st.code(reset_url, language=None)
+                    else:
+                        st.success("If an account exists for that email, a reset link has been generated.")
 
     with register_tab:
         with st.form("register_form"):
@@ -203,48 +252,25 @@ def safe_parse(expr_str, symbols_dict=None):
         transformations=SAFE_TRANSFORMATIONS,
     )
 # ====================================================================================================
-# MOVING BANNER CSS
+# TOP BANNER
+# A plain static strip instead of a scrolling marquee — reads as a normal
+# product header rather than a dated auto-scrolling ticker.
 
 st.markdown("""
-<div class="moving-banner">
-    <div class="banner-text">
-        📘 Master Algebra • 📈 Ace Functions • ✏️ Step-by-step Solutions • 🎯 Grade 12 Exam Ready • 🇿🇦
-    </div>
+<div class="top-banner">
+    Algebra · Functions · Finance · Trigonometry · Statistics — worked out step by step
 </div>
-""", unsafe_allow_html=True)
-
-
-st.markdown("""                        
 <style>
-
-/* Moving banner container */
-.moving-banner {
+.top-banner {
     background: white;
     border-radius: 18px;
-    padding: 16px 0;
+    padding: 16px 24px;
     margin-bottom: 24px;
-    overflow: hidden;
     box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-}
-
-/* Scrolling text */
-.banner-text {
-    display: inline-block;
-    white-space: nowrap;
     font-size: 1.05rem;
     font-weight: 600;
     color: #1e293b;
-    animation: scroll-left 18s linear infinite;
-}
-
-/* Animation */
-@keyframes scroll-left {
-    0% {
-        transform: translateX(100%);
-    }
-    100% {
-        transform: translateX(-100%);
-    }
+    text-align: center;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -300,6 +326,28 @@ h1, h2, h3 {
     border-radius: 16px;
     box-shadow: 0 10px 25px rgba(0,0,0,0.08);
     margin-bottom: 1.5rem;
+}
+
+/* ---------- INPUTS ---------- */
+/* Default input backgrounds can end up nearly the same shade as the page
+   gradient behind them, making fields like "Enter your expression..."
+   hard to spot. Give every input a clearly visible white background with
+   a real border so it always reads as an editable field. */
+.stTextInput input,
+.stNumberInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] > div {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    color: #1e293b;
+}
+
+.stTextInput input:focus,
+.stNumberInput input:focus,
+.stTextArea textarea:focus,
+.stSelectbox div[data-baseweb="select"] > div:focus-within {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 1px #2563eb;
 }
 
 /* ---------- BUTTONS ---------- */
@@ -1199,21 +1247,22 @@ with st.sidebar.expander("💳 Upgrade / Manage Plan"):
             checkout_url = build_checkout_url(payload)
             st.markdown(f"[Click here to pay securely via PayFast]({checkout_url})")
 
-if st.sidebar.button("Log Out"):
-    st.session_state.auth_user = None
-    st.rerun()
-
 st.sidebar.divider()
 
 mode = st.sidebar.radio(
     "Choose Mode",
-    ["📚 Past Papers (PDF)",
-     "📷 OCR Question",
-     "🧮 AI Tutor",
+    ["🧮 AI Tutor",
      "📝 Practice Questions",
+     "📷 OCR Question",
+     "📚 Past Papers (PDF)",
      "🎯 Learner Profile",
      "📏 Formula Sheet"]
 )
+
+st.sidebar.divider()
+if st.sidebar.button("Log Out"):
+    st.session_state.auth_user = None
+    st.rerun()
 
 # =====================================================
 # PRACTICE QUESTIONS
@@ -1285,6 +1334,10 @@ if mode=="📝 Practice Questions":
             learner["solved"] += 1
             learner["Marks"] += q_data["Marks"]
             learner["topic_counts"][topic] = learner["topic_counts"].get(topic, 0) + 1
+            record_solved_question(
+                auth_user["id"], "practice",
+                paper=paper, topic=topic, question=q_data["question"],
+            )
 
 # =====================================================
 # AI SOLVER (FULL PAPER 1 & PAPER 2 LOGIC)
@@ -1293,62 +1346,30 @@ if mode=="📝 Practice Questions":
 elif mode == "🧮 AI Tutor":
 
     # -------------------------------------------------
-    # CSS (ANIMATION + STYLING)
-    # -------------------------------------------------
-    st.markdown("""
-    <style>
-    @keyframes float {
-        0% { transform: translateY(0px); }
-        50% { transform: translateY(-6px); }
-        100% { transform: translateY(0px); }
-    }
-
-    .logo {
-        animation: float 3s ease-in-out infinite;
-        filter: drop-shadow(0 6px 12px rgba(0,0,0,0.15));
-    }
-
-    .header-box {
-        background: white;
-        padding: 1.5rem 2rem;
-        border-radius: 16px;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-        margin-bottom: 1.5rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # -------------------------------------------------
     # HEADER LAYOUT
     # -------------------------------------------------
-    st.markdown('<div class="header-box">', unsafe_allow_html=True)
+    with st.container(border=True):
+        col1, col2 = st.columns([1, 6])
 
-    col1, col2 = st.columns([1, 6])
+        with col1:
+            if logo_svg:
+                st.markdown(
+                    f"""
+                    <img src="data:image/png;base64,{logo_svg}"
+                         style="max-width:100%; height:auto; border-radius:12px;">
+                    """,
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown("### 🎓")
 
-    with col1:
-        if logo_svg:
-            st.markdown(
-                f"""
-                <img src="data:image/png;base64,{logo_svg}"
-                     class="logo"
-                     width="400">
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.markdown("### 🎓")
-
-    with col2:
-        st.markdown("""
-        <h3 style="margin-bottom:0;">AI TUTOR</h3>
-        <p style="font-size:1.1rem; color:#475569; margin-top:0;">
-            AI-powered Grade 12 Mathematics Tutor 🇿🇦
-        </p>
-        """, unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # 👉 Continue with your AI Tutor logic below
+        with col2:
+            st.markdown("""
+            <h3 style="margin-bottom:0;">AI Tutor</h3>
+            <p style="font-size:1.1rem; color:#475569; margin-top:0;">
+                Grade 12 Mathematics help, worked out one step at a time.
+            </p>
+            """, unsafe_allow_html=True)
 
 
 
@@ -1399,6 +1420,7 @@ elif mode == "🧮 AI Tutor":
             st.warning(limit_message)
             st.stop()
         record_solve(auth_user["id"])
+        record_solved_question(auth_user["id"], "ai_tutor", paper=paper, topic=topic, question=question)
         try:
             # ------------------------------
             # CLEAN & PARSE INPUT
@@ -2988,7 +3010,7 @@ elif mode=="📷 OCR Question":
         img_file = st.file_uploader("Upload image", type=["png","jpg","jpeg"])
         if img_file:
             img = Image.open(img_file)
-            st.image(img, use_container_width=True)
+            st.image(img, use_column_width=True)
             raw = ocr_with_exponents(preprocess_image(img))
             cleaned = clean_for_sympy(raw)
             st.code(cleaned)
@@ -3047,6 +3069,19 @@ elif mode=="🎯 Learner Profile":
         st.pyplot(fig, use_container_width=True)
     else:
         st.info("Solve some practice questions to see your progress here!")
+
+    st.markdown("#### 🕒 Recent Activity")
+    recent = get_recent_solved(auth_user["id"])
+    if recent:
+        for r in recent:
+            source_label = "AI Tutor" if r["source"] == "ai_tutor" else "Practice"
+            when = r["solved_at"].strftime("%d %b %Y, %H:%M") if r["solved_at"] else ""
+            paper_topic = " · ".join(p for p in (r["paper"], r["topic"]) if p)
+            st.caption(f"**{source_label}** — {paper_topic} — {when}")
+            if r["question"]:
+                st.code(r["question"], language=None)
+    else:
+        st.info("No solved-question history yet — this fills in as you use the AI Tutor or Practice Questions.")
 
 # =====================================================
 # FORMULA SHEET

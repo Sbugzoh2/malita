@@ -1419,13 +1419,13 @@ if st.session_state.get("pending_nav"):
     st.session_state["nav_mode"] = st.session_state.pop("pending_nav")
 
 _NAV_OPTIONS = [
+    "🏠 Home",
     "🧮 AI Tutor",
     "📝 Practice Questions",
     "📷 OCR Question",
     "📚 Past Papers (PDF)",
     "🎯 Learner Profile",
     "📏 Formula Sheet",
-    "🏠 Home",
 ]
 _radio_kwargs = {}
 if "nav_mode" not in st.session_state:

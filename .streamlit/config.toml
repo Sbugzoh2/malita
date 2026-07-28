@@ -1,7 +1,11 @@
 [theme]
+# Locked to a fixed light theme so the app always looks the same on every
+# device. Without this, Streamlit auto-follows the OS/browser's dark-mode
+# setting — on a phone in dark mode that flips built-in text to white while
+# our custom CSS keeps the background light, making most text invisible.
 base = "light"
-primaryColor = "#2563eb"
-backgroundColor = "#f8fafc"
-secondaryBackgroundColor = "#eef2ff"
-textColor = "#1e293b"
+primaryColor = "#2a78d6"
+backgroundColor = "#f9f9f7"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0b0b0b"
 font = "sans serif"

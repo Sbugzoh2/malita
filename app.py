@@ -214,6 +214,35 @@ def _fmt_num(v):
     v = float(v)
     return str(int(v)) if v.is_integer() else f"{v:.4g}"
 
+# A validated 8-hue categorical palette (fixed order, not cycled — see the
+# dataviz skill) used to give each topic its own identity throughout the
+# app, subject-tile-grid style, instead of a single flat blue everywhere.
+# 10 topics share these 8 slots; the last two intentionally reuse a slot
+# since axis/badge text labels — never color alone — always carry identity.
+TOPIC_COLORS = {
+    "Algebra": "#2a78d6",
+    "Sequences": "#eb6834",
+    "Financial Mathematics": "#1baf7a",
+    "Calculus": "#eda100",
+    "Functions & Graphs": "#e87ba4",
+    "Analytical Geometry": "#008300",
+    "Trigonometry": "#4a3aa7",
+    "Statistics": "#e34948",
+    "Statistics & Probability": "#e34948",
+    "Probability": "#2a78d6",
+    "Euclidean Geometry": "#eb6834",
+}
+_DEFAULT_TOPIC_COLOR = "#2a78d6"
+
+def topic_badge(topic):
+    """Render a small coloured pill naming the current topic — used next
+    to topic pickers so each subject reads with a consistent identity."""
+    color = TOPIC_COLORS.get(topic, _DEFAULT_TOPIC_COLOR)
+    st.markdown(
+        f'<span class="topic-badge" style="background:{color};">{topic}</span>',
+        unsafe_allow_html=True,
+    )
+
 def detect_variables(expr_str):
     """Find the single-letter variable candidates in a string, ignoring
     known function names like sin/cos/exp/pi/log/etc. Works for ANY letter
@@ -297,11 +326,11 @@ html, body, [class*="css"]  {
    to match — without this, that white text becomes invisible against the
    light background below. `.streamlit/config.toml` locks the theme itself,
    this is a belt-and-braces fallback for anything that doesn't pick that up.
-   The sidebar's own `color: white !important` rule further below still
-   wins inside the sidebar since !important beats inherited color. */
+   The sidebar's own text-color rule further below still wins inside the
+   sidebar since it's more specific. */
 .stApp {
-    background: linear-gradient(135deg, #f8fafc, #eef2ff);
-    color: #1e293b;
+    background: #f9f9f7;
+    color: #0b0b0b;
 }
 
 /* Ensure content never causes horizontal scrolling on narrow phone screens */
@@ -315,7 +344,7 @@ img {
 
 /* ---------- HEADINGS ---------- */
 h1, h2, h3 {
-    color: #1e293b;
+    color: #0b0b0b;
     font-weight: 700;
 }
 
@@ -323,9 +352,35 @@ h1, h2, h3 {
 .card {
     background: white;
     padding: 1.5rem;
-    border-radius: 16px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+    border-radius: 20px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.06);
     margin-bottom: 1.5rem;
+}
+
+/* Colourful subject-tile cards used on the Home dashboard, one accent
+   colour per tile (set inline via style="--tile-color:#..") so they read
+   like a subject/topic picker rather than a single flat-blue app. */
+.subject-tile {
+    background: var(--tile-color, #2a78d6);
+    border-radius: 20px;
+    padding: 1.4rem 1.2rem;
+    color: white;
+    box-shadow: 0 10px 22px rgba(0,0,0,0.12);
+    margin-bottom: 0.6rem;
+}
+.subject-tile .tile-icon { font-size: 2.2rem; }
+.subject-tile .tile-title { font-size: 1.15rem; font-weight: 700; margin: 0.3rem 0 0.2rem 0; }
+.subject-tile .tile-desc { font-size: 0.85rem; opacity: 0.92; margin: 0; }
+
+/* Small coloured pill used to show which topic is currently selected. */
+.topic-badge {
+    display: inline-block;
+    padding: 0.25rem 0.85rem;
+    border-radius: 999px;
+    color: white;
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin: 0.3rem 0 0.8rem 0;
 }
 
 /* ---------- INPUTS ---------- */
@@ -338,46 +393,57 @@ h1, h2, h3 {
 .stTextArea textarea,
 .stSelectbox div[data-baseweb="select"] > div {
     background-color: #ffffff;
-    border: 1px solid #cbd5e1;
-    color: #1e293b;
+    border: 1px solid #d8d7d0;
+    color: #0b0b0b;
 }
 
 .stTextInput input:focus,
 .stNumberInput input:focus,
 .stTextArea textarea:focus,
 .stSelectbox div[data-baseweb="select"] > div:focus-within {
-    border-color: #2563eb;
-    box-shadow: 0 0 0 1px #2563eb;
+    border-color: #2a78d6;
+    box-shadow: 0 0 0 1px #2a78d6;
 }
 
 /* ---------- BUTTONS ---------- */
 .stButton > button {
-    background: linear-gradient(135deg, #2563eb, #4f46e5);
+    background: #2a78d6;
     color: white;
-    border-radius: 10px;
-    padding: 0.6rem 1.2rem;
+    border-radius: 999px;
+    padding: 0.6rem 1.4rem;
     font-weight: 600;
     border: none;
 }
 
 .stButton > button:hover {
-    background: linear-gradient(135deg, #1e40af, #4338ca);
+    background: #184f95;
     transform: scale(1.02);
 }
 
 /* ---------- SIDEBAR ---------- */
+/* A clean light sidebar (rather than a dark admin-panel navy) reads as a
+   friendlier, more approachable "learning site" look. */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0f172a, #1e293b);
+    background: #ffffff;
+    border-right: 1px solid #e1e0d9;
 }
 
 section[data-testid="stSidebar"] * {
+    color: #0b0b0b !important;
+}
+
+section[data-testid="stSidebar"] .stButton > button {
+    background: #2a78d6;
     color: white !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: #184f95;
 }
 
 /* ---------- METRICS ---------- */
 [data-testid="stMetricValue"] {
     font-size: 2rem;
-    color: #2563eb;
+    color: #2a78d6;
 }
 
 </style>
@@ -1327,6 +1393,13 @@ with st.sidebar.expander("💳 Upgrade / Manage Plan"):
 
 st.sidebar.divider()
 
+# A Home-dashboard tile click sets "pending_nav" and reruns rather than
+# writing to session_state["nav_mode"] directly, since that button is
+# rendered lower down the script, after this radio widget already exists
+# this run — Streamlit forbids mutating a widget's key post-instantiation.
+if st.session_state.get("pending_nav"):
+    st.session_state["nav_mode"] = st.session_state.pop("pending_nav")
+
 mode = st.sidebar.radio(
     "Choose Mode",
     ["🧮 AI Tutor",
@@ -1334,7 +1407,9 @@ mode = st.sidebar.radio(
      "📷 OCR Question",
      "📚 Past Papers (PDF)",
      "🎯 Learner Profile",
-     "📏 Formula Sheet"]
+     "📏 Formula Sheet",
+     "🏠 Home"],
+    key="nav_mode",
 )
 
 st.sidebar.divider()
@@ -1363,6 +1438,7 @@ if mode=="📝 Practice Questions":
     if st.session_state.get("pq_topic") not in topic_options:
         st.session_state["pq_topic"] = topic_options[0]
     topic = st.selectbox("Select Topic", topic_options, key="pq_topic")
+    topic_badge(topic)
 
     questions = practice_data[paper][topic]
     q_numbers = [f"Q{i+1}" for i in range(len(questions))]
@@ -1463,6 +1539,7 @@ elif mode == "🧮 AI Tutor":
             "Topic",
             ["Analytical Geometry", "Trigonometry", "Statistics", "Probability", "Euclidean Geometry"]
         )
+    topic_badge(topic)
 
     with st.expander("💡 Not sure what to type? See examples for this topic"):
         EXAMPLE_QUESTIONS = {
@@ -3171,7 +3248,9 @@ elif mode=="🎯 Learner Profile":
     if topic_counts:
         st.markdown("#### 📊 Questions solved per topic")
         fig, ax = plt.subplots(figsize=(6, 3))
-        ax.bar(list(topic_counts.keys()), list(topic_counts.values()), color="#2563eb")
+        topics_list = list(topic_counts.keys())
+        bar_colors = [TOPIC_COLORS.get(t, _DEFAULT_TOPIC_COLOR) for t in topics_list]
+        ax.bar(topics_list, list(topic_counts.values()), color=bar_colors)
         ax.set_ylabel("Solved")
         plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
         st.pyplot(fig, use_container_width=True)
@@ -3194,7 +3273,7 @@ elif mode=="🎯 Learner Profile":
 # =====================================================
 # FORMULA SHEET
 # =====================================================
-else:
+elif mode == "📏 Formula Sheet":
     st.title("📏 Complete Matric Formula Sheet")
     st.info("Grouped according to NSC Papers")
 
@@ -3234,3 +3313,50 @@ else:
             st.latex(r"\bar{x}=\frac{\sum x}{n}")
             st.latex(r"\sigma^2=\frac{\sum(x-\bar{x})^2}{n}")
             st.latex(r"P(A)=\frac{n(A)}{n(S)}")
+
+# =====================================================
+# HOME DASHBOARD
+# =====================================================
+else:
+    st.title(f"👋 Welcome back, {auth_user['name'].split(' ')[0]}!")
+    st.caption("Pick where you'd like to start.")
+
+    HOME_TILES = [
+        {"mode": "🧮 AI Tutor", "icon": "🧮", "title": "AI Tutor",
+         "desc": "Get any Grade 12 question solved step by step.",
+         "color": "#2a78d6"},
+        {"mode": "📝 Practice Questions", "icon": "📝", "title": "Practice Questions",
+         "desc": "Work through curated questions with hints and full solutions.",
+         "color": "#eb6834"},
+        {"mode": "📷 OCR Question", "icon": "📷", "title": "OCR Question",
+         "desc": "Snap a photo of a question and let us read it for you.",
+         "color": "#1baf7a"},
+        {"mode": "📚 Past Papers (PDF)", "icon": "📚", "title": "Past Papers",
+         "desc": "Upload a past paper PDF and pull questions straight from it.",
+         "color": "#eda100"},
+        {"mode": "🎯 Learner Profile", "icon": "🎯", "title": "Learner Profile",
+         "desc": "Track your progress, badges, and solved-question history.",
+         "color": "#4a3aa7"},
+        {"mode": "📏 Formula Sheet", "icon": "📏", "title": "Formula Sheet",
+         "desc": "The complete NSC formula sheet, organised by paper.",
+         "color": "#e34948"},
+    ]
+
+    for row_start in range(0, len(HOME_TILES), 3):
+        row = HOME_TILES[row_start:row_start + 3]
+        cols = st.columns(3)
+        for col, tile in zip(cols, row):
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="subject-tile" style="--tile-color:{tile['color']};">
+                        <div class="tile-icon">{tile['icon']}</div>
+                        <p class="tile-title">{tile['title']}</p>
+                        <p class="tile-desc">{tile['desc']}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button("Open →", key=f"home_tile_{tile['mode']}"):
+                    st.session_state["pending_nav"] = tile["mode"]
+                    st.rerun()

@@ -1400,15 +1400,22 @@ st.sidebar.divider()
 if st.session_state.get("pending_nav"):
     st.session_state["nav_mode"] = st.session_state.pop("pending_nav")
 
+_NAV_OPTIONS = [
+    "🧮 AI Tutor",
+    "📝 Practice Questions",
+    "📷 OCR Question",
+    "📚 Past Papers (PDF)",
+    "🎯 Learner Profile",
+    "📏 Formula Sheet",
+    "🏠 Home",
+]
 mode = st.sidebar.radio(
     "Choose Mode",
-    ["🧮 AI Tutor",
-     "📝 Practice Questions",
-     "📷 OCR Question",
-     "📚 Past Papers (PDF)",
-     "🎯 Learner Profile",
-     "📏 Formula Sheet",
-     "🏠 Home"],
+    _NAV_OPTIONS,
+    # index only applies the very first time this widget renders for a
+    # session (Streamlit ignores it once "nav_mode" already has a value in
+    # session_state) - this is what makes Home the default landing page.
+    index=_NAV_OPTIONS.index("🏠 Home"),
     key="nav_mode",
 )
 

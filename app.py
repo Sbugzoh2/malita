@@ -358,19 +358,37 @@ h1, h2, h3 {
 }
 
 /* Colourful subject-tile cards used on the Home dashboard, one accent
-   colour per tile (set inline via style="--tile-color:#..") so they read
-   like a subject/topic picker rather than a single flat-blue app. */
+   colour per tile so they read like a subject/topic picker rather than a
+   single flat-blue app. Each tile gets a fixed class (.tile-c1 .. .tile-c6)
+   with its own hardcoded background - not a CSS custom property - so the
+   colour can never be silently dropped by a browser/host that mishandles
+   inline "style" custom properties. */
 .subject-tile {
-    background: var(--tile-color, #2a78d6);
+    position: relative;
     border-radius: 20px;
     padding: 1.4rem 1.2rem;
     color: white;
     box-shadow: 0 10px 22px rgba(0,0,0,0.12);
     margin-bottom: 0.6rem;
+    overflow: hidden;
 }
-.subject-tile .tile-icon { font-size: 2.2rem; }
-.subject-tile .tile-title { font-size: 1.15rem; font-weight: 700; margin: 0.3rem 0 0.2rem 0; }
-.subject-tile .tile-desc { font-size: 0.85rem; opacity: 0.92; margin: 0; }
+.tile-c1 { background: #2a78d6; }
+.tile-c2 { background: #eb6834; }
+.tile-c3 { background: #1baf7a; }
+.tile-c4 { background: #eda100; }
+.tile-c5 { background: #4a3aa7; }
+.tile-c6 { background: #e34948; }
+
+.subject-tile .tile-icon { font-size: 2.2rem; position: relative; z-index: 1; }
+.subject-tile .tile-title { font-size: 1.15rem; font-weight: 700; margin: 0.3rem 0 0.2rem 0; position: relative; z-index: 1; }
+.subject-tile .tile-desc { font-size: 0.85rem; opacity: 0.92; margin: 0; position: relative; z-index: 1; }
+.subject-tile .tile-illustration {
+    position: absolute;
+    right: -10px;
+    bottom: -10px;
+    opacity: 0.16;
+    z-index: 0;
+}
 
 /* Small coloured pill used to show which topic is currently selected. */
 .topic-badge {
@@ -1409,14 +1427,21 @@ _NAV_OPTIONS = [
     "📏 Formula Sheet",
     "🏠 Home",
 ]
+_radio_kwargs = {}
+if "nav_mode" not in st.session_state:
+    # Passing BOTH index= and a pre-existing session_state["nav_mode"] (set
+    # above whenever a Home-tile click just fired) makes Streamlit warn that
+    # the widget "was created with a default value but also had its value
+    # set via the Session State API" - so only pass index the very first
+    # time this widget renders for a session, before nav_mode exists at all.
+    # That first-render default is what makes Home the landing page.
+    _radio_kwargs["index"] = _NAV_OPTIONS.index("🏠 Home")
+
 mode = st.sidebar.radio(
     "Choose Mode",
     _NAV_OPTIONS,
-    # index only applies the very first time this widget renders for a
-    # session (Streamlit ignores it once "nav_mode" already has a value in
-    # session_state) - this is what makes Home the default landing page.
-    index=_NAV_OPTIONS.index("🏠 Home"),
     key="nav_mode",
+    **_radio_kwargs,
 )
 
 st.sidebar.divider()
@@ -3328,25 +3353,62 @@ else:
     st.title(f"👋 Welcome back, {auth_user['name'].split(' ')[0]}!")
     st.caption("Pick where you'd like to start.")
 
+    # Small flat-style watermark illustrations (plain inline SVG, no external
+    # images/fonts needed) so each tile carries a subject-relevant picture
+    # rather than colour alone.
+    _SVG_TUTOR = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <circle cx="30" cy="28" r="13"/>
+        <path d="M12 78 C12 56 20 47 30 47 C40 47 48 56 48 78 Z"/>
+        <rect x="52" y="15" width="36" height="24" rx="8"/>
+        <path d="M60 39 L56 48 L68 39 Z"/>
+        </svg>"""
+    _SVG_PENCIL_NOTES = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <rect x="20" y="15" width="50" height="65" rx="4"/>
+        <rect x="28" y="28" width="34" height="6" rx="2" fill-opacity="0.5"/>
+        <rect x="28" y="40" width="34" height="6" rx="2" fill-opacity="0.5"/>
+        <rect x="28" y="52" width="20" height="6" rx="2" fill-opacity="0.5"/>
+        <path d="M60 60 L80 40 L88 48 L68 68 L58 70 Z"/>
+        </svg>"""
+    _SVG_CAMERA = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <rect x="10" y="30" width="80" height="55" rx="8"/>
+        <rect x="35" y="18" width="30" height="14" rx="4"/>
+        <circle cx="50" cy="58" r="18" fill="none" stroke="white" stroke-width="6"/>
+        </svg>"""
+    _SVG_BOOKS = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <rect x="15" y="65" width="70" height="12" rx="2"/>
+        <rect x="20" y="50" width="60" height="12" rx="2"/>
+        <rect x="25" y="35" width="50" height="12" rx="2"/>
+        </svg>"""
+    _SVG_PROGRESS = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <rect x="15" y="55" width="14" height="30"/>
+        <rect x="35" y="40" width="14" height="45"/>
+        <rect x="55" y="25" width="14" height="60"/>
+        <path d="M80 15 L84 23 L93 24 L86.5 30 L88 39 L80 34.5 L72 39 L73.5 30 L67 24 L76 23 Z"/>
+        </svg>"""
+    _SVG_RULER = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <rect x="10" y="65" width="80" height="16" rx="2" transform="rotate(-8 50 73)"/>
+        <rect x="15" y="15" width="10" height="55" rx="2" transform="rotate(20 20 42)"/>
+        </svg>"""
+
     HOME_TILES = [
         {"mode": "🧮 AI Tutor", "icon": "🧮", "title": "AI Tutor",
          "desc": "Get any Grade 12 question solved step by step.",
-         "color": "#2a78d6"},
+         "css_class": "tile-c1", "illustration": _SVG_TUTOR},
         {"mode": "📝 Practice Questions", "icon": "📝", "title": "Practice Questions",
          "desc": "Work through curated questions with hints and full solutions.",
-         "color": "#eb6834"},
+         "css_class": "tile-c2", "illustration": _SVG_PENCIL_NOTES},
         {"mode": "📷 OCR Question", "icon": "📷", "title": "OCR Question",
          "desc": "Snap a photo of a question and let us read it for you.",
-         "color": "#1baf7a"},
+         "css_class": "tile-c3", "illustration": _SVG_CAMERA},
         {"mode": "📚 Past Papers (PDF)", "icon": "📚", "title": "Past Papers",
          "desc": "Upload a past paper PDF and pull questions straight from it.",
-         "color": "#eda100"},
+         "css_class": "tile-c4", "illustration": _SVG_BOOKS},
         {"mode": "🎯 Learner Profile", "icon": "🎯", "title": "Learner Profile",
          "desc": "Track your progress, badges, and solved-question history.",
-         "color": "#4a3aa7"},
+         "css_class": "tile-c5", "illustration": _SVG_PROGRESS},
         {"mode": "📏 Formula Sheet", "icon": "📏", "title": "Formula Sheet",
          "desc": "The complete NSC formula sheet, organised by paper.",
-         "color": "#e34948"},
+         "css_class": "tile-c6", "illustration": _SVG_RULER},
     ]
 
     for row_start in range(0, len(HOME_TILES), 3):
@@ -3356,7 +3418,8 @@ else:
             with col:
                 st.markdown(
                     f"""
-                    <div class="subject-tile" style="--tile-color:{tile['color']};">
+                    <div class="subject-tile {tile['css_class']}">
+                        {tile['illustration']}
                         <div class="tile-icon">{tile['icon']}</div>
                         <p class="tile-title">{tile['title']}</p>
                         <p class="tile-desc">{tile['desc']}</p>

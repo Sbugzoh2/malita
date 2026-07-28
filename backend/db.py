@@ -22,7 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2://postgres.xdzhlpuejbaqhmhkkcib:MtnJse212Ukzn@aws-0-eu-central-1.pooler.supabase.com:5432/postgres")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///malita.db")
 
 # check_same_thread=False is required for SQLite + Streamlit's threading model
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}

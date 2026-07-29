@@ -1,3 +1,9 @@
+[server]
+# Serves anything in ./static/ at /app/static/<file> - this is how the PWA
+# manifest, icons and service worker below get a real URL to be fetched
+# from, since Streamlit has no other built-in way to host static assets.
+enableStaticServing = true
+
 [theme]
 # Locked to a fixed light theme so the app always looks the same on every
 # device. Without this, Streamlit auto-follows the OS/browser's dark-mode

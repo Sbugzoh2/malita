@@ -5,6 +5,7 @@ load_dotenv()
 import re
 import sympy as sp
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 import numpy as np
 import cv2
@@ -77,6 +78,66 @@ if os.name == "nt":
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 st.set_page_config("Matric Math Master", layout="wide", page_icon="🎓")
+
+# =====================================================
+# PWA SUPPORT (installable on Android/iOS home screens)
+# =====================================================
+# Streamlit has no built-in way to add tags to <head> or host static
+# assets, so: (1) ./static/ is served at /app/static/<file> via
+# enableStaticServing in .streamlit/config.toml, and (2) this component
+# runs a script that reaches into the PARENT document (components.v1.html
+# renders in a same-origin iframe, so window.parent.document is reachable)
+# to attach the manifest link, theme-color/apple-touch-icon meta tags, and
+# register the service worker. Guarded by element IDs so re-running this
+# on every Streamlit rerun doesn't keep appending duplicate tags.
+components.html(
+    """
+    <script>
+    (function() {
+        try {
+            var doc = window.parent.document;
+            function addOnce(id, build) {
+                if (!doc.getElementById(id)) {
+                    var el = build();
+                    el.id = id;
+                    doc.head.appendChild(el);
+                }
+            }
+            addOnce('malita-manifest', function() {
+                var link = doc.createElement('link');
+                link.rel = 'manifest';
+                link.href = '/app/static/manifest.json';
+                return link;
+            });
+            addOnce('malita-theme-color', function() {
+                var meta = doc.createElement('meta');
+                meta.name = 'theme-color';
+                meta.content = '#2a78d6';
+                return meta;
+            });
+            addOnce('malita-apple-icon', function() {
+                var link = doc.createElement('link');
+                link.rel = 'apple-touch-icon';
+                link.href = '/app/static/icon-192.png';
+                return link;
+            });
+            addOnce('malita-apple-capable', function() {
+                var meta = doc.createElement('meta');
+                meta.name = 'apple-mobile-web-app-capable';
+                meta.content = 'yes';
+                return meta;
+            });
+            if (window.parent.navigator.serviceWorker) {
+                window.parent.navigator.serviceWorker.register('/app/static/service-worker.js');
+            }
+        } catch (e) {
+            console.error('Malita PWA setup failed:', e);
+        }
+    })();
+    </script>
+    """,
+    height=0,
+)
 
 # =====================================================
 # AUTHENTICATION GATE

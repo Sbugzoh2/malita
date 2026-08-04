@@ -65,6 +65,9 @@ class User(Base):
     password_resets = relationship(
         "PasswordReset", back_populates="user", cascade="all, delete-orphan"
     )
+    api_tokens = relationship(
+        "ApiToken", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Subscription(Base):
@@ -127,6 +130,24 @@ class PasswordReset(Base):
     used = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="password_resets")
+
+
+class ApiToken(Base):
+    """Bearer tokens for the native app (React Native) and any other
+    stateless HTTP client - the Streamlit app doesn't need these since it
+    already keeps the logged-in user in its own server-side session_state.
+    Deliberately simple (an opaque random token, no JWT/expiry logic) to
+    match this codebase's existing token pattern (see PasswordReset);
+    revoke by deleting the row rather than by expiry."""
+    __tablename__ = "api_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="api_tokens")
 
 
 class WebhookEvent(Base):

@@ -30,6 +30,6 @@ def set_admin(email: str, admin: bool = True) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python -m backend.set_admin sbugzoh2@gmail.com [--revoke]")
+        print("Usage: python -m backend.set_admin you@example.com [--revoke]")
         sys.exit(1)
     set_admin(sys.argv[1], admin="--revoke" not in sys.argv)

@@ -12,7 +12,7 @@ import secrets
 import datetime as dt
 import bcrypt
 
-from .db import get_session, User, Subscription, PasswordReset
+from .db import get_session, User, Subscription, PasswordReset, ApiToken
 from .payfast import cancel_payfast_subscription
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -159,6 +159,48 @@ def cancel_subscription(user_id: int) -> dict:
         payfast_notified = cancel_payfast_subscription(sub.payfast_token)
         sub.status = "cancelled"
         return {"had_subscription": True, "payfast_notified": payfast_notified}
+
+
+def create_api_token(user_id: int) -> str:
+    """Issue a new bearer token for the native app (see ApiToken docstring
+    in db.py for why this exists separately from Streamlit's session).
+    A user can hold multiple tokens at once (one per device) - logging in
+    from a new phone doesn't invalidate other devices' tokens."""
+    token = secrets.token_urlsafe(32)
+    with get_session() as db:
+        db.add(ApiToken(user_id=user_id, token=token))
+    return token
+
+
+def get_user_by_token(token: str):
+    """Resolve a bearer token to the same user dict shape login_user()
+    returns, or None if the token is unknown/revoked. Used as the native
+    app's auth dependency on every API request."""
+    with get_session() as db:
+        api_token = db.query(ApiToken).filter(ApiToken.token == token).first()
+        if not api_token:
+            return None
+        api_token.last_used_at = dt.datetime.utcnow()
+
+        user = db.query(User).get(api_token.user_id)
+        if not user:
+            return None
+        tier = user.subscription.tier if user.subscription else "free"
+        status = user.subscription.status if user.subscription else "active"
+        return {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "tier": tier,
+            "subscription_status": status,
+            "is_admin": user.is_admin,
+        }
+
+
+def revoke_api_token(token: str) -> None:
+    """Log out a single device (used by the native app's logout button)."""
+    with get_session() as db:
+        db.query(ApiToken).filter(ApiToken.token == token).delete()
 
 
 def reset_password(token: str, new_password: str) -> None:

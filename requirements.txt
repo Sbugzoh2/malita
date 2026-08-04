@@ -1,4 +1,6 @@
 #streamlit run app.py #another option
+#python -m backend.set_admin youremail@example.com
+#python -m uvicorn api_server:app --host 0.0.0.0 --port 8002
 streamlit==1.38.0
 sympy==1.13.2
 numpy==1.26.4
@@ -14,3 +16,5 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 requests==2.32.3
 python-dotenv==1.0.1
+python-multipart==0.0.12
+python-multipart

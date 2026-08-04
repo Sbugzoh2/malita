@@ -8,12 +8,15 @@ accounts, subscription tiers, and PayFast billing.
 ```
 app.py                 The Streamlit app learners use (tutor, practice, OCR, PDF)
 webhook_server.py       Tiny FastAPI service that receives PayFast payment webhooks
+api_server.py           REST API for the React Native app (see "Native app" section below)
 backend/
   db.py                 Database models (users, subscriptions, usage, webhook log)
   auth.py               Registration / login (bcrypt password hashing)
   tiers.py               Free / Learner / Premium tier definitions - edit prices here
   usage.py               Daily AI Tutor solve-limit tracking for the Free tier
   payfast.py             Checkout link builder + webhook signature verification
+  math_utils.py          Safe SymPy expression parsing, shared by app.py and api_server.py
+  solver.py               Pure math-solving logic (currently: Algebra), shared the same way
 requirements.txt
 packages.txt            OS packages needed on Linux hosting (Tesseract for OCR)
 .env.example             Copy to .env and fill in your real values
@@ -36,6 +39,12 @@ streamlit run app.py
 Run the webhook receiver (separate terminal — needed for payments to work):
 ```bash
 uvicorn webhook_server:app --host 0.0.0.0 --port 8001
+```
+
+Run the native-app API (separate terminal — only needed once the React
+Native app is in the picture; the Streamlit app above doesn't need it):
+```bash
+uvicorn api_server:app --host 0.0.0.0 --port 8002
 ```
 
 The `.env.example` file already contains PayFast's published **Sandbox**
@@ -209,3 +218,31 @@ next steps once you have real users:
   uses it yet).
 - Automated handling of failed recurring payments beyond marking the
   subscription `past_due` (e.g. a dunning email sequence).
+
+## 8. Native app (React Native) — status
+
+The long-term goal is a real iOS/Android app (not just the installable
+PWA the Streamlit site already supports). Streamlit can't serve a REST
+API, so `api_server.py` + `backend/solver.py` / `backend/math_utils.py`
+exist to give a native client something to talk to, without touching how
+app.py works today.
+
+**Done:** registration/login/logout via bearer tokens (`ApiToken` in
+`backend/db.py`), `/me` (tier + daily usage), and `/solve` for the
+**Algebra** topic — ported from app.py's AI Tutor so both surfaces run
+the literal same solving code (see `backend/solver.py`'s `StepRecorder`
+pattern: the solving logic doesn't know or care whether its output ends
+up as a Streamlit widget or a JSON response).
+
+**Not done yet:** every other AI Tutor topic (Sequences, Financial Maths,
+Calculus, Functions & Graphs, Analytical Geometry, Trigonometry,
+Statistics, Probability, Euclidean Geometry), OCR, PDF past-paper
+extraction, Practice Questions, Learner Profile, Formula Sheet, and
+subscriptions/payments in-app. `/solve` returns a `501` with a clear
+message for any topic other than Algebra rather than a wrong or empty
+answer — extend `SUPPORTED_SOLVE_TOPICS` in `api_server.py` as each
+topic gets the same extraction treatment as Algebra.
+
+The actual React Native project (Expo) lives alongside this repo once
+scaffolded — it talks to `api_server.py` over plain HTTP(S), the same way
+any REST client would.

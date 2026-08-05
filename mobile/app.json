@@ -9,10 +9,12 @@
     "extra": {
       "apiBaseUrl": "http://localhost:8002"
     },
-    "ios": {
-      "supportsTablet": true
-    },
-    "android": {
+  "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.malita.mathstutor"
+          },
+  "android": {
+      "package": "com.malita.mathstutor",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

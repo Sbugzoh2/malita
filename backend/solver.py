@@ -1119,6 +1119,16 @@ def solve_functions_graphs(question: str) -> list:
             expr_str = question.lower()
             expr_str = re.sub(r"(graph|sketch|draw)", "", expr_str)
             expr_str = expr_str.strip()
+
+            # Support function notation like "f(x) = ...", "g(t) = ...",
+            # "h(x)=..." - rewrite the header down to a plain "y = ..." so
+            # the rest of the solver (which expects a bare dependent
+            # symbol on one side, exactly like "y = x**2-4x+4") works
+            # unchanged. Without this, sympy sees "f(x)" as a call to the
+            # symbol f and fails to parse the equation at all - only
+            # "y = ..." used to work.
+            expr_str = re.sub(r"^([a-zA-Z]\w*)\(([a-zA-Z]\w*)\)\s*=\s*", "y=", expr_str)
+
             expr_str = expr_str.replace("^", "**")
 
             # Handle implicit multiplication
@@ -1240,6 +1250,14 @@ def solve_functions_graphs(question: str) -> list:
             # line test) we skip straight to generic intercepts
             # plus the graph, further down.
             # ---------------------------------------------------
+            # Collected across whichever branch runs below, purely to
+            # auto-scale the graph's domain around the function's own
+            # interesting features instead of a fixed window - see the
+            # "AUTO-SCALE THE GRAPH DOMAIN" comment further down.
+            real_roots = []
+            turning_xs = []
+            x_ints = []
+
             if is_explicit_function:
 
                 # ---------------------------------------------------
@@ -1295,6 +1313,7 @@ def solve_functions_graphs(question: str) -> list:
                             if tx.is_real:
                                 ty = expr.subs(indep_var, tx)
                                 turning_points.append(ty)
+                                turning_xs.append(float(tx))
                                 st.latex(rf"{sp.latex(indep_var)} = {sp.latex(tx)}, {sp.latex(out_var)} = {sp.latex(ty)}")
 
                                 nature = second_derivative.subs(indep_var, tx)
@@ -1400,7 +1419,36 @@ def solve_functions_graphs(question: str) -> list:
             # ---------------------------------------------------
             st.markdown("##### 📉 Sketch of the Graph")
 
-            horiz_vals = np.linspace(-10, 10, 4000)
+            # AUTO-SCALE THE GRAPH DOMAIN around the function's own
+            # interesting features (turning points, intercepts) instead of
+            # a fixed [-10, 10] window. A fixed window looks cut off/
+            # lopsided whenever those features sit far from the origin -
+            # e.g. f(x)=x^2-4x+4 has its vertex at x=2, so [-10,10] shows
+            # 12 units of curve on one side of the vertex and only 8 on
+            # the other. Centring on the turning point(s) - the function's
+            # true axis of symmetry - keeps both arms visually balanced.
+            feature_xs = [0.0]
+            try:
+                feature_xs += [float(r) for r in real_roots]
+            except Exception:
+                pass
+            try:
+                feature_xs += [float(xi) for xi in x_ints]
+            except Exception:
+                pass
+            feature_xs += turning_xs
+            feature_xs = [f for f in feature_xs if np.isfinite(f)]
+
+            if turning_xs:
+                domain_center = sum(turning_xs) / len(turning_xs)
+            elif feature_xs:
+                domain_center = sum(feature_xs) / len(feature_xs)
+            else:
+                domain_center = 0.0
+
+            feature_spread = max([abs(f - domain_center) for f in feature_xs] or [0.0])
+            half_span = max(feature_spread, 3.0) * 2.0 + 3.0
+            horiz_vals = np.linspace(domain_center - half_span, domain_center + half_span, 4000)
             fig, ax = plt.subplots(figsize=(7, 5))
 
             if not branches:

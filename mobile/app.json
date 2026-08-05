@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "Malita",
-    "slug": "malita",
+    "slug": "mobileapp",
+    "owner": "malita-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,7 +10,7 @@
   "extra": {
     "apiBaseUrl": "http://localhost:8002",
     "eas": {
-     "projectId": "PASTE-YOUR-PROJECT-ID-HERE"
+     "projectId": "dea19c46-b69f-485e-95d3-0694e5ab06f2"
          }
        },
   "ios": {

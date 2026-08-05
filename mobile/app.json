@@ -6,9 +6,12 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "extra": {
-      "apiBaseUrl": "http://localhost:8002"
-    },
+  "extra": {
+    "apiBaseUrl": "http://localhost:8002",
+    "eas": {
+     "projectId": "PASTE-YOUR-PROJECT-ID-HERE"
+         }
+       },
   "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.malita.mathstutor"

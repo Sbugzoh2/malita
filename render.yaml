@@ -24,3 +24,14 @@ services:
         sync: false
       - key: PAYFAST_SANDBOX
         value: "false"
+
+      
+  - type: web
+    name: malita-api
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api_server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false

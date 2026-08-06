@@ -73,7 +73,9 @@ export default function AITutorScreen({ route }: any) {
             style={[styles.chip, paper === p && styles.chipActive]}
             onPress={() => selectPaper(p)}
           >
-            <Text style={[styles.chipText, paper === p && styles.chipTextActive]}>{p}</Text>
+            <Text textBreakStrategy="simple" style={[styles.chipText, paper === p && styles.chipTextActive]}>
+              {p}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -96,7 +98,7 @@ export default function AITutorScreen({ route }: any) {
                 setError(null);
               }}
             >
-              <Text style={[styles.chipText, topic === t && styles.chipTextActive]}>
+              <Text textBreakStrategy="simple" style={[styles.chipText, topic === t && styles.chipTextActive]}>
                 {t}
                 {!solvable ? " (web only)" : ""}
               </Text>

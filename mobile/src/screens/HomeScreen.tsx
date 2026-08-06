@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, Image } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 
@@ -38,110 +38,118 @@ const TILES = [
 export default function HomeScreen({ navigation }: any) {
   const { me, logout } = useAuth();
   const firstName = me?.user.name.split(" ")[0] ?? "";
-  const initial = firstName ? firstName[0].toUpperCase() : "?";
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.profileCard}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initial}</Text>
-        </View>
-        <View style={styles.profileInfo}>
-          <Text style={styles.greeting}>Welcome back, {firstName}!</Text>
-          <Pressable
-            style={styles.planBadge}
-            onPress={() => navigation.navigate("Subscription")}
-          >
+    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.hero}>
+        <Image
+          source={require("../../assets/hero-student.png")}
+          style={styles.heroImage}
+          resizeMode="cover"
+        />
+        <View style={styles.heroScrim} />
+        <View style={styles.heroContent}>
+          <Text style={styles.heroGreeting}>Welcome back, {firstName}!</Text>
+          <Pressable style={styles.planBadge} onPress={() => navigation.navigate("Subscription")}>
             <Text style={styles.planBadgeText}>{me?.tier_label ?? "Free"} plan</Text>
             <Text style={styles.planBadgeArrow}>›</Text>
           </Pressable>
         </View>
       </View>
 
-      {me?.daily_limit != null && (
-        <Text style={styles.usage}>
-          {me.used_today}/{me.daily_limit} solves used today
-        </Text>
-      )}
+      <View style={styles.body}>
+        {me?.daily_limit != null && (
+          <Text style={styles.usage}>
+            {me.used_today}/{me.daily_limit} solves used today
+          </Text>
+        )}
 
-      <Text style={styles.pick}>Pick where you'd like to start.</Text>
+        <Text style={styles.pick}>Pick where you'd like to start.</Text>
 
-      {TILES.map((tile) => (
-        <Pressable
-          key={tile.key}
-          style={[styles.tile, { backgroundColor: tile.color }, tile.disabled && styles.tileDisabled]}
-          onPress={() => !tile.disabled && navigation.navigate(tile.key)}
-          disabled={tile.disabled}
-        >
-          <Text style={styles.tileIcon}>{tile.icon}</Text>
-          <Text style={styles.tileTitle}>{tile.title}</Text>
-          <Text style={styles.tileDesc}>{tile.desc}</Text>
+        {TILES.map((tile) => (
+          <Pressable
+            key={tile.key}
+            style={[styles.tile, tile.disabled && styles.tileDisabled]}
+            onPress={() => !tile.disabled && navigation.navigate(tile.key)}
+            disabled={tile.disabled}
+          >
+            <View style={[styles.tileIconBadge, { backgroundColor: tile.color }]}>
+              <Text style={styles.tileIcon}>{tile.icon}</Text>
+            </View>
+            <View style={styles.tileTextCol}>
+              <Text style={styles.tileTitle}>{tile.title}</Text>
+              <Text style={styles.tileDesc}>{tile.desc}</Text>
+            </View>
+            <Text style={styles.tileChevron}>›</Text>
+          </Pressable>
+        ))}
+
+        <Pressable style={styles.logoutButton} onPress={logout}>
+          <Text style={styles.logoutText}>Log Out</Text>
         </Pressable>
-      ))}
-
-      <Pressable style={styles.logoutButton} onPress={logout}>
-        <Text style={styles.logoutText}>Log Out</Text>
-      </Pressable>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
-  profileCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+  container: { backgroundColor: colors.background, flexGrow: 1 },
+  hero: { height: 200, position: "relative" },
+  heroImage: { width: "100%", height: "100%" },
+  heroScrim: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(11,11,11,0.45)",
   },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
-  },
-  avatarText: { color: "#fff", fontSize: 22, fontWeight: "700" },
-  profileInfo: { flex: 1 },
-  greeting: { fontSize: 19, fontWeight: "700", color: colors.text },
+  heroContent: { position: "absolute", left: 20, right: 20, bottom: 18 },
+  heroGreeting: { fontSize: 22, fontWeight: "700", color: "#fff" },
   planBadge: {
     flexDirection: "row",
     alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: colors.background,
+    backgroundColor: "rgba(255,255,255,0.92)",
     borderRadius: 999,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    marginTop: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    marginTop: 8,
   },
-  planBadgeText: { fontSize: 12, fontWeight: "600", color: colors.primaryDark },
+  planBadgeText: { fontSize: 12, fontWeight: "700", color: colors.primaryDark },
   planBadgeArrow: { fontSize: 14, fontWeight: "700", color: colors.primaryDark, marginLeft: 4 },
-  usage: { fontSize: 12, color: colors.textSecondary, marginTop: 10 },
-  pick: { fontSize: 15, color: colors.textSecondary, marginTop: 20, marginBottom: 12 },
+  body: { padding: 20 },
+  usage: { fontSize: 12, color: colors.textSecondary },
+  pick: { fontSize: 15, fontWeight: "600", color: colors.text, marginTop: 18, marginBottom: 12 },
   tile: {
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
     shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
-  tileDisabled: { opacity: 0.55 },
-  tileIcon: { fontSize: 32, marginBottom: 6 },
-  tileTitle: { fontSize: 18, fontWeight: "700", color: "#fff", marginBottom: 4 },
-  tileDesc: { fontSize: 13, color: "#ffffffeb" },
+  tileDisabled: { opacity: 0.5 },
+  tileIconBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  tileIcon: { fontSize: 24 },
+  tileTextCol: { flex: 1 },
+  tileTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 2 },
+  tileDesc: { fontSize: 12, color: colors.textSecondary },
+  tileChevron: { fontSize: 22, color: colors.border, fontWeight: "700", marginLeft: 6 },
   logoutButton: {
-    marginTop: 24,
+    marginTop: 12,
     alignSelf: "center",
     backgroundColor: colors.primary,
     borderRadius: 999,

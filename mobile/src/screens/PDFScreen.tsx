@@ -53,6 +53,9 @@ export default function PDFScreen({ navigation }: any) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
+        <Text style={styles.backLinkText}>‹ Back to Home</Text>
+      </Pressable>
       <Text style={styles.title}>📚 Past Papers (PDF)</Text>
       <Text style={styles.subtitle}>Upload a past paper PDF and pull questions straight from it.</Text>
 
@@ -107,6 +110,8 @@ export default function PDFScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
+  backLink: { marginBottom: 12, alignSelf: "flex-start" },
+  backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 16 },
   actionButton: {

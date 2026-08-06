@@ -80,6 +80,9 @@ export default function OCRScreen({ navigation }: any) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
+        <Text style={styles.backLinkText}>‹ Back to Home</Text>
+      </Pressable>
       <Text style={styles.title}>📷 OCR Question</Text>
       <Text style={styles.subtitle}>Snap a photo of a question and let us read it for you.</Text>
 
@@ -139,6 +142,8 @@ export default function OCRScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
+  backLink: { marginBottom: 12, alignSelf: "flex-start" },
+  backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 16 },
   row: { flexDirection: "row", gap: 10, flexWrap: "wrap" },

@@ -19,7 +19,15 @@ export default function LatexView({ latex, fontSize = 16 }: { latex: string; fon
           // inside this flexWrap row too narrow on first paint and clip
           // its tail (only showing fully after a re-render) - locking it
           // to its natural content width avoids that.
-          <Text key={i} style={{ fontSize, color: colors.text, flexShrink: 0 }}>
+          // textBreakStrategy="simple" - Android-only prop that disables
+          // the default "highQuality" line-breaking algorithm, which has
+          // a known bug miscalculating text bounds inside flex containers
+          // and clipping the tail on first paint (ignored on iOS/web).
+          <Text
+            key={i}
+            textBreakStrategy="simple"
+            style={{ fontSize, color: colors.text, flexShrink: 0 }}
+          >
             {group.nodes.map((n, j) => (
               <React.Fragment key={j}>{renderInline(n, fontSize)}</React.Fragment>
             ))}
@@ -69,7 +77,7 @@ function renderInline(node: LatexNode, fontSize: number): React.ReactNode {
       return (
         <>
           {renderInline(node.base, fontSize)}
-          <Text style={{ fontSize: fontSize * 0.68, top: -fontSize * 0.32 }}>
+          <Text textBreakStrategy="simple" style={{ fontSize: fontSize * 0.68, top: -fontSize * 0.32 }}>
             {renderInline(node.exp, fontSize * 0.68)}
           </Text>
         </>
@@ -78,7 +86,7 @@ function renderInline(node: LatexNode, fontSize: number): React.ReactNode {
       return (
         <>
           {renderInline(node.base, fontSize)}
-          <Text style={{ fontSize: fontSize * 0.68, top: fontSize * 0.12 }}>
+          <Text textBreakStrategy="simple" style={{ fontSize: fontSize * 0.68, top: fontSize * 0.12 }}>
             {renderInline(node.sub, fontSize * 0.68)}
           </Text>
         </>
@@ -103,11 +111,11 @@ function renderInline(node: LatexNode, fontSize: number): React.ReactNode {
 function FracView({ node, fontSize }: { node: FracNode; fontSize: number }) {
   return (
     <View style={styles.frac}>
-      <Text style={[styles.fracText, { fontSize: fontSize * 0.85 }]}>
+      <Text textBreakStrategy="simple" style={[styles.fracText, { fontSize: fontSize * 0.85 }]}>
         {renderInline(node.numerator, fontSize * 0.85)}
       </Text>
       <View style={styles.fracBar} />
-      <Text style={[styles.fracText, { fontSize: fontSize * 0.85 }]}>
+      <Text textBreakStrategy="simple" style={[styles.fracText, { fontSize: fontSize * 0.85 }]}>
         {renderInline(node.denominator, fontSize * 0.85)}
       </Text>
     </View>

@@ -1716,7 +1716,7 @@ def solve_statistics(question: str) -> list:
             return str(int(v)) if float(v).is_integer() else f"{v:.4g}"
 
         st.markdown("**Step 1: Arrange the data in ascending order**")
-        st.latex(",\;".join(_fmt(v) for v in values))
+        st.latex(r",\;".join(_fmt(v) for v in values))
 
         st.markdown("**Step 2: Mean**")
         st.latex(r"\bar{x}=\frac{\sum x}{n}")
@@ -1727,7 +1727,7 @@ def solve_statistics(question: str) -> list:
 
         st.markdown("**Step 4: Mode**")
         if modes:
-            st.latex(r"\text{Mode}=" + ",\;".join(_fmt(m) for m in modes))
+            st.latex(r"\text{Mode}=" + r",\;".join(_fmt(m) for m in modes))
         else:
             st.latex(r"\text{No mode — every value occurs once}")
 

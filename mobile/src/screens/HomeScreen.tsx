@@ -3,7 +3,9 @@ import { View, Text, Pressable, StyleSheet, ScrollView, Image } from "react-nati
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 
-const TILES = [
+type Tile = { key: string; icon: string; title: string; desc: string; color: string; disabled?: boolean };
+
+const TILES: Tile[] = [
   {
     key: "AITutor",
     icon: "🧮",
@@ -15,9 +17,8 @@ const TILES = [
     key: "PracticeQuestions",
     icon: "📝",
     title: "Practice Questions",
-    desc: "Coming soon in the app — available on the web version today.",
+    desc: "Work through real Grade 12 questions with hints and worked solutions.",
     color: "#eb6834",
-    disabled: true,
   },
   {
     key: "OCR",
@@ -32,6 +33,13 @@ const TILES = [
     title: "Past Papers (PDF)",
     desc: "Upload a past paper PDF and pull questions straight from it.",
     color: "#eda100",
+  },
+  {
+    key: "PastPapersLibrary",
+    icon: "🗂️",
+    title: "Past Papers Library",
+    desc: "Browse curated past exam papers by year and subject. Premium.",
+    color: "#4a3aa7",
   },
 ];
 

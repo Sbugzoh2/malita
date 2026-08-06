@@ -11,6 +11,8 @@ import AITutorScreen from "../screens/AITutorScreen";
 import OCRScreen from "../screens/OCRScreen";
 import PDFScreen from "../screens/PDFScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
+import PracticeScreen from "../screens/PracticeScreen";
+import PastPapersScreen from "../screens/PastPapersScreen";
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
@@ -51,6 +53,8 @@ function AppNavigator() {
       <AppStack.Screen name="OCR" component={OCRScreen} options={{ title: "OCR Question" }} />
       <AppStack.Screen name="PDF" component={PDFScreen} options={{ title: "Past Papers (PDF)" }} />
       <AppStack.Screen name="Subscription" component={SubscriptionScreen} options={{ title: "Subscription" }} />
+      <AppStack.Screen name="PracticeQuestions" component={PracticeScreen} options={{ title: "Practice Questions" }} />
+      <AppStack.Screen name="PastPapersLibrary" component={PastPapersScreen} options={{ title: "Past Papers Library" }} />
     </AppStack.Navigator>
   );
 }

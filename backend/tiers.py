@@ -12,6 +12,7 @@ TIER_CONFIG = {
         "ai_tutor_daily_limit": 5,   # solves per day, resets at midnight
         "ocr_enabled": False,
         "pdf_enabled": False,
+        "past_papers_enabled": False,
     },
     "learner": {
         "label": "Learner",
@@ -19,6 +20,10 @@ TIER_CONFIG = {
         "ai_tutor_daily_limit": None,  # None = unlimited
         "ocr_enabled": True,
         "pdf_enabled": True,
+        # Past Papers Library is the one thing that separates Learner from
+        # Premium - previously the two tiers were identical in every way
+        # except price, which is its own bug (nothing to "upgrade" to).
+        "past_papers_enabled": False,
     },
     "premium": {
         "label": "Premium",
@@ -26,6 +31,7 @@ TIER_CONFIG = {
         "ai_tutor_daily_limit": None,
         "ocr_enabled": True,
         "pdf_enabled": True,
+        "past_papers_enabled": True,
     },
 }
 
@@ -42,6 +48,10 @@ def can_use_ocr(tier: str) -> bool:
 
 def can_use_pdf(tier: str) -> bool:
     return tier_config(tier)["pdf_enabled"]
+
+
+def can_use_past_papers(tier: str) -> bool:
+    return tier_config(tier)["past_papers_enabled"]
 
 
 def daily_limit(tier: str):

@@ -24,6 +24,7 @@ export default function AITutorScreen({ route }: any) {
   const [error, setError] = useState<string | null>(null);
   const [solving, setSolving] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
+  const [solveCount, setSolveCount] = useState(0);
 
   // OCR/PDF screens navigate here with a pre-filled question (their own
   // "Transfer to Solver" equivalent) - adopt it once per navigation, the
@@ -52,6 +53,7 @@ export default function AITutorScreen({ route }: any) {
     try {
       const res = await solve(token, { paper, topic, question: question.trim() });
       setSteps(res.steps);
+      setSolveCount((c) => c + 1);
       await refreshMe();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong. Please try again.");
@@ -61,7 +63,11 @@ export default function AITutorScreen({ route }: any) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+      removeClippedSubviews={false}
+    >
       <Text style={styles.title}>🧮 AI Tutor</Text>
       <Text style={styles.subtitle}>Grade 12 Mathematics help, worked out one step at a time.</Text>
 
@@ -161,7 +167,11 @@ export default function AITutorScreen({ route }: any) {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {steps && (
-        <View style={styles.resultCard}>
+        // key forces a full fresh mount per solve (not an in-place patch
+        // of the previous result's views) - a defensive measure against
+        // Android sometimes carrying over stale text measurements when
+        // ScrollView content is updated rather than freshly laid out.
+        <View key={solveCount} style={styles.resultCard}>
           {steps.map((step, i) => (
             <StepView key={i} step={step} />
           ))}
@@ -253,6 +263,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     backgroundColor: "#fff",
     alignSelf: "flex-start",
+    flexShrink: 0,
+    flexGrow: 0,
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   chipDisabled: { opacity: 0.6 },

@@ -100,6 +100,9 @@ export default function SubscriptionScreen() {
                 </Text>
                 <Text style={styles.planFeature}>{t.ocr_enabled ? "Photo/camera OCR" : "No OCR"}</Text>
                 <Text style={styles.planFeature}>{t.pdf_enabled ? "Past paper PDF extraction" : "No PDF extraction"}</Text>
+                <Text style={styles.planFeature}>
+                  {t.past_papers_enabled ? "Past Papers Library access" : "No Past Papers Library"}
+                </Text>
 
                 {isCurrent ? (
                   confirmingCancel ? (

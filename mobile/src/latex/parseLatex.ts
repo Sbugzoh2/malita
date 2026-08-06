@@ -22,15 +22,26 @@ const SYMBOL_MAP: Record<string, string> = {
   "\\div": "÷",
   "\\Delta": "Δ",
   "\\delta": "δ",
+  "\\sigma": "σ",
   "\\infty": "∞",
   "\\leq": "≤",
+  "\\le": "≤",
   "\\geq": "≥",
+  "\\ge": "≥",
   "\\neq": "≠",
+  "\\ne": "≠",
   "\\approx": "≈",
   "\\pi": "π",
   "\\theta": "θ",
   "\\alpha": "α",
   "\\beta": "β",
+  "\\sum": "∑",
+  "\\cup": "∪",
+  "\\cap": "∩",
+  "\\to": "→",
+  "\\circ": "°",
+  "\\ldots": "…",
+  "\\cdots": "…",
   "\\quad": "  ",
   "\\qquad": "    ",
   "\\;": " ",
@@ -39,6 +50,31 @@ const SYMBOL_MAP: Record<string, string> = {
   "\\left": "",
   "\\right": "",
 };
+
+// Blackboard-bold number sets - \mathbb always wraps a single capital
+// letter in this app's output (domains/ranges: "x \in \mathbb{R}" etc).
+const BLACKBOARD_BOLD: Record<string, string> = {
+  R: "ℝ", N: "ℕ", Z: "ℤ", Q: "ℚ", C: "ℂ",
+};
+
+// Combining marks for \bar/\hat/\vec - appended directly onto the base
+// character(s) rather than rendered as a separate positioned element, so
+// this never needs nested <Text> with a pixel offset at all (see the
+// comment in LatexView.tsx for why that matters on Android).
+const COMBINING_MARK: Record<string, string> = {
+  "\\bar": "̄",      // combining macron, e.g. x -> x̄
+  "\\overline": "̄",
+  "\\hat": "̂",      // combining circumflex, e.g. x -> x̂
+  "\\vec": "⃗",      // combining right arrow above, e.g. x -> x⃗
+};
+
+function plainTextOf(node: LatexNode): string | null {
+  if (node.type === "text") return node.value;
+  if (node.type === "row" && node.children.every((c) => c.type === "text")) {
+    return node.children.map((c) => (c as Extract<LatexNode, { type: "text" }>).value).join("");
+  }
+  return null;
+}
 
 class Parser {
   private s: string;
@@ -96,6 +132,25 @@ class Parser {
     }
     if (cmd === "\\text") {
       return this.readGroup();
+    }
+    if (cmd === "\\mathbb") {
+      const arg = this.readGroup();
+      const letter = plainTextOf(arg);
+      if (letter && BLACKBOARD_BOLD[letter]) {
+        return { type: "text", value: BLACKBOARD_BOLD[letter] };
+      }
+      return arg;
+    }
+    if (cmd in COMBINING_MARK) {
+      const arg = this.readGroup();
+      const base = plainTextOf(arg);
+      if (base !== null) {
+        return { type: "text", value: base + COMBINING_MARK[cmd] };
+      }
+      // Complex base (not plain text) - not expected from this app's
+      // output today, but fall back to the un-decorated base rather
+      // than losing it entirely.
+      return arg;
     }
     if (cmd in SYMBOL_MAP) {
       return { type: "text", value: SYMBOL_MAP[cmd] };

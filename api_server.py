@@ -37,7 +37,7 @@ from backend.auth import (
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
 )
-from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf
+from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers
 from backend.usage import can_solve, record_solve, get_today_count
 from backend.records import record_solved_question
 from backend.auth import get_user_tier
@@ -49,6 +49,7 @@ from backend.solver import (
 from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
 from backend.payfast import build_checkout_payload, build_checkout_url
+from backend.practice import practice_data, check_practice_answer
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
 # through the same webhook, so both apps' PayFast configuration must agree.
@@ -113,6 +114,17 @@ class ResetPasswordRequest(BaseModel):
 
 
 class SolveRequest(BaseModel):
+    paper: str
+    topic: str
+    question: str
+
+
+class PracticeCheckRequest(BaseModel):
+    answer: str
+    expected_latex: str
+
+
+class PracticeRecordRequest(BaseModel):
     paper: str
     topic: str
     question: str
@@ -335,3 +347,65 @@ def billing_cancel(authorization: str = Header(None)):
     user = _auth_user(authorization)
     result = cancel_subscription(user["id"])
     return result
+
+
+@app.get("/practice/topics")
+def practice_topics(authorization: str = Header(None)):
+    """Available paper/topic combinations - same practice_data app.py's
+    Practice Questions mode reads from, just as JSON."""
+    _auth_user(authorization)
+    return {
+        paper: list(topics.keys())
+        for paper, topics in practice_data.items()
+    }
+
+
+@app.get("/practice/questions")
+def practice_questions(paper: str, topic: str, authorization: str = Header(None)):
+    """Every question for one paper/topic, including hint/solution_steps/
+    final_answer - the mobile client decides when to reveal those client
+    side, exactly like app.py's "Show Solution" button does."""
+    _auth_user(authorization)
+    topics = practice_data.get(paper)
+    if topics is None or topic not in topics:
+        raise HTTPException(status_code=404, detail="Unknown paper/topic.")
+    return {"questions": topics[topic]}
+
+
+@app.post("/practice/check")
+def practice_check(body: PracticeCheckRequest, authorization: str = Header(None)):
+    """Best-effort numeric grading - same check_practice_answer() app.py
+    uses. `correct` is null when the expected answer has no numbers to
+    compare against (the client should just let the learner reveal the
+    solution instead of claiming right/wrong)."""
+    _auth_user(authorization)
+    verdict = check_practice_answer(body.answer, body.expected_latex)
+    return {"correct": verdict}
+
+
+@app.post("/practice/record")
+def practice_record(body: PracticeRecordRequest, authorization: str = Header(None)):
+    """Logs one practice question as solved for progress tracking - call
+    this when the learner reveals a solution, mirroring app.py's
+    solved_set bookkeeping (mobile has no server session to dedupe
+    against, so the client should only call this once per question)."""
+    user = _auth_user(authorization)
+    record_solved_question(user["id"], "practice", paper=body.paper, topic=body.topic, question=body.question)
+    return {"ok": True}
+
+
+@app.get("/past-papers")
+def past_papers_list(authorization: str = Header(None)):
+    """Placeholder for the curated Past Papers Library - not populated
+    yet, see the conversation with the user about how papers will be
+    sourced. Returns an empty, tier-gated list so the mobile screen has
+    a real endpoint to call once papers exist."""
+    user = _auth_user(authorization)
+    is_admin = is_user_admin(user["id"])
+    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    if not can_use_past_papers(effective_tier):
+        raise HTTPException(
+            status_code=403,
+            detail="The Past Papers Library is a Premium feature. Upgrade to unlock it.",
+        )
+    return {"papers": []}

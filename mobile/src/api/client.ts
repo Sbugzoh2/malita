@@ -162,6 +162,7 @@ export type TierInfo = {
   ai_tutor_daily_limit: number | null;
   ocr_enabled: boolean;
   pdf_enabled: boolean;
+  past_papers_enabled: boolean;
 };
 
 export function fetchTiers() {
@@ -178,4 +179,52 @@ export function createCheckout(token: string, tier: string) {
 
 export function cancelSubscription(token: string) {
   return request<{ payfast_notified: boolean }>("/billing/cancel", { method: "POST", token });
+}
+
+export type PracticeSolutionStep = { explain: string; latex: string };
+
+export type PracticeQuestion = {
+  question: string;
+  hint?: string;
+  solution_steps: PracticeSolutionStep[];
+  final_answer: string;
+  Marks: number;
+  difficulty?: string;
+};
+
+export function fetchPracticeTopics(token: string) {
+  return request<Record<string, string[]>>("/practice/topics", { token });
+}
+
+export function fetchPracticeQuestions(token: string, paper: string, topic: string) {
+  const params = `?paper=${encodeURIComponent(paper)}&topic=${encodeURIComponent(topic)}`;
+  return request<{ questions: PracticeQuestion[] }>(`/practice/questions${params}`, { token });
+}
+
+export function checkPracticeAnswer(token: string, answer: string, expectedLatex: string) {
+  return request<{ correct: boolean | null }>("/practice/check", {
+    method: "POST",
+    body: { answer, expected_latex: expectedLatex },
+    token,
+  });
+}
+
+export function recordPracticeSolved(token: string, paper: string, topic: string, question: string) {
+  return request<{ ok: boolean }>("/practice/record", {
+    method: "POST",
+    body: { paper, topic, question },
+    token,
+  });
+}
+
+export type PastPaper = {
+  id: number;
+  title: string;
+  year: number;
+  paper_number: string;
+  subject: string;
+};
+
+export function fetchPastPapers(token: string) {
+  return request<{ papers: PastPaper[] }>("/past-papers", { token });
 }

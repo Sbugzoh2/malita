@@ -37,14 +37,32 @@ const TILES = [
 
 export default function HomeScreen({ navigation }: any) {
   const { me, logout } = useAuth();
+  const firstName = me?.user.name.split(" ")[0] ?? "";
+  const initial = firstName ? firstName[0].toUpperCase() : "?";
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.greeting}>👋 Welcome back, {me?.user.name.split(" ")[0] ?? ""}!</Text>
-      <Text style={styles.plan}>
-        Plan: {me?.tier_label ?? "Free"}
-        {me?.daily_limit != null ? ` · ${me.used_today}/${me.daily_limit} solves today` : ""}
-      </Text>
+      <View style={styles.profileCard}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{initial}</Text>
+        </View>
+        <View style={styles.profileInfo}>
+          <Text style={styles.greeting}>Welcome back, {firstName}!</Text>
+          <Pressable
+            style={styles.planBadge}
+            onPress={() => navigation.navigate("Subscription")}
+          >
+            <Text style={styles.planBadgeText}>{me?.tier_label ?? "Free"} plan</Text>
+            <Text style={styles.planBadgeArrow}>›</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {me?.daily_limit != null && (
+        <Text style={styles.usage}>
+          {me.used_today}/{me.daily_limit} solves used today
+        </Text>
+      )}
 
       <Text style={styles.pick}>Pick where you'd like to start.</Text>
 
@@ -70,9 +88,44 @@ export default function HomeScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
-  greeting: { fontSize: 26, fontWeight: "700", color: colors.text },
-  plan: { fontSize: 14, color: colors.textSecondary, marginTop: 6 },
-  pick: { fontSize: 15, color: colors.textSecondary, marginTop: 16, marginBottom: 12 },
+  profileCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  avatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  avatarText: { color: "#fff", fontSize: 22, fontWeight: "700" },
+  profileInfo: { flex: 1 },
+  greeting: { fontSize: 19, fontWeight: "700", color: colors.text },
+  planBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.background,
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginTop: 6,
+  },
+  planBadgeText: { fontSize: 12, fontWeight: "600", color: colors.primaryDark },
+  planBadgeArrow: { fontSize: 14, fontWeight: "700", color: colors.primaryDark, marginLeft: 4 },
+  usage: { fontSize: 12, color: colors.textSecondary, marginTop: 10 },
+  pick: { fontSize: 15, color: colors.textSecondary, marginTop: 20, marginBottom: 12 },
   tile: {
     borderRadius: 20,
     padding: 20,

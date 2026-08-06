@@ -72,6 +72,12 @@ export default function OCRScreen({ navigation }: any) {
     navigation.navigate("AITutor", { prefillQuestion: recognizedText });
   }
 
+  function reset() {
+    setImageUri(null);
+    setRecognizedText("");
+    setError(null);
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>📷 OCR Question</Text>
@@ -95,6 +101,12 @@ export default function OCRScreen({ navigation }: any) {
           </View>
 
           {imageUri && <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="contain" />}
+
+          {imageUri && !loading && (
+            <Pressable style={styles.cancelButton} onPress={reset}>
+              <Text style={styles.cancelButtonText}>← Choose a different photo</Text>
+            </Pressable>
+          )}
 
           {loading && (
             <View style={styles.loadingRow}>
@@ -138,6 +150,8 @@ const styles = StyleSheet.create({
   },
   actionButtonText: { color: "#fff", fontWeight: "700" },
   preview: { width: "100%", height: 220, marginTop: 16, borderRadius: 12, backgroundColor: "#eee" },
+  cancelButton: { marginTop: 10, alignSelf: "flex-start" },
+  cancelButtonText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
   loadingRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16 },
   loadingText: { color: colors.textSecondary },
   error: { color: colors.error, marginTop: 16 },

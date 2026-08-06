@@ -11,7 +11,7 @@ import {
   Dimensions,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
-import { colors, PAPER_TOPICS, SOLVABLE_TOPICS, topicColors } from "../theme";
+import { colors, PAPER_TOPICS, SOLVABLE_TOPICS, topicColors, EXAMPLE_QUESTIONS } from "../theme";
 import { ApiError, solve, SolveStep } from "../api/client";
 import LatexView from "../latex/LatexView";
 
@@ -23,6 +23,7 @@ export default function AITutorScreen({ route }: any) {
   const [steps, setSteps] = useState<SolveStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [solving, setSolving] = useState(false);
+  const [showExamples, setShowExamples] = useState(false);
 
   // OCR/PDF screens navigate here with a pre-filled question (their own
   // "Transfer to Solver" equivalent) - adopt it once per navigation, the
@@ -103,6 +104,28 @@ export default function AITutorScreen({ route }: any) {
           );
         })}
       </View>
+
+      <Pressable style={styles.examplesToggle} onPress={() => setShowExamples((v) => !v)}>
+        <Text style={styles.examplesToggleText}>
+          {showExamples ? "▾" : "▸"} 💡 Not sure what to type? See examples for this topic
+        </Text>
+      </Pressable>
+      {showExamples && (
+        <View style={styles.examplesBox}>
+          {(EXAMPLE_QUESTIONS[topic] ?? []).map((ex, i) => (
+            <Pressable
+              key={i}
+              style={styles.exampleRow}
+              onPress={() => {
+                setQuestion(ex);
+                setShowExamples(false);
+              }}
+            >
+              <Text style={styles.exampleText}>{ex}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       <Text style={styles.label}>Enter your expression or question</Text>
       <TextInput
@@ -227,10 +250,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 14,
     backgroundColor: "#fff",
+    alignSelf: "flex-start",
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   chipDisabled: { opacity: 0.6 },
-  chipText: { color: colors.text, fontSize: 13 },
+  // flexShrink: 0 - Android's Yoga layout can otherwise measure a Text
+  // inside a flexWrap row too narrow on first paint and clip it (only
+  // showing the full label after a re-render, e.g. on tap) - locking the
+  // label to its natural content width avoids that.
+  chipText: { color: colors.text, fontSize: 13, flexShrink: 0 },
   chipTextActive: { color: "#fff", fontWeight: "700" },
   input: {
     borderWidth: 1,
@@ -243,6 +271,21 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   notice: { color: colors.textSecondary, fontSize: 12, marginTop: 8, fontStyle: "italic" },
+  examplesToggle: { marginTop: 14 },
+  examplesToggleText: { fontSize: 13, color: colors.primaryDark, fontWeight: "600" },
+  examplesBox: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    marginTop: 8,
+    overflow: "hidden",
+  },
+  exampleRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  exampleText: { fontSize: 13, color: colors.text, fontFamily: "monospace" },
   solveButton: {
     backgroundColor: colors.primary,
     borderRadius: 999,

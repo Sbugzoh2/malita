@@ -154,3 +154,28 @@ export function ocrImage(token: string, imageUri: string, mimeType: string = "im
 export function pdfExtract(token: string, fileUri: string, fileName: string = "paper.pdf") {
   return uploadFile("/pdf-extract", token, { uri: fileUri, name: fileName, type: "application/pdf" });
 }
+
+export type TierInfo = {
+  key: string;
+  label: string;
+  price_zar: number;
+  ai_tutor_daily_limit: number | null;
+  ocr_enabled: boolean;
+  pdf_enabled: boolean;
+};
+
+export function fetchTiers() {
+  return request<{ tiers: TierInfo[] }>("/billing/tiers");
+}
+
+export function createCheckout(token: string, tier: string) {
+  return request<{ checkout_url: string }>("/billing/checkout", {
+    method: "POST",
+    body: { tier },
+    token,
+  });
+}
+
+export function cancelSubscription(token: string) {
+  return request<{ payfast_notified: boolean }>("/billing/cancel", { method: "POST", token });
+}

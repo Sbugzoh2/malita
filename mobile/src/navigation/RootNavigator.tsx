@@ -10,6 +10,7 @@ import HomeScreen from "../screens/HomeScreen";
 import AITutorScreen from "../screens/AITutorScreen";
 import OCRScreen from "../screens/OCRScreen";
 import PDFScreen from "../screens/PDFScreen";
+import SubscriptionScreen from "../screens/SubscriptionScreen";
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
@@ -49,6 +50,7 @@ function AppNavigator() {
       />
       <AppStack.Screen name="OCR" component={OCRScreen} options={{ title: "OCR Question" }} />
       <AppStack.Screen name="PDF" component={PDFScreen} options={{ title: "Past Papers (PDF)" }} />
+      <AppStack.Screen name="Subscription" component={SubscriptionScreen} options={{ title: "Subscription" }} />
     </AppStack.Navigator>
   );
 }

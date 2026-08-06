@@ -18,6 +18,8 @@ RUN IT WITH:
 """
 
 import datetime as dt
+import os
+import uuid
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -33,9 +35,9 @@ from backend.db import init_db, SA_PROVINCES
 from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
-    create_password_reset, reset_password,
+    create_password_reset, reset_password, cancel_subscription,
 )
-from backend.tiers import TIER_CONFIG, daily_limit, can_use_ocr, can_use_pdf
+from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf
 from backend.usage import can_solve, record_solve, get_today_count
 from backend.records import record_solved_question
 from backend.auth import get_user_tier
@@ -46,6 +48,12 @@ from backend.solver import (
 )
 from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
+from backend.payfast import build_checkout_payload, build_checkout_url
+
+# Same env vars app.py reads - the mobile checkout link has to round-trip
+# through the same webhook, so both apps' PayFast configuration must agree.
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
+APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
 
 app = FastAPI(title="Malita API")
 init_db()
@@ -108,6 +116,10 @@ class SolveRequest(BaseModel):
     paper: str
     topic: str
     question: str
+
+
+class CheckoutRequest(BaseModel):
+    tier: str
 
 
 def _auth_user(authorization: str | None):
@@ -275,3 +287,51 @@ async def pdf_extract(file: UploadFile = File(...), authorization: str = Header(
     except Exception:
         raise HTTPException(status_code=400, detail="Could not read that PDF file.")
     return {"text": text}
+
+
+@app.get("/billing/tiers")
+def billing_tiers():
+    """Plan list for the mobile Subscription screen - same TIER_CONFIG
+    app.py's sidebar reads from, just as JSON."""
+    return {
+        "tiers": [
+            {"key": key, **TIER_CONFIG[key]}
+            for key in TIER_ORDER
+        ]
+    }
+
+
+@app.post("/billing/checkout")
+def billing_checkout(body: CheckoutRequest, authorization: str = Header(None)):
+    """Builds a PayFast checkout link exactly like app.py's sidebar
+    Upgrade button does, and hands the URL back so the native app can
+    open it in the phone's browser (Linking.openURL) - no payment UI is
+    reimplemented natively, this just reuses the same tested flow."""
+    user = _auth_user(authorization)
+    cfg = TIER_CONFIG.get(body.tier)
+    if cfg is None or cfg["price_zar"] == 0:
+        raise HTTPException(status_code=400, detail="Not a paid plan.")
+
+    payload = build_checkout_payload(
+        m_payment_id=f"{user['id']}-{uuid.uuid4().hex[:8]}",
+        amount=cfg["price_zar"],
+        item_name=f"Malita {cfg['label']} Subscription",
+        name_first=user["name"].split(" ")[0],
+        email_address=user["email"],
+        return_url=f"{APP_BASE_URL}/?upgraded=1",
+        cancel_url=f"{APP_BASE_URL}/?cancelled=1",
+        notify_url=APP_WEBHOOK_URL,
+        recurring=True,
+        recurring_amount=cfg["price_zar"],
+        frequency=3,  # monthly
+        cycles=0,     # bill indefinitely until cancelled
+        custom_fields={"custom_str1": str(user["id"]), "custom_str2": body.tier},
+    )
+    return {"checkout_url": build_checkout_url(payload)}
+
+
+@app.post("/billing/cancel")
+def billing_cancel(authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    result = cancel_subscription(user["id"])
+    return result

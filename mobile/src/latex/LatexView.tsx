@@ -15,7 +15,11 @@ export default function LatexView({ latex, fontSize = 16 }: { latex: string; fon
         group.type === "frac" ? (
           <FracView key={i} node={group.node} fontSize={fontSize} />
         ) : (
-          <Text key={i} style={{ fontSize, color: colors.text }}>
+          // flexShrink: 0 - Android's Yoga layout can measure a Text
+          // inside this flexWrap row too narrow on first paint and clip
+          // its tail (only showing fully after a re-render) - locking it
+          // to its natural content width avoids that.
+          <Text key={i} style={{ fontSize, color: colors.text, flexShrink: 0 }}>
             {group.nodes.map((n, j) => (
               <React.Fragment key={j}>{renderInline(n, fontSize)}</React.Fragment>
             ))}

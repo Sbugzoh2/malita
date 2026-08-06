@@ -45,6 +45,12 @@ export default function PDFScreen({ navigation }: any) {
     navigation.navigate("AITutor", { prefillQuestion: extractedText });
   }
 
+  function reset() {
+    setFileName(null);
+    setExtractedText("");
+    setError(null);
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>📚 Past Papers (PDF)</Text>
@@ -63,6 +69,12 @@ export default function PDFScreen({ navigation }: any) {
           </Pressable>
 
           {fileName && <Text style={styles.fileName}>{fileName}</Text>}
+
+          {fileName && !loading && (
+            <Pressable style={styles.cancelButton} onPress={reset}>
+              <Text style={styles.cancelButtonText}>← Choose a different PDF</Text>
+            </Pressable>
+          )}
 
           {loading && (
             <View style={styles.loadingRow}>
@@ -106,6 +118,8 @@ const styles = StyleSheet.create({
   },
   actionButtonText: { color: "#fff", fontWeight: "700" },
   fileName: { marginTop: 10, color: colors.textSecondary, fontStyle: "italic" },
+  cancelButton: { marginTop: 10, alignSelf: "flex-start" },
+  cancelButtonText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
   loadingRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16 },
   loadingText: { color: colors.textSecondary },
   error: { color: colors.error, marginTop: 16 },

@@ -26,10 +26,15 @@ load_dotenv()
 
 from io import BytesIO
 
+from pathlib import Path
+
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from PIL import Image
+
+LEGAL_DIR = Path(__file__).resolve().parent / "static" / "legal"
 
 from backend.db import init_db, SA_PROVINCES
 from backend.auth import (
@@ -409,3 +414,28 @@ def past_papers_list(authorization: str = Header(None)):
             detail="The Past Papers Library is a Premium feature. Upgrade to unlock it.",
         )
     return {"papers": []}
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms():
+    """Public, unauthenticated - both app.py and the mobile app link out
+    here rather than each carrying their own copy, so there is exactly
+    one canonical Terms & Conditions (also what app store review expects:
+    a working public URL, not in-app-only text)."""
+    return (LEGAL_DIR / "terms.html").read_text(encoding="utf-8")
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy():
+    """Placeholder until the real Privacy Policy text is provided - see
+    /terms for the hosting pattern this will follow once it exists."""
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<title>Malita — Privacy Policy</title></head>"
+        "<body style='font-family: sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; color: #0b0b0b;'>"
+        "<h1>Privacy Policy</h1>"
+        "<p>This page is being finalised. In the meantime, for any question about how Malita "
+        "handles your personal information, contact us at "
+        "<a href='mailto:sbugzoh2@gmail.com'>sbugzoh2@gmail.com</a>.</p>"
+        "</body></html>"
+    )

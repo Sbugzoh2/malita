@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, fetchTiers, createCheckout, cancelSubscription, TierInfo } from "../api/client";
+import { ApiError, fetchTiers, createCheckout, cancelSubscription, TierInfo, API_BASE_URL } from "../api/client";
 
 export default function SubscriptionScreen() {
   const { token, me, refreshMe } = useAuth();
@@ -154,6 +154,14 @@ export default function SubscriptionScreen() {
         Upgrading opens PayFast's secure checkout in your browser. Once payment completes, come back to the app —
         your plan updates automatically.
       </Text>
+
+      <Text style={styles.legalNote}>
+        Subscriptions are governed by Malita's{" "}
+        <Text style={styles.legalLink} onPress={() => Linking.openURL(`${API_BASE_URL}/terms`)}>
+          Terms &amp; Conditions
+        </Text>
+        , including the Refund and Cancellation Policy.
+      </Text>
     </ScrollView>
   );
 }
@@ -210,4 +218,6 @@ const styles = StyleSheet.create({
   smallButtonText: { color: "#fff", fontWeight: "700" },
   smallButtonTextDark: { color: colors.text, fontWeight: "700" },
   paymentNote: { fontSize: 12, color: colors.textSecondary, marginTop: 20, fontStyle: "italic" },
+  legalNote: { fontSize: 12, color: colors.textSecondary, marginTop: 10, lineHeight: 17 },
+  legalLink: { color: colors.primary, fontWeight: "600" },
 });

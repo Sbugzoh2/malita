@@ -48,6 +48,9 @@ from backend.practice import practice_data, check_practice_answer
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
+# api_server.py hosts the Terms/Privacy pages (one canonical copy the
+# mobile app links to as well) - see api_server.py's /terms, /privacy.
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8002")
 
 init_db()
 
@@ -230,6 +233,10 @@ if st.session_state.auth_user is None:
             reg_city = st.text_input("City / Town")
             reg_password = st.text_input("Password", type="password", key="reg_pw")
             reg_password_confirm = st.text_input("Confirm password", type="password")
+            st.caption(
+                f"By creating an account you agree to Malita's [Terms & Conditions]({API_BASE_URL}/terms) "
+                f"and [Privacy Policy]({API_BASE_URL}/privacy)."
+            )
             submitted_reg = st.form_submit_button("Create Free Account")
             if submitted_reg:
                 if reg_password != reg_password_confirm:
@@ -635,6 +642,10 @@ st.sidebar.divider()
 if st.sidebar.button("Log Out"):
     st.session_state.auth_user = None
     st.rerun()
+
+st.sidebar.caption(
+    f"[Terms & Conditions]({API_BASE_URL}/terms) · [Privacy Policy]({API_BASE_URL}/privacy)"
+)
 
 # =====================================================
 # PRACTICE QUESTIONS

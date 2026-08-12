@@ -9,10 +9,11 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, fetchProvinces } from "../api/client";
+import { ApiError, fetchProvinces, API_BASE_URL } from "../api/client";
 
 export default function RegisterScreen({ navigation }: any) {
   const { register } = useAuth();
@@ -104,6 +105,18 @@ export default function RegisterScreen({ navigation }: any) {
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
+          <Text style={styles.legalNote}>
+            By creating an account you agree to Malita's{" "}
+            <Text style={styles.legalLink} onPress={() => Linking.openURL(`${API_BASE_URL}/terms`)}>
+              Terms &amp; Conditions
+            </Text>{" "}
+            and{" "}
+            <Text style={styles.legalLink} onPress={() => Linking.openURL(`${API_BASE_URL}/privacy`)}>
+              Privacy Policy
+            </Text>
+            .
+          </Text>
+
           <Pressable
             style={[styles.button, submitting && styles.buttonDisabled]}
             onPress={handleRegister}
@@ -162,4 +175,6 @@ const styles = StyleSheet.create({
   linkButton: { marginTop: 16, alignItems: "center" },
   link: { color: colors.primary, fontWeight: "600" },
   error: { color: colors.error, marginTop: 12 },
+  legalNote: { fontSize: 12, color: colors.textSecondary, marginTop: 14, lineHeight: 17 },
+  legalLink: { color: colors.primary, fontWeight: "600" },
 });

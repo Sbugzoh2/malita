@@ -427,15 +427,6 @@ def terms():
 
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy():
-    """Placeholder until the real Privacy Policy text is provided - see
-    /terms for the hosting pattern this will follow once it exists."""
-    return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        "<title>Malita — Privacy Policy</title></head>"
-        "<body style='font-family: sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; color: #0b0b0b;'>"
-        "<h1>Privacy Policy</h1>"
-        "<p>This page is being finalised. In the meantime, for any question about how Malita "
-        "handles your personal information, contact us at "
-        "<a href='mailto:sbugzoh2@gmail.com'>sbugzoh2@gmail.com</a>.</p>"
-        "</body></html>"
-    )
+    """Public, unauthenticated - same hosting pattern as /terms, one
+    canonical Privacy Policy both app.py and the mobile app link out to."""
+    return (LEGAL_DIR / "privacy.html").read_text(encoding="utf-8")

@@ -30,7 +30,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from PIL import Image
 
@@ -55,6 +55,7 @@ from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
 from backend.payfast import build_checkout_payload, build_checkout_url
 from backend.practice import practice_data, check_practice_answer
+from backend.past_papers import list_past_papers, get_past_paper_file
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
 # through the same webhook, so both apps' PayFast configuration must agree.
@@ -401,10 +402,9 @@ def practice_record(body: PracticeRecordRequest, authorization: str = Header(Non
 
 @app.get("/past-papers")
 def past_papers_list(authorization: str = Header(None)):
-    """Placeholder for the curated Past Papers Library - not populated
-    yet, see the conversation with the user about how papers will be
-    sourced. Returns an empty, tier-gated list so the mobile screen has
-    a real endpoint to call once papers exist."""
+    """Real curated Past Papers Library, tier-gated to Premium (and
+    admins). Papers are uploaded via the Streamlit admin UI (app.py) and
+    stored in the same Postgres database as everything else."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
     effective_tier = "premium" if is_admin else get_user_tier(user["id"])
@@ -413,7 +413,37 @@ def past_papers_list(authorization: str = Header(None)):
             status_code=403,
             detail="The Past Papers Library is a Premium feature. Upgrade to unlock it.",
         )
-    return {"papers": []}
+    papers = list_past_papers()
+    for p in papers:
+        p["uploaded_at"] = p["uploaded_at"].isoformat() if p["uploaded_at"] else None
+    return {"papers": papers}
+
+
+@app.get("/past-papers/{paper_id}/download")
+def past_papers_download(paper_id: int, authorization: str = Header(None), token: str = None):
+    """Streams the PDF bytes for one past paper. Accepts the bearer token
+    either as an Authorization header (used by API calls) or as a `token`
+    query param (needed because the mobile app opens this URL directly in
+    the device's browser via Linking.openURL, which can't attach headers)."""
+    if token and not authorization:
+        authorization = f"Bearer {token}"
+    user = _auth_user(authorization)
+    is_admin = is_user_admin(user["id"])
+    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    if not can_use_past_papers(effective_tier):
+        raise HTTPException(
+            status_code=403,
+            detail="The Past Papers Library is a Premium feature. Upgrade to unlock it.",
+        )
+    result = get_past_paper_file(paper_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Past paper not found.")
+    file_name, file_data = result
+    return Response(
+        content=file_data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{file_name}"'},
+    )
 
 
 @app.get("/terms", response_class=HTMLResponse)

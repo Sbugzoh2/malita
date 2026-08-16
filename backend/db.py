@@ -18,7 +18,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean, DateTime, Date,
-    ForeignKey, UniqueConstraint
+    ForeignKey, UniqueConstraint, LargeBinary
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
@@ -148,6 +148,30 @@ class ApiToken(Base):
     last_used_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="api_tokens")
+
+
+class PastPaper(Base):
+    """A real past exam paper (PDF) stored in the DB so the Past Papers
+    Library can serve them directly — separate from the AI Tutor's
+    upload-and-solve PDF flow, which never persists what a learner
+    uploads. file_data holds the raw PDF bytes; for this library's scale
+    (tens, maybe ~100 papers) storing them in the same Postgres database
+    is simpler than standing up a separate object-storage service."""
+    __tablename__ = "past_papers"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String(200), nullable=False)       # e.g. "November 2021"
+    subject = Column(String(60), default="Mathematics", nullable=False)
+    grade = Column(Integer, default=12, nullable=False)
+    year = Column(Integer, nullable=False, index=True)
+    month = Column(String(20), nullable=True)          # e.g. "November"
+    paper_number = Column(Integer, nullable=False)      # 1 or 2
+    variant = Column(String(80), default="English", nullable=False)  # e.g. "Afrikaans/English (Bilingual)"
+    file_name = Column(String(255), nullable=False)
+    file_data = Column(LargeBinary, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uploaded_at = Column(DateTime, default=dt.datetime.utcnow)
 
 
 class WebhookEvent(Base):

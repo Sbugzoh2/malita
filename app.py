@@ -32,7 +32,7 @@ from backend.auth import (
     create_password_reset, reset_password, cancel_subscription,
 )
 from backend.email_util import send_email
-from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, daily_limit
+from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, daily_limit
 from backend.usage import can_solve, record_solve, get_today_count, reset_today_usage
 from backend.records import record_solved_question, get_recent_solved
 from backend.payfast import build_checkout_payload, build_checkout_url
@@ -45,6 +45,7 @@ from backend.solver import (
 from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
 from backend.practice import practice_data, check_practice_answer
+from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
@@ -413,6 +414,7 @@ h1, h2, h3 {
 .tile-c4 { background: #eda100; }
 .tile-c5 { background: #4a3aa7; }
 .tile-c6 { background: #e34948; }
+.tile-c7 { background: #0f9b8e; }
 
 .subject-tile .tile-icon { font-size: 2.2rem; position: relative; z-index: 1; }
 .subject-tile .tile-title { font-size: 1.15rem; font-weight: 700; margin: 0.3rem 0 0.2rem 0; position: relative; z-index: 1; }
@@ -618,6 +620,7 @@ _NAV_OPTIONS = [
     "📝 Practice Questions",
     "📷 OCR Question",
     "📚 Past Papers (PDF)",
+    "🗄️ Past Papers Library",
     "🎯 Learner Profile",
     "📏 Formula Sheet",
 ]
@@ -924,6 +927,63 @@ elif mode=="📚 Past Papers (PDF)":
                 st.session_state.copied_text = edited
 
 # =====================================================
+# PAST PAPERS LIBRARY
+# =====================================================
+elif mode == "🗄️ Past Papers Library":
+    st.title("🗄️ Past Papers Library")
+    st.caption("Real NSC Grade 12 past exam papers, ready to download.")
+
+    if is_admin_user:
+        with st.expander("➕ Add a new past paper (admin only)"):
+            with st.form("add_past_paper_form", clear_on_submit=True):
+                up_col1, up_col2 = st.columns(2)
+                with up_col1:
+                    up_year = st.number_input("Year", min_value=2000, max_value=2100, value=2021, step=1)
+                    up_paper_number = st.selectbox("Paper", [1, 2])
+                with up_col2:
+                    up_month = st.text_input("Month", value="November")
+                    up_variant = st.selectbox("Variant", ["English", "Afrikaans/English (Bilingual)"])
+                up_file = st.file_uploader("PDF file", type=["pdf"], key="past_paper_upload")
+                submitted = st.form_submit_button("Upload paper")
+                if submitted:
+                    if not up_file:
+                        st.error("Please choose a PDF file to upload.")
+                    else:
+                        title = f"{up_month} {up_year}"
+                        add_past_paper(
+                            title=title, year=int(up_year), paper_number=int(up_paper_number),
+                            file_name=up_file.name, file_data=up_file.read(),
+                            variant=up_variant, month=up_month, uploaded_by=auth_user["id"],
+                        )
+                        st.success(f"Uploaded {title} — Paper {up_paper_number} ({up_variant}).")
+                        st.rerun()
+
+    if not can_use_past_papers(effective_tier):
+        st.warning("🗄️ The Past Papers Library is a Premium feature. Upgrade from the sidebar to unlock it.")
+    else:
+        papers = list_past_papers()
+        if not papers:
+            st.info("No papers uploaded yet — check back soon.")
+        else:
+            for year in sorted({p["year"] for p in papers}, reverse=True):
+                st.markdown(f"### {year}")
+                for p in [p for p in papers if p["year"] == year]:
+                    pc1, pc2 = st.columns([3, 1])
+                    with pc1:
+                        st.markdown(f"**{p['subject']} Paper {p['paper_number']}** · {p['variant']}")
+                        st.caption(f"{p['title']} · {p['file_size'] // 1024} KB")
+                    with pc2:
+                        fname, fdata = get_past_paper_file(p["id"])
+                        st.download_button(
+                            "⬇️ Download", data=fdata, file_name=fname,
+                            mime="application/pdf", key=f"dl_{p['id']}",
+                        )
+                    if is_admin_user:
+                        if st.button("🗑️ Delete", key=f"del_{p['id']}"):
+                            delete_past_paper(p["id"])
+                            st.rerun()
+
+# =====================================================
 # PROFILE
 # =====================================================
 elif mode=="🎯 Learner Profile":
@@ -1062,6 +1122,12 @@ else:
         <rect x="10" y="65" width="80" height="16" rx="2" transform="rotate(-8 50 73)"/>
         <rect x="15" y="15" width="10" height="55" rx="2" transform="rotate(20 20 42)"/>
         </svg>"""
+    _SVG_LIBRARY = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <rect x="15" y="20" width="70" height="55" rx="6" fill-opacity="0.5"/>
+        <rect x="22" y="30" width="56" height="8" rx="2"/>
+        <rect x="22" y="44" width="56" height="8" rx="2"/>
+        <rect x="22" y="58" width="34" height="8" rx="2"/>
+        </svg>"""
 
     HOME_TILES = [
         {"mode": "🧮 AI Tutor", "icon": "🧮", "title": "AI Tutor",
@@ -1076,6 +1142,9 @@ else:
         {"mode": "📚 Past Papers (PDF)", "icon": "📚", "title": "Past Papers",
          "desc": "Upload a past paper PDF and pull questions straight from it.",
          "css_class": "tile-c4", "illustration": _SVG_BOOKS},
+        {"mode": "🗄️ Past Papers Library", "icon": "🗄️", "title": "Past Papers Library",
+         "desc": "Browse and download real NSC past exam papers.",
+         "css_class": "tile-c7", "illustration": _SVG_LIBRARY},
         {"mode": "🎯 Learner Profile", "icon": "🎯", "title": "Learner Profile",
          "desc": "Track your progress, badges, and solved-question history.",
          "css_class": "tile-c5", "illustration": _SVG_PROGRESS},

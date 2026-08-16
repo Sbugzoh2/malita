@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, fetchPastPapers, PastPaper } from "../api/client";
+import { ApiError, fetchPastPapers, pastPaperDownloadUrl, PastPaper } from "../api/client";
 
 export default function PastPapersScreen({ navigation }: any) {
   const { token, me } = useAuth();
@@ -47,10 +47,20 @@ export default function PastPapersScreen({ navigation }: any) {
       ) : papers && papers.length > 0 ? (
         papers.map((p) => (
           <View key={p.id} style={styles.paperCard}>
-            <Text style={styles.paperTitle}>{p.title}</Text>
-            <Text style={styles.paperMeta}>
-              {p.subject} · {p.year} · {p.paper_number}
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.paperTitle}>
+                {p.subject} Paper {p.paper_number} · {p.variant}
+              </Text>
+              <Text style={styles.paperMeta}>
+                {p.title} · {Math.round(p.file_size / 1024)} KB
+              </Text>
+            </View>
+            <Pressable
+              style={styles.downloadButton}
+              onPress={() => token && Linking.openURL(pastPaperDownloadUrl(token, p.id))}
+            >
+              <Text style={styles.downloadButtonText}>⬇️ Open</Text>
+            </Pressable>
           </View>
         ))
       ) : (
@@ -96,9 +106,20 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14,
     marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   paperTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   paperMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
+  downloadButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    marginLeft: 10,
+  },
+  downloadButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   emptyState: {
     backgroundColor: colors.surface,
     borderRadius: 16,

@@ -220,11 +220,21 @@ export function recordPracticeSolved(token: string, paper: string, topic: string
 export type PastPaper = {
   id: number;
   title: string;
-  year: number;
-  paper_number: string;
   subject: string;
+  grade: number;
+  year: number;
+  month: string | null;
+  paper_number: number;
+  variant: string;
+  file_name: string;
+  file_size: number;
+  uploaded_at: string | null;
 };
 
 export function fetchPastPapers(token: string) {
   return request<{ papers: PastPaper[] }>("/past-papers", { token });
+}
+
+export function pastPaperDownloadUrl(token: string, paperId: number) {
+  return `${API_BASE_URL}/past-papers/${paperId}/download?token=${encodeURIComponent(token)}`;
 }

@@ -4,11 +4,22 @@ import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 import { ApiError, fetchPastPapers, pastPaperDownloadUrl, PastPaper } from "../api/client";
 
+// Same chronological order as app.py's EXAM_SERIES_OPTIONS, so a year's
+// documents always group the same way on both platforms.
+const EXAM_SERIES_ORDER = [
+  "February/March (Supplementary)",
+  "March/April Control Test",
+  "June Exam",
+  "September (Trial)",
+  "November (Final)",
+];
+
 export default function PastPapersScreen({ navigation }: any) {
   const { token, me } = useAuth();
   const [papers, setPapers] = useState<PastPaper[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expandedYears, setExpandedYears] = useState<Set<number>>(new Set());
 
   const locked = me != null && me.effective_tier !== "premium";
 
@@ -18,10 +29,23 @@ export default function PastPapersScreen({ navigation }: any) {
       return;
     }
     fetchPastPapers(token)
-      .then((res) => setPapers(res.papers))
+      .then((res) => {
+        setPapers(res.papers);
+        const years = [...new Set(res.papers.map((p) => p.year))].sort((a, b) => b - a);
+        if (years.length > 0) setExpandedYears(new Set([years[0]]));
+      })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load past papers."))
       .finally(() => setLoading(false));
   }, [token, locked]);
+
+  function toggleYear(year: number) {
+    setExpandedYears((prev) => {
+      const next = new Set(prev);
+      if (next.has(year)) next.delete(year);
+      else next.add(year);
+      return next;
+    });
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -45,24 +69,50 @@ export default function PastPapersScreen({ navigation }: any) {
       ) : error ? (
         <Text style={styles.error}>{error}</Text>
       ) : papers && papers.length > 0 ? (
-        papers.map((p) => (
-          <View key={p.id} style={styles.paperCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.paperTitle}>
-                {p.subject} Paper {p.paper_number} · {p.variant}
-              </Text>
-              <Text style={styles.paperMeta}>
-                {p.title} · {Math.round(p.file_size / 1024)} KB
-              </Text>
-            </View>
-            <Pressable
-              style={styles.downloadButton}
-              onPress={() => token && Linking.openURL(pastPaperDownloadUrl(token, p.id))}
-            >
-              <Text style={styles.downloadButtonText}>⬇️ Open</Text>
-            </Pressable>
-          </View>
-        ))
+        [...new Set(papers.map((p) => p.year))]
+          .sort((a, b) => b - a)
+          .map((year) => {
+            const yearPapers = papers.filter((p) => p.year === year);
+            const isExpanded = expandedYears.has(year);
+            const seriesForYear = [
+              ...EXAM_SERIES_ORDER.filter((s) => yearPapers.some((p) => p.exam_series === s)),
+              ...[...new Set(yearPapers.map((p) => p.exam_series))].filter((s) => !EXAM_SERIES_ORDER.includes(s)),
+            ];
+            return (
+              <View key={year} style={styles.yearSection}>
+                <Pressable style={styles.yearHeader} onPress={() => toggleYear(year)}>
+                  <Text style={styles.yearHeaderText}>
+                    📅 {year} ({yearPapers.length} document{yearPapers.length !== 1 ? "s" : ""})
+                  </Text>
+                  <Text style={styles.yearChevron}>{isExpanded ? "▲" : "▼"}</Text>
+                </Pressable>
+                {isExpanded &&
+                  seriesForYear.map((series) => (
+                    <View key={series}>
+                      <Text style={styles.seriesLabel}>{series}</Text>
+                      {yearPapers
+                        .filter((p) => p.exam_series === series)
+                        .map((p) => (
+                          <View key={p.id} style={styles.paperCard}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.paperTitle}>
+                                {p.subject} Paper {p.paper_number} · {p.document_type} · {p.variant}
+                              </Text>
+                              <Text style={styles.paperMeta}>{Math.round(p.file_size / 1024)} KB</Text>
+                            </View>
+                            <Pressable
+                              style={styles.downloadButton}
+                              onPress={() => token && Linking.openURL(pastPaperDownloadUrl(token, p.id))}
+                            >
+                              <Text style={styles.downloadButtonText}>⬇️ Open</Text>
+                            </Pressable>
+                          </View>
+                        ))}
+                    </View>
+                  ))}
+              </View>
+            );
+          })
       ) : (
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>No papers here yet</Text>
@@ -101,6 +151,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   upgradeButtonText: { color: "#fff", fontWeight: "700" },
+  yearSection: { marginTop: 14 },
+  yearHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  yearHeaderText: { fontSize: 16, fontWeight: "700", color: colors.text },
+  yearChevron: { fontSize: 12, color: colors.textSecondary },
+  seriesLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.textSecondary,
+    marginTop: 12,
+    marginLeft: 4,
+  },
   paperCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,

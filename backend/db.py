@@ -165,6 +165,8 @@ class PastPaper(Base):
     grade = Column(Integer, default=12, nullable=False)
     year = Column(Integer, nullable=False, index=True)
     month = Column(String(20), nullable=True)          # e.g. "November"
+    exam_series = Column(String(60), default="November (Final)", nullable=False)  # e.g. "June", "Trial", "March/April"
+    document_type = Column(String(20), default="Question Paper", nullable=False)  # "Question Paper" | "Memo"
     paper_number = Column(Integer, nullable=False)      # 1 or 2
     variant = Column(String(80), default="English", nullable=False)  # e.g. "Afrikaans/English (Bilingual)"
     file_name = Column(String(255), nullable=False)

@@ -224,6 +224,8 @@ export type PastPaper = {
   grade: number;
   year: number;
   month: string | null;
+  exam_series: string;
+  document_type: string;
   paper_number: number;
   variant: string;
   file_name: string;

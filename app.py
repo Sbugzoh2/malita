@@ -933,6 +933,18 @@ elif mode == "🗄️ Past Papers Library":
     st.title("🗄️ Past Papers Library")
     st.caption("Real NSC Grade 12 past exam papers, ready to download.")
 
+    # SA schools sit these exam sittings across a school year, in
+    # chronological order - kept here (rather than free text) so every
+    # upload uses one consistent label the year-expander sort can rely on.
+    EXAM_SERIES_OPTIONS = [
+        "February/March (Supplementary)",
+        "March/April Control Test",
+        "June Exam",
+        "September (Trial)",
+        "November (Final)",
+    ]
+    DOCUMENT_TYPE_OPTIONS = ["Question Paper", "Memo"]
+
     if is_admin_user:
         with st.expander("➕ Add a new past paper (admin only)"):
             with st.form("add_past_paper_form", clear_on_submit=True):
@@ -940,8 +952,9 @@ elif mode == "🗄️ Past Papers Library":
                 with up_col1:
                     up_year = st.number_input("Year", min_value=2000, max_value=2100, value=2021, step=1)
                     up_paper_number = st.selectbox("Paper", [1, 2])
+                    up_document_type = st.selectbox("Document type", DOCUMENT_TYPE_OPTIONS)
                 with up_col2:
-                    up_month = st.text_input("Month", value="November")
+                    up_exam_series = st.selectbox("Exam", EXAM_SERIES_OPTIONS, index=len(EXAM_SERIES_OPTIONS) - 1)
                     up_variant = st.selectbox("Variant", ["English", "Afrikaans/English (Bilingual)"])
                 up_file = st.file_uploader("PDF file", type=["pdf"], key="past_paper_upload")
                 submitted = st.form_submit_button("Upload paper")
@@ -949,13 +962,14 @@ elif mode == "🗄️ Past Papers Library":
                     if not up_file:
                         st.error("Please choose a PDF file to upload.")
                     else:
-                        title = f"{up_month} {up_year}"
+                        title = f"{up_exam_series} {up_year}"
                         add_past_paper(
                             title=title, year=int(up_year), paper_number=int(up_paper_number),
                             file_name=up_file.name, file_data=up_file.read(),
-                            variant=up_variant, month=up_month, uploaded_by=auth_user["id"],
+                            variant=up_variant, exam_series=up_exam_series,
+                            document_type=up_document_type, uploaded_by=auth_user["id"],
                         )
-                        st.success(f"Uploaded {title} — Paper {up_paper_number} ({up_variant}).")
+                        st.success(f"Uploaded {title} — Paper {up_paper_number} {up_document_type} ({up_variant}).")
                         st.rerun()
 
     if not can_use_past_papers(effective_tier):
@@ -965,23 +979,45 @@ elif mode == "🗄️ Past Papers Library":
         if not papers:
             st.info("No papers uploaded yet — check back soon.")
         else:
-            for year in sorted({p["year"] for p in papers}, reverse=True):
-                st.markdown(f"### {year}")
-                for p in [p for p in papers if p["year"] == year]:
-                    pc1, pc2 = st.columns([3, 1])
-                    with pc1:
-                        st.markdown(f"**{p['subject']} Paper {p['paper_number']}** · {p['variant']}")
-                        st.caption(f"{p['title']} · {p['file_size'] // 1024} KB")
-                    with pc2:
-                        fname, fdata = get_past_paper_file(p["id"])
-                        st.download_button(
-                            "⬇️ Download", data=fdata, file_name=fname,
-                            mime="application/pdf", key=f"dl_{p['id']}",
-                        )
-                    if is_admin_user:
-                        if st.button("🗑️ Delete", key=f"del_{p['id']}"):
-                            delete_past_paper(p["id"])
-                            st.rerun()
+            def _render_paper_row(p):
+                pc1, pc2 = st.columns([3, 1])
+                with pc1:
+                    st.markdown(
+                        f"{p['subject']} Paper {p['paper_number']} · {p['document_type']} · {p['variant']}"
+                    )
+                    st.caption(f"{p['file_size'] // 1024} KB")
+                with pc2:
+                    fname, fdata = get_past_paper_file(p["id"])
+                    st.download_button(
+                        "⬇️ Download", data=fdata, file_name=fname,
+                        mime="application/pdf", key=f"dl_{p['id']}",
+                    )
+                if is_admin_user:
+                    if st.button("🗑️ Delete", key=f"del_{p['id']}"):
+                        delete_past_paper(p["id"])
+                        st.rerun()
+
+            years = sorted({p["year"] for p in papers}, reverse=True)
+            for i, year in enumerate(years):
+                year_papers = [p for p in papers if p["year"] == year]
+                with st.expander(f"📅 {year} ({len(year_papers)} document{'s' if len(year_papers) != 1 else ''})", expanded=(i == 0)):
+                    seen_series = set()
+                    for series in EXAM_SERIES_OPTIONS:
+                        series_papers = [p for p in year_papers if p["exam_series"] == series]
+                        if not series_papers:
+                            continue
+                        seen_series.add(series)
+                        st.markdown(f"**{series}**")
+                        for p in series_papers:
+                            _render_paper_row(p)
+                    # Any exam series added before this dropdown existed (or
+                    # any custom value) still shows up here rather than
+                    # silently vanishing from the library.
+                    other_papers = [p for p in year_papers if p["exam_series"] not in seen_series]
+                    if other_papers:
+                        st.markdown(f"**{other_papers[0]['exam_series'] or 'Other'}**")
+                        for p in other_papers:
+                            _render_paper_row(p)
 
 # =====================================================
 # PROFILE

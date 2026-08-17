@@ -169,12 +169,13 @@ export function fetchTiers() {
   return request<{ tiers: TierInfo[] }>("/billing/tiers");
 }
 
-export function createCheckout(token: string, tier: string) {
-  return request<{ checkout_url: string }>("/billing/checkout", {
-    method: "POST",
-    body: { tier },
-    token,
-  });
+// PayFast's live environment rejects a plain GET link (only sandbox
+// tolerates that) - it requires a real form POST, which a phone browser
+// can only do by loading a page that submits one on load. This URL points
+// at that page (api_server.py's /billing/checkout-page) instead of at
+// PayFast directly.
+export function checkoutPageUrl(token: string, tier: string) {
+  return `${API_BASE_URL}/billing/checkout-page?tier=${encodeURIComponent(tier)}&token=${encodeURIComponent(token)}`;
 }
 
 export function cancelSubscription(token: string) {

@@ -53,7 +53,7 @@ from backend.solver import (
 )
 from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
-from backend.payfast import build_checkout_payload, build_checkout_url
+from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file
 
@@ -134,10 +134,6 @@ class PracticeRecordRequest(BaseModel):
     paper: str
     topic: str
     question: str
-
-
-class CheckoutRequest(BaseModel):
-    tier: str
 
 
 def _auth_user(authorization: str | None):
@@ -319,14 +315,19 @@ def billing_tiers():
     }
 
 
-@app.post("/billing/checkout")
-def billing_checkout(body: CheckoutRequest, authorization: str = Header(None)):
-    """Builds a PayFast checkout link exactly like app.py's sidebar
-    Upgrade button does, and hands the URL back so the native app can
-    open it in the phone's browser (Linking.openURL) - no payment UI is
-    reimplemented natively, this just reuses the same tested flow."""
+@app.get("/billing/checkout-page", response_class=HTMLResponse)
+def billing_checkout_page(tier: str, authorization: str = Header(None), token: str = None):
+    """Builds a PayFast checkout exactly like app.py's sidebar Upgrade
+    button does, but returns a real self-submitting HTML <form> (POST)
+    rather than a JSON URL - PayFast's sandbox tolerated a plain GET link,
+    but live PayFast returns its own 500 error for that, so this is what
+    the native app opens directly in the phone's browser
+    (Linking.openURL), same as the past-papers download endpoint accepting
+    the token as a query param since Linking.openURL can't send headers."""
+    if token and not authorization:
+        authorization = f"Bearer {token}"
     user = _auth_user(authorization)
-    cfg = TIER_CONFIG.get(body.tier)
+    cfg = TIER_CONFIG.get(tier)
     if cfg is None or cfg["price_zar"] == 0:
         raise HTTPException(status_code=400, detail="Not a paid plan.")
 
@@ -343,9 +344,9 @@ def billing_checkout(body: CheckoutRequest, authorization: str = Header(None)):
         recurring_amount=cfg["price_zar"],
         frequency=3,  # monthly
         cycles=0,     # bill indefinitely until cancelled
-        custom_fields={"custom_str1": str(user["id"]), "custom_str2": body.tier},
+        custom_fields={"custom_str1": str(user["id"]), "custom_str2": tier},
     )
-    return {"checkout_url": build_checkout_url(payload)}
+    return build_checkout_page_html(payload)
 
 
 @app.post("/billing/cancel")

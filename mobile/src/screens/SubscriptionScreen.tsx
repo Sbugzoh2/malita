@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, fetchTiers, createCheckout, cancelSubscription, TierInfo, API_BASE_URL } from "../api/client";
+import { ApiError, fetchTiers, checkoutPageUrl, cancelSubscription, TierInfo, API_BASE_URL } from "../api/client";
 
 export default function SubscriptionScreen() {
   const { token, me, refreshMe } = useAuth();
@@ -31,10 +31,9 @@ export default function SubscriptionScreen() {
     setError(null);
     setBusyTier(tierKey);
     try {
-      const res = await createCheckout(token, tierKey);
-      await Linking.openURL(res.checkout_url);
+      await Linking.openURL(checkoutPageUrl(token, tierKey));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not start checkout. Please try again.");
+      setError("Could not start checkout. Please try again.");
     } finally {
       setBusyTier(null);
     }

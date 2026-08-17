@@ -35,7 +35,7 @@ from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, daily_limit
 from backend.usage import can_solve, record_solve, get_today_count, reset_today_usage
 from backend.records import record_solved_question, get_recent_solved
-from backend.payfast import build_checkout_payload, build_checkout_url
+from backend.payfast import build_checkout_payload, build_checkout_redirect_snippet
 from backend.math_utils import safe_parse, detect_variables, _fmt_num
 from backend.solver import (
     solve_algebra, solve_sequences, solve_financial_mathematics, solve_calculus,
@@ -602,8 +602,8 @@ with st.sidebar.expander("💳 Upgrade / Manage Plan"):
                 # round trip so the webhook knows whose subscription to update.
                 custom_fields={"custom_str1": str(auth_user["id"]), "custom_str2": tier_key},
             )
-            checkout_url = build_checkout_url(payload)
-            st.markdown(f"[Click here to pay securely via PayFast]({checkout_url})")
+            st.info("Redirecting you to PayFast to complete payment…")
+            components.html(build_checkout_redirect_snippet(payload), height=0)
 
 st.sidebar.divider()
 

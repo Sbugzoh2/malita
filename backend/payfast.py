@@ -24,6 +24,8 @@ developers. Before accepting real payments:
 import os
 import socket
 import hashlib
+import html
+import json
 import urllib.parse
 import datetime as dt
 from collections import OrderedDict
@@ -126,9 +128,61 @@ def build_checkout_payload(
     return data
 
 
-def build_checkout_url(payload: dict) -> str:
-    query = "&".join(f"{k}={_payfast_urlencode(v)}" for k, v in payload.items())
-    return f"{PAYFAST_PROCESS_URL}?{query}"
+def _hidden_fields_html(payload: dict) -> str:
+    return "\n".join(
+        f'<input type="hidden" name="{html.escape(str(k))}" value="{html.escape(str(v))}">'
+        for k, v in payload.items()
+    )
+
+
+def build_checkout_redirect_snippet(payload: dict) -> str:
+    """A components.html-style snippet that builds a real POST <form> on
+    the PARENT document (same window.parent.document trick app.py's PWA
+    setup already uses to reach past its own sandboxed iframe) and submits
+    it. PayFast's sandbox used to tolerate a plain GET link with the
+    payload in the query string, but live PayFast returns its own generic
+    500 "Server Error" for that same GET request — the documented
+    integration is a real form POST, so that's what this builds."""
+    return f"""
+    <script>
+    (function() {{
+        try {{
+            var doc = window.parent.document;
+            var form = doc.createElement('form');
+            form.method = 'POST';
+            form.action = {json.dumps(PAYFAST_PROCESS_URL)};
+            var fields = {json.dumps(payload)};
+            for (var key in fields) {{
+                var input = doc.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = fields[key];
+                form.appendChild(input);
+            }}
+            doc.body.appendChild(form);
+            form.submit();
+        }} catch (e) {{
+            console.error('PayFast redirect failed:', e);
+        }}
+    }})();
+    </script>
+    """
+
+
+def build_checkout_page_html(payload: dict) -> str:
+    """A standalone HTML page (not a components.html snippet) that
+    auto-submits the same POST on load — used by the API's
+    /billing/checkout-page endpoint, which the mobile app opens directly
+    in the phone's browser via Linking.openURL (which can only navigate to
+    a URL, not inject a form into an existing page)."""
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Redirecting to PayFast…</title></head>
+<body onload="document.getElementById('payfast-checkout-form').submit();">
+<form id="payfast-checkout-form" method="POST" action="{html.escape(PAYFAST_PROCESS_URL)}">
+{_hidden_fields_html(payload)}
+</form>
+<p style="font-family: sans-serif; text-align: center; margin-top: 40px;">Redirecting to PayFast…</p>
+</body></html>"""
 
 
 # ---------------------------------------------------------------------------

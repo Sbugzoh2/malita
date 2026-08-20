@@ -109,6 +109,18 @@ class StepRecorder:
         return nullcontext()
 
 
+def steps_contain_error(steps: list) -> bool:
+    """Every solve_* function below catches its own parsing/solving
+    exceptions internally (via the `except Exception as e: st.error(...)`
+    pattern - "st" here is the StepRecorder, not Streamlit) and returns a
+    normal step list containing an "error" step, rather than letting the
+    exception propagate to the caller. That means a caller wanting to
+    detect "this solve effectively failed" - e.g. to decide whether to
+    try an LLM fallback - can't rely on try/except alone; it has to check
+    the returned steps for one of these, too."""
+    return any(s.get("type") == "error" for s in steps)
+
+
 def solve_algebra(question: str) -> list:
     """Solve a Grade 12 Algebra question - a single equation, an
     inequality, or a 2x2 simultaneous system - and return a list of

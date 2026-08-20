@@ -41,6 +41,7 @@ from backend.solver import (
     solve_algebra, solve_sequences, solve_financial_mathematics, solve_calculus,
     solve_functions_graphs, solve_analytical_geometry, solve_trigonometry,
     solve_statistics, solve_probability, solve_euclidean_geometry_topic,
+    steps_contain_error,
 )
 from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
@@ -861,34 +862,53 @@ elif mode == "🧮 AI Tutor":
             # PAPER 1
             # =====================================================
             if topic == "Algebra":
-                render_steps(solve_algebra(question))
+                steps = solve_algebra(question)
 
             elif topic == "Sequences":
-                render_steps(solve_sequences(question))
+                steps = solve_sequences(question)
 
             elif topic == "Financial Mathematics":
-                render_steps(solve_financial_mathematics(question))
+                steps = solve_financial_mathematics(question)
 
             elif topic == "Calculus":
-                render_steps(solve_calculus(question))
+                steps = solve_calculus(question)
 
             elif topic == "Functions & Graphs":
-                render_steps(solve_functions_graphs(question))
+                steps = solve_functions_graphs(question)
 
             elif topic == "Analytical Geometry":
-                render_steps(solve_analytical_geometry(question))
+                steps = solve_analytical_geometry(question)
 
             elif topic == "Trigonometry":
-                render_steps(solve_trigonometry(question))
+                steps = solve_trigonometry(question)
 
             elif topic == "Statistics":
-                render_steps(solve_statistics(question))
+                steps = solve_statistics(question)
 
             elif topic == "Probability":
-                render_steps(solve_probability(question))
+                steps = solve_probability(question)
 
             elif topic == "Euclidean Geometry":
-                render_steps(solve_euclidean_geometry_topic(question))
+                steps = solve_euclidean_geometry_topic(question)
+
+            else:
+                steps = []
+
+            # Every solve_* function catches its own parsing failures
+            # internally and returns an "error" step rather than raising -
+            # so a failed solve has to be detected here, not just in the
+            # except block below (which only ever catches the rarer case
+            # of something crashing before it can even build a step list).
+            if steps_contain_error(steps) and can_use_llm_fallback(effective_tier):
+                with st.spinner("That one needs a closer look — let me work through it…"):
+                    try:
+                        steps = solve_with_llm(question, topic=topic, paper=paper)
+                        render_steps(steps)
+                        st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
+                    except Exception:
+                        render_steps(steps)
+            else:
+                render_steps(steps)
 
         except Exception as e:
             if can_use_llm_fallback(effective_tier):

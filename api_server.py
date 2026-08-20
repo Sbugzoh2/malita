@@ -50,6 +50,7 @@ from backend.solver import (
     solve_algebra, solve_sequences, solve_financial_mathematics, solve_calculus,
     solve_functions_graphs, solve_analytical_geometry, solve_trigonometry,
     solve_statistics, solve_probability, solve_euclidean_geometry_topic,
+    steps_contain_error,
 )
 from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
@@ -254,6 +255,16 @@ def solve(body: SolveRequest, authorization: str = Header(None)):
     record_solved_question(user["id"], "ai_tutor", paper=body.paper, topic=body.topic, question=body.question)
     try:
         steps = solver(body.question)
+        # solve_* functions catch their own parsing failures internally
+        # and return an "error" step rather than raising - so a failed
+        # solve has to be detected here too, not just in the except below
+        # (which only ever catches something crashing before it can even
+        # build a step list).
+        if steps_contain_error(steps) and can_use_llm_fallback(effective_tier):
+            try:
+                steps = solve_with_llm(body.question, topic=body.topic, paper=body.paper)
+            except Exception:
+                pass  # keep the original error steps rather than losing them
     except Exception:
         if can_use_llm_fallback(effective_tier):
             try:

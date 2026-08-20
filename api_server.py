@@ -57,6 +57,7 @@ from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file
 from backend.llm_tutor import solve_with_llm
+from backend.llm_ocr import read_math_photo
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
 # through the same webhook, so both apps' PayFast configuration must agree.
@@ -287,7 +288,38 @@ async def ocr(file: UploadFile = File(...), authorization: str = Header(None)):
 
     raw = ocr_with_exponents(preprocess_image(img))
     cleaned = clean_for_sympy(raw)
+    if not cleaned.strip() and can_use_llm_fallback(effective_tier):
+        try:
+            cleaned = read_math_photo(image_bytes)
+        except Exception:
+            pass
     return {"text": cleaned}
+
+
+@app.post("/ocr/ai-read")
+async def ocr_ai_read(file: UploadFile = File(...), authorization: str = Header(None)):
+    """Re-reads the same photo with Claude vision instead of Tesseract -
+    what the app calls when a learner taps "Try AI reading instead"
+    because the Tesseract result looks wrong (not just empty, which /ocr
+    already retries automatically). A manual action rather than an
+    automatic one because "Tesseract read something, but it's wrong" has
+    no reliable heuristic - the learner looking at their own photo is the
+    only reliable judge of that."""
+    user = _auth_user(authorization)
+    is_admin = is_user_admin(user["id"])
+    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    if not can_use_llm_fallback(effective_tier):
+        raise HTTPException(
+            status_code=403,
+            detail="AI-assisted reading is a Learner/Premium feature. Upgrade to unlock it.",
+        )
+
+    image_bytes = await file.read()
+    try:
+        text = read_math_photo(image_bytes)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Couldn't get a better reading — try a clearer photo.")
+    return {"text": text}
 
 
 @app.post("/pdf-extract")

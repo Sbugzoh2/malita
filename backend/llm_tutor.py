@@ -18,19 +18,10 @@ Requires ANTHROPIC_API_KEY to be set in the environment.
 
 import json
 
-import anthropic
+from .llm_client import get_client
 
 LLM_MODEL = "claude-haiku-4-5"
 MAX_OUTPUT_TOKENS = 1024
-
-_client = None
-
-
-def _get_client():
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic()
-    return _client
 
 
 # Deliberately short - see the module docstring on prompt caching (it's
@@ -54,7 +45,7 @@ def solve_with_llm(question: str, topic: str = "", paper: str = ""):
     result exactly like a normal SymPy solve. Raises on any API failure -
     callers should catch that and fall back to their normal error
     message, the same as an unparseable SymPy input would."""
-    client = _get_client()
+    client = get_client()
     context = f"Paper: {paper}. Topic: {topic}.\n" if topic else ""
     response = client.messages.create(
         model=LLM_MODEL,

@@ -13,16 +13,31 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, ocrImage } from "../api/client";
+import { ApiError, ocrImage, ocrImageWithAI } from "../api/client";
 
 export default function OCRScreen({ navigation }: any) {
   const { token, me } = useAuth();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [recognizedText, setRecognizedText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [aiRetrying, setAiRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const ocrLocked = me?.effective_tier === "free";
+
+  async function retryWithAI() {
+    if (!token || !imageUri) return;
+    setAiRetrying(true);
+    setError(null);
+    try {
+      const res = await ocrImageWithAI(token, imageUri);
+      setRecognizedText(res.text);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Couldn't get a better reading. Please try again.");
+    } finally {
+      setAiRetrying(false);
+    }
+  }
 
   async function runOcr(uri: string) {
     if (!token) return;
@@ -129,6 +144,17 @@ export default function OCRScreen({ navigation }: any) {
                 onChangeText={setRecognizedText}
                 multiline
               />
+              <Pressable
+                style={[styles.retryButton, aiRetrying && styles.buttonDisabled]}
+                onPress={retryWithAI}
+                disabled={aiRetrying}
+              >
+                {aiRetrying ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={styles.retryButtonText}>🔍 Not right? Try AI reading instead</Text>
+                )}
+              </Pressable>
               <Pressable style={styles.solveButton} onPress={sendToSolver}>
                 <Text style={styles.solveButtonText}>Send to AI Tutor →</Text>
               </Pressable>
@@ -171,6 +197,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     minHeight: 60,
   },
+  retryButton: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 12,
+  },
+  retryButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
+  buttonDisabled: { opacity: 0.6 },
   solveButton: {
     backgroundColor: colors.primary,
     borderRadius: 999,

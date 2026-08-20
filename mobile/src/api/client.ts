@@ -151,6 +151,13 @@ export function ocrImage(token: string, imageUri: string, mimeType: string = "im
   return uploadFile("/ocr", token, { uri: imageUri, name: "photo.jpg", type: mimeType });
 }
 
+// Re-reads the same photo with Claude vision instead of Tesseract - for
+// when /ocr read *something* but got it wrong (not the empty-result case,
+// which /ocr already retries with AI automatically). Learner/Premium only.
+export function ocrImageWithAI(token: string, imageUri: string, mimeType: string = "image/jpeg") {
+  return uploadFile("/ocr/ai-read", token, { uri: imageUri, name: "photo.jpg", type: mimeType });
+}
+
 export function pdfExtract(token: string, fileUri: string, fileName: string = "paper.pdf") {
   return uploadFile("/pdf-extract", token, { uri: fileUri, name: fileName, type: "application/pdf" });
 }

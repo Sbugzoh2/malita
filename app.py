@@ -47,6 +47,7 @@ from backend.pdf_extract import extract_pdf_text
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
 from backend.llm_tutor import solve_with_llm
+from backend.llm_ocr import read_math_photo
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
@@ -912,11 +913,41 @@ elif mode=="📷 OCR Question":
     else:
         img_file = st.file_uploader("Upload image", type=["png","jpg","jpeg"])
         if img_file:
+            img_bytes = img_file.getvalue()
             img = Image.open(img_file)
             st.image(img, use_column_width=True)
-            raw = ocr_with_exponents(preprocess_image(img))
-            cleaned = clean_for_sympy(raw)
+
+            # A learner can hit "Try AI reading instead" more than once on
+            # the same photo (a rerun-triggering button click) - persist
+            # whichever reading is current per-file so a rerun doesn't
+            # silently overwrite an AI-corrected reading with a fresh,
+            # identical Tesseract pass.
+            override_key = f"ocr_override_{img_file.file_id}"
+            if override_key in st.session_state:
+                cleaned = st.session_state[override_key]
+            else:
+                raw = ocr_with_exponents(preprocess_image(img))
+                cleaned = clean_for_sympy(raw)
+                if not cleaned.strip() and can_use_llm_fallback(effective_tier):
+                    with st.spinner("That photo's hard to read — let AI take a closer look…"):
+                        try:
+                            cleaned = read_math_photo(img_bytes)
+                            st.session_state[override_key] = cleaned
+                        except Exception:
+                            pass
+
             st.code(cleaned)
+
+            if can_use_llm_fallback(effective_tier):
+                if st.button("🔍 Not right? Try AI reading instead"):
+                    with st.spinner("Taking another look with AI…"):
+                        try:
+                            cleaned = read_math_photo(img_bytes)
+                            st.session_state[override_key] = cleaned
+                            st.rerun()
+                        except Exception:
+                            st.error("Couldn't get a better reading — try a clearer photo.")
+
             if st.button("Transfer to Solver"):
                 st.session_state.copied_text = cleaned
 

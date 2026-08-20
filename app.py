@@ -32,7 +32,7 @@ from backend.auth import (
     create_password_reset, reset_password, cancel_subscription,
 )
 from backend.email_util import send_email
-from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, daily_limit
+from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, daily_limit
 from backend.usage import can_solve, record_solve, get_today_count, reset_today_usage
 from backend.records import record_solved_question, get_recent_solved
 from backend.payfast import build_checkout_payload, build_checkout_redirect_snippet
@@ -46,6 +46,7 @@ from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
+from backend.llm_tutor import solve_with_llm
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
@@ -889,8 +890,17 @@ elif mode == "🧮 AI Tutor":
                 render_steps(solve_euclidean_geometry_topic(question))
 
         except Exception as e:
-            st.error("Invalid expression or input")
-            st.caption(str(e))
+            if can_use_llm_fallback(effective_tier):
+                with st.spinner("That one needs a closer look — let me work through it…"):
+                    try:
+                        render_steps(solve_with_llm(question, topic=topic, paper=paper))
+                        st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
+                    except Exception:
+                        st.error("Invalid expression or input")
+                        st.caption(str(e))
+            else:
+                st.error("Invalid expression or input")
+                st.caption(str(e))
 
 # =====================================================
 # OCR

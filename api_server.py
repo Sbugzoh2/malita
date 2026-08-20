@@ -42,7 +42,7 @@ from backend.auth import (
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
 )
-from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers
+from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback
 from backend.usage import can_solve, record_solve, get_today_count
 from backend.records import record_solved_question
 from backend.auth import get_user_tier
@@ -56,6 +56,7 @@ from backend.pdf_extract import extract_pdf_text
 from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file
+from backend.llm_tutor import solve_with_llm
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
 # through the same webhook, so both apps' PayFast configuration must agree.
@@ -250,7 +251,16 @@ def solve(body: SolveRequest, authorization: str = Header(None)):
 
     record_solve(user["id"])
     record_solved_question(user["id"], "ai_tutor", paper=body.paper, topic=body.topic, question=body.question)
-    steps = solver(body.question)
+    try:
+        steps = solver(body.question)
+    except Exception:
+        if can_use_llm_fallback(effective_tier):
+            try:
+                steps = solve_with_llm(body.question, topic=body.topic, paper=body.paper)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Could not solve that question. Try rephrasing it.")
+        else:
+            raise HTTPException(status_code=400, detail="Could not solve that question. Try rephrasing it.")
     return {"steps": steps}
 
 

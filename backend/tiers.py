@@ -13,6 +13,10 @@ TIER_CONFIG = {
         "ocr_enabled": False,
         "pdf_enabled": False,
         "past_papers_enabled": False,
+        # LLM fallback costs real money per call (see backend/llm_tutor.py) -
+        # keeping it off Free means that cost is only ever incurred for
+        # paying learners, not an open-ended liability on the free tier.
+        "llm_fallback_enabled": False,
     },
     "learner": {
         "label": "Learner",
@@ -24,6 +28,7 @@ TIER_CONFIG = {
         # Premium - previously the two tiers were identical in every way
         # except price, which is its own bug (nothing to "upgrade" to).
         "past_papers_enabled": False,
+        "llm_fallback_enabled": True,
     },
     "premium": {
         "label": "Premium",
@@ -32,6 +37,7 @@ TIER_CONFIG = {
         "ocr_enabled": True,
         "pdf_enabled": True,
         "past_papers_enabled": True,
+        "llm_fallback_enabled": True,
     },
 }
 
@@ -52,6 +58,10 @@ def can_use_pdf(tier: str) -> bool:
 
 def can_use_past_papers(tier: str) -> bool:
     return tier_config(tier)["past_papers_enabled"]
+
+
+def can_use_llm_fallback(tier: str) -> bool:
+    return tier_config(tier)["llm_fallback_enabled"]
 
 
 def daily_limit(tier: str):

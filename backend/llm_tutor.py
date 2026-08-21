@@ -31,7 +31,10 @@ from .llm_client import get_client
 from .math_utils import safe_parse
 
 LLM_MODEL = "claude-haiku-4-5"
-MAX_OUTPUT_TOKENS = 1024
+# Explanation and mathematics are now separate steps (see SYSTEM_PROMPT),
+# roughly doubling step count vs. one combined sentence-with-inline-math
+# per step - a bigger budget keeps that from truncating mid-JSON.
+MAX_OUTPUT_TOKENS = 1536
 
 # app.py's render_steps() does a direct dict lookup with no fallback for
 # an unrecognised "type" - a step type outside this set would crash the
@@ -54,17 +57,22 @@ A learner has asked a question the app's built-in solver could not parse - likel
 Respond with ONLY a raw JSON array - your entire response must start with [ and end with ]. Do NOT wrap it in a ```json code fence or any other markdown, and do NOT include any prose before or after it.
 
 Each element is a step object shaped exactly like: {"type": "markdown", "content": "..."}
-"content" may include inline LaTeX using single-dollar delimiters, e.g. "Solve for $x$: $x^2 - 5x + 6 = 0$".
-Use "type": "success" for exactly one final step stating the final answer clearly.
-Keep it concise: 3-6 steps is typical.
+
+Keep explanation and mathematics visually separate, like a worked solution written on paper - explanation on one line, the equation it produces on the next:
+- A "markdown" step is short, plain-language prose ONLY - never embed $...$ math inside it.
+- Immediately after any markdown step that leads into an equation, expression, or result, add a SEPARATE step with "type": "latex" holding just that expression (plain LaTeX, no $ delimiters - e.g. "content": "x^2 - 5x + 6 = 0", not "$x^2 - 5x + 6 = 0$").
+- Never combine a sentence of explanation and its equation into a single step - always two steps, markdown then latex.
+
+Use "type": "success" for exactly one final step stating the final answer, wrapped in single-dollar delimiters, e.g. {"type": "success", "content": "$x = 5$"}.
+Keep it concise: 4-8 steps is typical (explanation + equation pairs, plus the final success step).
 
 If, and only if, the question explicitly asks you to sketch, draw, or plot a graph/function, include ONE extra step shaped like {"type": "plot", "content": "x**2 - 4"} at the point where the sketch belongs. "content" must be ONLY a plottable expression in terms of x, using Python/SymPy syntax (** for powers, sin/cos/tan/exp/log/sqrt/pi as needed) - Malita renders the actual image itself from this expression, so never describe the graph in words instead of (or in addition to) giving this step; never use "type": "plot" for anything that isn't a real function to graph.
 
 Example of a complete, correct response:
-[{"type": "markdown", "content": "Let $x$ be the number of years."}, {"type": "success", "content": "$x = 5$"}]
+[{"type": "markdown", "content": "Let x be the number of years the money is invested."}, {"type": "markdown", "content": "Set up the compound growth equation:"}, {"type": "latex", "content": "5000(1.08)^x = 10000"}, {"type": "markdown", "content": "Solve for x using logarithms:"}, {"type": "latex", "content": "x = \\log_{1.08}(2) \\approx 9.01"}, {"type": "success", "content": "$x \\approx 9.01 \\text{ years}$"}]
 
 Example including a sketch:
-[{"type": "markdown", "content": "This is a downward parabola with turning point at $(0, 4)$."}, {"type": "plot", "content": "4 - x**2"}, {"type": "success", "content": "x-intercepts: $x = -2$ and $x = 2$"}]"""
+[{"type": "markdown", "content": "This is a downward parabola. Find the turning point by completing the square:"}, {"type": "latex", "content": "y = 4 - x^2, \\quad \\text{turning point } (0, 4)"}, {"type": "plot", "content": "4 - x**2"}, {"type": "markdown", "content": "Find the x-intercepts by setting y = 0:"}, {"type": "latex", "content": "4 - x^2 = 0 \\implies x = \\pm 2"}, {"type": "success", "content": "$x = -2$ and $x = 2$"}]"""
 
 
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
@@ -190,7 +198,7 @@ def solve_full_paper(paper_text: str, paper_title: str = ""):
             f"{q['number']}.1, {q['number']}.2 - work through each sub-part in turn.)"
         )
         try:
-            steps = solve_with_llm(prompt_text, paper=paper_title, max_tokens=2048)
+            steps = solve_with_llm(prompt_text, paper=paper_title, max_tokens=3072)
         except Exception as e:
             steps = [{"type": "error", "content": f"Couldn't solve this question: {e}"}]
         results.append({"number": q["number"], "text": q["text"], "steps": steps})

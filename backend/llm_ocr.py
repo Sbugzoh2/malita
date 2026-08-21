@@ -60,13 +60,18 @@ Each element represents ONE question or sub-part, shaped exactly like:
 "number" should match the question's own numbering as shown in the photo (e.g. "1.1.1", "2", "(a)") - if the photo has no explicit numbering, use "1", "2", "3" in order.
 
 Each entry in "steps" is a step object shaped exactly like: {"type": "markdown", "content": "..."}
-"content" may include inline LaTeX using single-dollar delimiters, e.g. "Solve for $x$: $x^2 - 5x + 6 = 0$".
-Use "type": "success" for exactly one final step per question, stating its final answer clearly.
+
+Keep explanation and mathematics visually separate, like a worked solution written on paper - explanation on one line, the equation it produces on the next:
+- A "markdown" step is short, plain-language prose ONLY - never embed $...$ math inside it.
+- Immediately after any markdown step that leads into an equation, expression, or result, add a SEPARATE step with "type": "latex" holding just that expression (plain LaTeX, no $ delimiters - e.g. "content": "x^2 - 5x + 6 = 0", not "$x^2 - 5x + 6 = 0$").
+- Never combine a sentence of explanation and its equation into a single step - always two steps, markdown then latex.
+
+Use "type": "success" for exactly one final step per question, stating its final answer, wrapped in single-dollar delimiters, e.g. {"type": "success", "content": "$x = 5$"}.
 If a question asks you to sketch, draw, or plot a graph/function, include ONE extra step shaped like {"type": "plot", "content": "x**2 - 4"} at the point where the sketch belongs, using Python/SymPy syntax (** for powers) - Malita renders the actual image itself from this expression.
-Keep each question's steps concise: 3-6 steps is typical.
+Keep each question's steps concise: 4-8 steps is typical (explanation + equation pairs, plus the final success step).
 
 Example of a complete, correct response for a photo with two sub-questions:
-[{"number": "1.1", "steps": [{"type": "markdown", "content": "Let $x$ be the number of years."}, {"type": "success", "content": "$x = 5$"}]}, {"number": "1.2", "steps": [{"type": "markdown", "content": "Factorise: $(x-2)(x-3)=0$"}, {"type": "success", "content": "$x = 2$ or $x = 3$"}]}]"""
+[{"number": "1.1", "steps": [{"type": "markdown", "content": "Let x be the number of years."}, {"type": "markdown", "content": "Set up the equation:"}, {"type": "latex", "content": "5000(1.08)^x = 10000"}, {"type": "success", "content": "$x \\approx 9.01$"}]}, {"number": "1.2", "steps": [{"type": "markdown", "content": "Factorise the quadratic:"}, {"type": "latex", "content": "(x-2)(x-3)=0"}, {"type": "success", "content": "$x = 2$ or $x = 3$"}]}]"""
 
 
 def _resize_for_upload(image_bytes: bytes) -> tuple[bytes, str]:

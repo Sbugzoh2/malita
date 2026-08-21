@@ -53,13 +53,12 @@ from backend.solver import (
     solve_statistics, solve_probability, solve_euclidean_geometry_topic,
     steps_contain_error,
 )
-from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
 from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file
 from backend.llm_tutor import solve_with_llm, solve_full_paper
-from backend.llm_ocr import read_math_photo
+from backend.llm_ocr import solve_photo_with_llm
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
 # through the same webhook, so both apps' PayFast configuration must agree.
@@ -299,12 +298,14 @@ def solve(body: SolveRequest, authorization: str = Header(None)):
     return {"steps": steps}
 
 
-@app.post("/ocr")
-async def ocr(file: UploadFile = File(...), authorization: str = Header(None)):
+@app.post("/ocr/solve")
+async def ocr_solve(file: UploadFile = File(...), authorization: str = Header(None)):
     """Accepts a photo (camera capture or gallery upload from the native
-    app - either path lands here as the same multipart file) and returns
-    the recognised expression, cleaned up for the AI Tutor solver. Mirrors
-    app.py's OCR Question mode exactly (same backend.ocr functions)."""
+    app - either path lands here as the same multipart file), reads every
+    question/sub-part in it, and solves each one directly - the OCR
+    screen's primary path now that Tesseract's accuracy has proven too
+    unreliable to trust as the default. Mirrors app.py's OCR Question
+    mode exactly (same backend.llm_ocr function)."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
     effective_tier = "premium" if is_admin else get_user_tier(user["id"])
@@ -316,44 +317,15 @@ async def ocr(file: UploadFile = File(...), authorization: str = Header(None)):
 
     image_bytes = await file.read()
     try:
-        img = Image.open(BytesIO(image_bytes))
+        Image.open(BytesIO(image_bytes))
     except Exception:
         raise HTTPException(status_code=400, detail="Could not read that image file.")
 
-    raw = ocr_with_exponents(preprocess_image(img))
-    cleaned = clean_for_sympy(raw)
-    if not cleaned.strip() and can_use_llm_fallback(effective_tier):
-        try:
-            cleaned = read_math_photo(image_bytes)
-        except Exception:
-            pass
-    return {"text": cleaned}
-
-
-@app.post("/ocr/ai-read")
-async def ocr_ai_read(file: UploadFile = File(...), authorization: str = Header(None)):
-    """Re-reads the same photo with Claude vision instead of Tesseract -
-    what the app calls when a learner taps "Try AI reading instead"
-    because the Tesseract result looks wrong (not just empty, which /ocr
-    already retries automatically). A manual action rather than an
-    automatic one because "Tesseract read something, but it's wrong" has
-    no reliable heuristic - the learner looking at their own photo is the
-    only reliable judge of that."""
-    user = _auth_user(authorization)
-    is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
-    if not can_use_llm_fallback(effective_tier):
-        raise HTTPException(
-            status_code=403,
-            detail="AI-assisted reading is a Learner/Premium feature. Upgrade to unlock it.",
-        )
-
-    image_bytes = await file.read()
     try:
-        text = read_math_photo(image_bytes)
+        questions = solve_photo_with_llm(image_bytes)
     except Exception:
-        raise HTTPException(status_code=502, detail="Couldn't get a better reading — try a clearer photo.")
-    return {"text": text}
+        raise HTTPException(status_code=502, detail="Couldn't read that photo. Please try a clearer picture, better lighting, or less glare.")
+    return {"questions": questions}
 
 
 @app.post("/pdf-extract")

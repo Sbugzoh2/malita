@@ -124,11 +124,11 @@ export function fetchProvinces() {
   return request<{ provinces: string[] }>("/meta/provinces");
 }
 
-async function uploadFile(
+async function uploadFile<T = { text: string }>(
   path: string,
   token: string,
   file: { uri: string; name: string; type: string }
-): Promise<{ text: string }> {
+): Promise<T> {
   const formData = new FormData();
   if (Platform.OS === "web") {
     // react-native-web has no native {uri,name,type} FormData shim - the
@@ -155,15 +155,17 @@ async function uploadFile(
   return data;
 }
 
-export function ocrImage(token: string, imageUri: string, mimeType: string = "image/jpeg") {
-  return uploadFile("/ocr", token, { uri: imageUri, name: "photo.jpg", type: mimeType });
-}
+export type SolvedPhotoQuestion = { number: string; steps: SolveStep[] };
 
-// Re-reads the same photo with Claude vision instead of Tesseract - for
-// when /ocr read *something* but got it wrong (not the empty-result case,
-// which /ocr already retries with AI automatically). Learner/Premium only.
-export function ocrImageWithAI(token: string, imageUri: string, mimeType: string = "image/jpeg") {
-  return uploadFile("/ocr/ai-read", token, { uri: imageUri, name: "photo.jpg", type: mimeType });
+// Reads every question/sub-part in a photographed maths problem and
+// solves each one directly - the OCR screen's primary path (Tesseract
+// proved too unreliable to trust as a default).
+export function solvePhotoWithAI(token: string, imageUri: string, mimeType: string = "image/jpeg") {
+  return uploadFile<{ questions: SolvedPhotoQuestion[] }>("/ocr/solve", token, {
+    uri: imageUri,
+    name: "photo.jpg",
+    type: mimeType,
+  });
 }
 
 export function pdfExtract(token: string, fileUri: string, fileName: string = "paper.pdf") {

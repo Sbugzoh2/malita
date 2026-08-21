@@ -7,49 +7,41 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
-  TextInput,
   Alert,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, ocrImage, ocrImageWithAI } from "../api/client";
+import { ApiError, solvePhotoWithAI, SolvedPhotoQuestion } from "../api/client";
+import { StepView } from "./AITutorScreen";
 
 export default function OCRScreen({ navigation }: any) {
   const { token, me } = useAuth();
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [recognizedText, setRecognizedText] = useState("");
+  const [questions, setQuestions] = useState<SolvedPhotoQuestion[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const [aiRetrying, setAiRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const ocrLocked = me?.effective_tier === "free";
 
-  async function retryWithAI() {
-    if (!token || !imageUri) return;
-    setAiRetrying(true);
-    setError(null);
-    try {
-      const res = await ocrImageWithAI(token, imageUri);
-      setRecognizedText(res.text);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Couldn't get a better reading. Please try again.");
-    } finally {
-      setAiRetrying(false);
-    }
-  }
-
-  async function runOcr(uri: string) {
+  async function solvePhoto(uri: string) {
     if (!token) return;
     setImageUri(uri);
-    setRecognizedText("");
+    setQuestions(null);
     setError(null);
+    setExpanded(new Set());
     setLoading(true);
     try {
-      const res = await ocrImage(token, uri);
-      setRecognizedText(res.text);
+      const res = await solvePhotoWithAI(token, uri);
+      setQuestions(res.questions);
+      if (res.questions.length > 0) setExpanded(new Set([res.questions[0].number]));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not read that image. Please try again.");
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : "Couldn't read that photo. Please try a clearer picture, better lighting, or less glare."
+      );
     } finally {
       setLoading(false);
     }
@@ -63,7 +55,7 @@ export default function OCRScreen({ navigation }: any) {
     }
     const result = await ImagePicker.launchCameraAsync({ quality: 0.9, allowsEditing: false });
     if (!result.canceled && result.assets?.[0]) {
-      await runOcr(result.assets[0].uri);
+      await solvePhoto(result.assets[0].uri);
     }
   }
 
@@ -79,17 +71,26 @@ export default function OCRScreen({ navigation }: any) {
       allowsEditing: false,
     });
     if (!result.canceled && result.assets?.[0]) {
-      await runOcr(result.assets[0].uri);
+      await solvePhoto(result.assets[0].uri);
     }
   }
 
-  function sendToSolver() {
-    navigation.navigate("AITutor", { prefillQuestion: recognizedText });
+  function retry() {
+    if (imageUri) solvePhoto(imageUri);
+  }
+
+  function toggle(number: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(number)) next.delete(number);
+      else next.add(number);
+      return next;
+    });
   }
 
   function reset() {
     setImageUri(null);
-    setRecognizedText("");
+    setQuestions(null);
     setError(null);
   }
 
@@ -99,7 +100,10 @@ export default function OCRScreen({ navigation }: any) {
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
       </Pressable>
       <Text style={styles.title}>📷 OCR Question</Text>
-      <Text style={styles.subtitle}>Snap a photo of a question and let us read it for you.</Text>
+      <Text style={styles.subtitle}>
+        Take or upload a photo of one or more maths questions — Malita reads and solves every
+        question directly here, no need to retype anything.
+      </Text>
 
       {ocrLocked ? (
         <View style={styles.lockedBanner}>
@@ -129,37 +133,40 @@ export default function OCRScreen({ navigation }: any) {
           {loading && (
             <View style={styles.loadingRow}>
               <ActivityIndicator color={colors.primary} />
-              <Text style={styles.loadingText}>Reading the image…</Text>
+              <Text style={styles.loadingText}>
+                Reading and solving every question in this photo with AI — this may take a moment…
+              </Text>
             </View>
           )}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          {recognizedText ? (
-            <View style={styles.resultCard}>
-              <Text style={styles.label}>Recognised expression (edit if needed)</Text>
-              <TextInput
-                style={styles.input}
-                value={recognizedText}
-                onChangeText={setRecognizedText}
-                multiline
-              />
-              <Pressable
-                style={[styles.retryButton, aiRetrying && styles.buttonDisabled]}
-                onPress={retryWithAI}
-                disabled={aiRetrying}
-              >
-                {aiRetrying ? (
-                  <ActivityIndicator color={colors.primary} />
-                ) : (
-                  <Text style={styles.retryButtonText}>🔍 Not right? Try AI reading instead</Text>
-                )}
-              </Pressable>
-              <Pressable style={styles.solveButton} onPress={sendToSolver}>
-                <Text style={styles.solveButtonText}>Send to AI Tutor →</Text>
+          {questions && questions.length > 0 && (
+            <View style={{ marginTop: 16 }}>
+              {questions.map((q) => {
+                const isOpen = expanded.has(q.number);
+                return (
+                  <View key={q.number} style={styles.questionCard}>
+                    <Pressable style={styles.questionHeader} onPress={() => toggle(q.number)}>
+                      <Text style={styles.questionHeaderText}>Question {q.number}</Text>
+                      <Text style={styles.chevron}>{isOpen ? "▲" : "▼"}</Text>
+                    </Pressable>
+                    {isOpen && (
+                      <View style={styles.questionBody}>
+                        {q.steps.map((step, i) => (
+                          <StepView key={i} step={step} />
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+
+              <Pressable style={styles.retryButton} onPress={retry}>
+                <Text style={styles.retryButtonText}>🔄 Not right? Re-read and re-solve this photo</Text>
               </Pressable>
             </View>
-          ) : null}
+          )}
         </>
       )}
     </ScrollView>
@@ -184,37 +191,33 @@ const styles = StyleSheet.create({
   cancelButton: { marginTop: 10, alignSelf: "flex-start" },
   cancelButtonText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
   loadingRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16 },
-  loadingText: { color: colors.textSecondary },
+  loadingText: { color: colors.textSecondary, flexShrink: 1 },
   error: { color: colors.error, marginTop: 16 },
-  resultCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, marginTop: 16 },
-  label: { fontSize: 13, color: colors.textSecondary, marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: "#fff",
-    minHeight: 60,
+  questionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    marginBottom: 12,
+    overflow: "hidden",
   },
+  questionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  questionHeaderText: { fontSize: 15, fontWeight: "700", color: colors.text },
+  chevron: { fontSize: 12, color: colors.textSecondary },
+  questionBody: { paddingHorizontal: 16, paddingBottom: 16 },
   retryButton: {
     borderWidth: 1,
     borderColor: colors.primary,
     borderRadius: 999,
     paddingVertical: 12,
     alignItems: "center",
-    marginTop: 12,
+    marginTop: 4,
   },
   retryButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
-  buttonDisabled: { opacity: 0.6 },
-  solveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 14,
-  },
-  solveButtonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   lockedBanner: {
     backgroundColor: "#fff4e5",
     borderRadius: 12,

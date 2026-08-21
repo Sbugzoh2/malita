@@ -8,8 +8,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
 import numpy as np
-import cv2
-import pytesseract
 import matplotlib.pyplot as plt
 import fitz  # PyMuPDF
 #import PyMuPDF
@@ -43,12 +41,11 @@ from backend.solver import (
     solve_statistics, solve_probability, solve_euclidean_geometry_topic,
     steps_contain_error,
 )
-from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
 from backend.llm_tutor import solve_with_llm, solve_full_paper
-from backend.llm_ocr import read_math_photo
+from backend.llm_ocr import solve_photo_with_llm
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
@@ -80,17 +77,6 @@ except FileNotFoundError:
 # =====================================================
 # CONFIG
 # =====================================================
-#pytesseract.pytesseract.tesseract_cmd = r"C:\Users\10119145\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
-
-# Only set path locally, and only if it actually exists on this machine.
-# On servers / Linux hosting, Tesseract must be installed via the OS package
-# manager (e.g. apt-get install tesseract-ocr) and will already be on PATH,
-# so pytesseract can find it without us setting tesseract_cmd at all.
-if os.name == "nt":
-    _local_tesseract_path = r"C:\Users\10119145\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
-    if os.path.exists(_local_tesseract_path):
-        pytesseract.pytesseract.tesseract_cmd = _local_tesseract_path
-
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 st.set_page_config("Matric Math Master", layout="wide", page_icon="🎓")
@@ -936,6 +922,10 @@ elif mode == "🧮 AI Tutor":
 # =====================================================
 elif mode=="📷 OCR Question":
     st.title("📷 OCR Question")
+    st.caption(
+        "Take or upload a photo of one or more maths questions — Malita reads and solves "
+        "every question directly here, no need to retype anything."
+    )
     if not can_use_ocr(effective_tier):
         st.warning("📷 Photo upload & OCR is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
     else:
@@ -945,41 +935,25 @@ elif mode=="📷 OCR Question":
             img = Image.open(img_file)
             st.image(img, use_column_width=True)
 
-            # A learner can hit "Try AI reading instead" more than once on
-            # the same photo (a rerun-triggering button click) - persist
-            # whichever reading is current per-file so a rerun doesn't
-            # silently overwrite an AI-corrected reading with a fresh,
-            # identical Tesseract pass.
-            override_key = f"ocr_override_{img_file.file_id}"
-            if override_key in st.session_state:
-                cleaned = st.session_state[override_key]
-            else:
-                raw = ocr_with_exponents(preprocess_image(img))
-                cleaned = clean_for_sympy(raw)
-                if not cleaned.strip() and can_use_llm_fallback(effective_tier):
-                    with st.spinner("That photo's hard to read — let AI take a closer look…"):
-                        try:
-                            cleaned = read_math_photo(img_bytes)
-                            st.session_state[override_key] = cleaned
-                        except Exception:
-                            pass
+            solve_key = f"ocr_solved_{img_file.file_id}"
+            if solve_key not in st.session_state:
+                with st.spinner("Reading and solving every question in this photo with AI — this may take a moment…"):
+                    try:
+                        st.session_state[solve_key] = solve_photo_with_llm(img_bytes)
+                    except Exception:
+                        st.session_state[solve_key] = None
+                        st.error("Couldn't read that photo. Please try a clearer picture, better lighting, or less glare.")
 
-            st.code(cleaned)
+            solved = st.session_state.get(solve_key)
+            if solved:
+                for q in solved:
+                    st.markdown(f"#### Question {q['number']}")
+                    render_steps(q["steps"])
+                    st.divider()
 
-            if can_use_llm_fallback(effective_tier):
-                if st.button("🔍 Not right? Try AI reading instead"):
-                    with st.spinner("Taking another look with AI…"):
-                        try:
-                            cleaned = read_math_photo(img_bytes)
-                            st.session_state[override_key] = cleaned
-                            st.rerun()
-                        except Exception:
-                            st.error("Couldn't get a better reading — try a clearer photo.")
-
-            if st.button("Transfer to Solver"):
-                st.session_state.copied_text = cleaned
-                st.session_state["pending_nav"] = "🧮 AI Tutor"
-                st.rerun()
+                if st.button("🔄 Not right? Re-read and re-solve this photo"):
+                    del st.session_state[solve_key]
+                    st.rerun()
 
 # =====================================================
 # PDF

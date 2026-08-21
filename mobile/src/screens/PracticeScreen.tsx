@@ -81,6 +81,16 @@ export default function PracticeScreen({ navigation }: any) {
     try {
       const res = await checkPracticeAnswer(token, attempt, questions[qIndex].final_answer);
       setVerdict(res.correct);
+      // Marks only count on a correct check, not just for viewing the
+      // solution - matches the web app's Learner Profile behaviour.
+      if (res.correct === true && paper && topic && !recorded) {
+        setRecorded(true);
+        try {
+          await recordPracticeSolved(token, paper, topic, questions[qIndex].question);
+        } catch {
+          // Best-effort progress tracking - not worth surfacing an error for.
+        }
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not check your answer. Please try again.");
     } finally {
@@ -88,15 +98,8 @@ export default function PracticeScreen({ navigation }: any) {
     }
   }
 
-  async function handleShowSolution() {
+  function handleShowSolution() {
     setShowSolution(true);
-    if (!token || !paper || !topic || !questions || recorded) return;
-    setRecorded(true);
-    try {
-      await recordPracticeSolved(token, paper, topic, questions[qIndex].question);
-    } catch {
-      // Best-effort progress tracking - not worth surfacing an error for.
-    }
   }
 
   const q = questions?.[qIndex];
@@ -203,7 +206,7 @@ export default function PracticeScreen({ navigation }: any) {
                     </>
                   ) : null}
 
-                  <Text style={styles.label}>Attempt your answer first</Text>
+                  <Text style={styles.label}>Type your final answer here (e.g. x=3 or x=2), then check it</Text>
                   <TextInput
                     style={styles.input}
                     value={attempt}
@@ -211,7 +214,7 @@ export default function PracticeScreen({ navigation }: any) {
                       setAttempt(v);
                       setVerdict("unchecked");
                     }}
-                    placeholder="Type your answer"
+                    placeholder="e.g. x=3 or x=2"
                     autoCapitalize="none"
                   />
 
@@ -255,6 +258,10 @@ export default function PracticeScreen({ navigation }: any) {
                         <LatexView latex={q.final_answer} fontSize={16} />
                       </View>
                       <Text style={styles.marksNote}>Total Marks: {q.Marks}</Text>
+                      <Text style={styles.marksHint}>
+                        Marks are only added to your Learner Profile when you type the final answer above and
+                        check it correctly — viewing this solution is just for reference.
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -348,4 +355,5 @@ const styles = StyleSheet.create({
   stepExplain: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 4 },
   finalAnswerLabel: { fontSize: 13, fontWeight: "700", color: "#0ca30c", marginTop: 8 },
   marksNote: { fontSize: 12, color: colors.textSecondary, marginTop: 6, fontStyle: "italic" },
+  marksHint: { fontSize: 11, color: colors.textSecondary, marginTop: 4 },
 });

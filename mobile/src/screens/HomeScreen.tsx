@@ -29,9 +29,9 @@ const TILES: Tile[] = [
   },
   {
     key: "PDF",
-    icon: "📚",
-    title: "Past Papers (PDF)",
-    desc: "Upload a past paper PDF and pull questions straight from it.",
+    icon: "📄",
+    title: "Upload PDF Document",
+    desc: "Upload any PDF with maths questions and get them solved with AI.",
     color: "#eda100",
   },
   {

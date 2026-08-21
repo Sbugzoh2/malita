@@ -11,7 +11,8 @@ import {
 import * as DocumentPicker from "expo-document-picker";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, pdfExtract } from "../api/client";
+import { ApiError, pdfExtract, solvePdfText, SolvedPdfQuestion } from "../api/client";
+import { StepView } from "./AITutorScreen";
 
 export default function PDFScreen({ navigation }: any) {
   const { token, me } = useAuth();
@@ -19,6 +20,11 @@ export default function PDFScreen({ navigation }: any) {
   const [fileName, setFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [solving, setSolving] = useState(false);
+  const [solveError, setSolveError] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<SolvedPdfQuestion[] | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const pdfLocked = me?.effective_tier === "free";
 
@@ -30,6 +36,8 @@ export default function PDFScreen({ navigation }: any) {
     setFileName(asset.name);
     setExtractedText("");
     setError(null);
+    setQuestions(null);
+    setSolveError(null);
     setLoading(true);
     try {
       const res = await pdfExtract(token, asset.uri, asset.name);
@@ -45,10 +53,38 @@ export default function PDFScreen({ navigation }: any) {
     navigation.navigate("AITutor", { prefillQuestion: extractedText });
   }
 
+  async function solveAll() {
+    if (!token || !extractedText) return;
+    setSolving(true);
+    setSolveError(null);
+    try {
+      const res = await solvePdfText(token, extractedText, fileName ?? "");
+      setQuestions(res.questions);
+      if (res.questions.length === 0) {
+        setSolveError("Couldn't detect individual questions in this document.");
+      }
+    } catch (e) {
+      setSolveError(e instanceof ApiError ? e.message : "Could not solve this document. Please try again.");
+    } finally {
+      setSolving(false);
+    }
+  }
+
+  function toggle(number: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(number)) next.delete(number);
+      else next.add(number);
+      return next;
+    });
+  }
+
   function reset() {
     setFileName(null);
     setExtractedText("");
     setError(null);
+    setQuestions(null);
+    setSolveError(null);
   }
 
   return (
@@ -56,13 +92,16 @@ export default function PDFScreen({ navigation }: any) {
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
       </Pressable>
-      <Text style={styles.title}>📚 Past Papers (PDF)</Text>
-      <Text style={styles.subtitle}>Upload a past paper PDF and pull questions straight from it.</Text>
+      <Text style={styles.title}>📄 Upload PDF Document</Text>
+      <Text style={styles.subtitle}>
+        Upload any PDF with maths questions — a past paper, a worksheet, homework, anything with
+        problems on it — not just official exam papers.
+      </Text>
 
       {pdfLocked ? (
         <View style={styles.lockedBanner}>
           <Text style={styles.lockedText}>
-            Past paper PDF extraction is a Learner/Premium feature. Upgrade from the Home screen to unlock it.
+            PDF upload is a Learner/Premium feature. Upgrade from the Home screen to unlock it.
           </Text>
         </View>
       ) : (
@@ -100,8 +139,55 @@ export default function PDFScreen({ navigation }: any) {
               <Pressable style={styles.solveButton} onPress={sendToSolver}>
                 <Text style={styles.solveButtonText}>Send to AI Tutor →</Text>
               </Pressable>
+
+              <Pressable
+                style={[styles.aiSolveButton, solving && styles.buttonDisabled]}
+                onPress={solveAll}
+                disabled={solving}
+              >
+                {solving ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={styles.aiSolveButtonText}>🧠 Solve all questions with AI</Text>
+                )}
+              </Pressable>
+              {solving && (
+                <Text style={styles.solvingHint}>
+                  Reading the document and solving every question with AI — this can take a minute
+                  for a full document…
+                </Text>
+              )}
+              {solveError ? <Text style={styles.error}>{solveError}</Text> : null}
             </View>
           ) : null}
+
+          {questions && questions.length > 0 && (
+            <View style={{ marginTop: 16 }}>
+              <Text style={styles.sectionTitle}>🧠 AI-Solved Questions</Text>
+              {questions.map((q) => {
+                const isOpen = expanded.has(q.number);
+                return (
+                  <View key={q.number} style={styles.questionCard}>
+                    <Pressable style={styles.questionHeader} onPress={() => toggle(q.number)}>
+                      <Text style={styles.questionHeaderText}>Question {q.number}</Text>
+                      <Text style={styles.chevron}>{isOpen ? "▲" : "▼"}</Text>
+                    </Pressable>
+                    {isOpen && (
+                      <View style={styles.questionBody}>
+                        <Text style={styles.originalLabel}>
+                          Original question (as extracted from the PDF):
+                        </Text>
+                        <Text style={styles.originalText}>{q.text}</Text>
+                        {q.steps.map((step, i) => (
+                          <StepView key={i} step={step} />
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </>
       )}
     </ScrollView>
@@ -148,6 +234,44 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   solveButtonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  aiSolveButton: {
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  aiSolveButtonText: { color: colors.primary, fontWeight: "700", fontSize: 16 },
+  buttonDisabled: { opacity: 0.6 },
+  solvingHint: { fontSize: 12, color: colors.textSecondary, marginTop: 8, textAlign: "center" },
+  sectionTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 10 },
+  questionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  questionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  questionHeaderText: { fontSize: 15, fontWeight: "700", color: colors.text },
+  chevron: { fontSize: 12, color: colors.textSecondary },
+  questionBody: { paddingHorizontal: 16, paddingBottom: 16 },
+  originalLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
+  originalText: {
+    fontSize: 13,
+    color: colors.text,
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
   lockedBanner: {
     backgroundColor: "#fff4e5",
     borderRadius: 12,

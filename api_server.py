@@ -141,6 +141,11 @@ class PracticeRecordRequest(BaseModel):
     question: str
 
 
+class PdfSolveAllRequest(BaseModel):
+    text: str
+    title: str = ""
+
+
 def _auth_user(authorization: str | None):
     """FastAPI dependency-style helper: parse 'Bearer <token>' and resolve
     it to a user dict, or raise 401. Not using FastAPI's OAuth2 machinery
@@ -518,36 +523,28 @@ def past_papers_download(paper_id: int, authorization: str = Header(None), token
     )
 
 
-@app.post("/past-papers/{paper_id}/solve-all")
-def past_papers_solve_all(paper_id: int, authorization: str = Header(None)):
-    """Extracts every question from a past paper's PDF and solves each one
-    with the LLM fallback - the API twin of app.py's "Solve all questions
-    with AI" button. Premium-gated same as the rest of the library, plus
-    the LLM-fallback tier gate since this always calls the paid model
-    (there's no free/SymPy path for a whole scanned exam paper)."""
+@app.post("/pdf-extract/solve-all")
+def pdf_extract_solve_all(body: PdfSolveAllRequest, authorization: str = Header(None)):
+    """Solves every question detected in a learner-uploaded PDF's already-
+    extracted text - the API twin of app.py's "Upload PDF Document" mode's
+    "Solve all questions with AI" button. Takes the text directly (not the
+    PDF file itself) since the client already has it from /pdf-extract.
+    Not offered on the curated Past Papers Library, which also holds memos
+    that don't make sense to "solve"."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
     effective_tier = "premium" if is_admin else get_user_tier(user["id"])
-    if not can_use_past_papers(effective_tier):
+    if not can_use_pdf(effective_tier):
         raise HTTPException(
             status_code=403,
-            detail="The Past Papers Library is a Premium feature. Upgrade to unlock it.",
+            detail="PDF upload is a Learner/Premium feature. Upgrade to unlock it.",
         )
     if not can_use_llm_fallback(effective_tier):
         raise HTTPException(
             status_code=403,
-            detail="Solving a full paper with AI is a Learner/Premium feature. Upgrade to unlock it.",
+            detail="Solving a full document with AI is a Learner/Premium feature. Upgrade to unlock it.",
         )
-    papers = {p["id"]: p for p in list_past_papers()}
-    paper = papers.get(paper_id)
-    if paper is None:
-        raise HTTPException(status_code=404, detail="Past paper not found.")
-    if paper["document_type"] != "Question Paper":
-        raise HTTPException(status_code=400, detail="AI solving is only available for question papers, not memos.")
-
-    _, file_data = get_past_paper_file(paper_id)
-    paper_text = extract_pdf_text(file_data)
-    questions = solve_full_paper(paper_text, paper_title=paper["title"])
+    questions = solve_full_paper(body.text, paper_title=body.title)
     return {"questions": questions}
 
 

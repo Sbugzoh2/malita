@@ -29,7 +29,7 @@ import random
 from backend.db import init_db, SA_PROVINCES
 from backend.auth import (
     register_user, login_user, get_user_tier, is_user_admin, AuthError,
-    create_password_reset, reset_password, cancel_subscription,
+    create_password_reset, reset_password, cancel_subscription, create_api_token,
 )
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, daily_limit
@@ -624,7 +624,7 @@ _NAV_OPTIONS = [
     "🧮 AI Tutor",
     "📝 Practice Questions",
     "📷 OCR Question",
-    "📚 Past Papers (PDF)",
+    "📄 Upload PDF Document",
     "🗄️ Past Papers Library",
     "🎯 Learner Profile",
     "📏 Formula Sheet",
@@ -694,7 +694,10 @@ if mode=="📝 Practice Questions":
         with st.expander("💡 Need a hint?"):
             st.latex(q_data["hint"])
 
-    attempt = st.text_input("Attempt your answer first:", key=f"attempt_{q_key}")
+    attempt = st.text_input(
+        "Type your final answer here (e.g. x=3 or x=2), then check it:",
+        key=f"attempt_{q_key}",
+    )
 
     col_check, col_solution = st.columns(2)
     with col_check:
@@ -703,10 +706,20 @@ if mode=="📝 Practice Questions":
             if verdict is True:
                 st.success("Correct! 🎉")
                 st.balloons()
+                learner = st.session_state.learner
+                if q_key not in learner["solved_set"]:
+                    learner["solved_set"].add(q_key)
+                    learner["solved"] += 1
+                    learner["Marks"] += q_data["Marks"]
+                    learner["topic_counts"][topic] = learner["topic_counts"].get(topic, 0) + 1
+                    record_solved_question(
+                        auth_user["id"], "practice",
+                        paper=paper, topic=topic, question=q_data["question"],
+                    )
             elif verdict is False:
                 st.error("Not quite — try again, or reveal the solution below.")
             else:
-                st.info("Enter your answer above, then reveal the solution below to check your work.")
+                st.info("Type your final answer above (e.g. x=3 or x=2), then check it.")
 
     with col_solution:
         show_solution = st.button("📖 Show Solution", key=f"solution_{q_key}")
@@ -719,17 +732,10 @@ if mode=="📝 Practice Questions":
         st.success("Final Answer")
         st.latex(q_data["final_answer"])
         st.info(f"Total Marks: {q_data['Marks']}")
-
-        learner = st.session_state.learner
-        if q_key not in learner["solved_set"]:
-            learner["solved_set"].add(q_key)
-            learner["solved"] += 1
-            learner["Marks"] += q_data["Marks"]
-            learner["topic_counts"][topic] = learner["topic_counts"].get(topic, 0) + 1
-            record_solved_question(
-                auth_user["id"], "practice",
-                paper=paper, topic=topic, question=q_data["question"],
-            )
+        st.caption(
+            "Marks are only added to your Learner Profile when you type the final answer above and "
+            "check it correctly — viewing this solution is just for reference."
+        )
 
 # =====================================================
 # AI SOLVER (FULL PAPER 1 & PAPER 2 LOGIC)
@@ -979,19 +985,51 @@ elif mode=="📷 OCR Question":
 # PDF
 # =====================================================
 
-elif mode=="📚 Past Papers (PDF)":
-    st.title("📚 PDF Extractor")
+elif mode=="📄 Upload PDF Document":
+    st.title("📄 Upload PDF Document")
+    st.caption(
+        "Upload any PDF containing maths questions — a past paper, a worksheet, homework, "
+        "anything with problems on it — not just official exam papers."
+    )
     if not can_use_pdf(effective_tier):
-        st.warning("📚 Past paper PDF extraction is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
+        st.warning("📄 PDF upload is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
     else:
         pdf = st.file_uploader("Upload PDF", type=["pdf"])
         if pdf:
-            text = extract_pdf_text(pdf.read())
+            pdf_bytes = pdf.read()
+            text = extract_pdf_text(pdf_bytes)
             edited = st.text_area("Extracted Text", text, height=300)
             if st.button("Transfer to Solver"):
                 st.session_state.copied_text = edited
                 st.session_state["pending_nav"] = "🧮 AI Tutor"
                 st.rerun()
+
+            if can_use_llm_fallback(effective_tier):
+                solve_key = f"solved_pdf_{pdf.file_id}"
+                if not st.session_state.get(solve_key):
+                    if st.button("🧠 Solve all questions with AI"):
+                        with st.spinner(
+                            "Reading the document and solving every question with AI — "
+                            "this can take a minute for a full document…"
+                        ):
+                            solved = solve_full_paper(text, paper_title=pdf.name)
+                        if not solved:
+                            st.warning("Couldn't detect individual questions in this document.")
+                        else:
+                            st.session_state[solve_key] = solved
+                            st.rerun()
+                else:
+                    if st.button("🔄 Re-solve with AI"):
+                        del st.session_state[solve_key]
+                        st.rerun()
+
+                if st.session_state.get(solve_key):
+                    st.markdown("###### 🧠 AI-Solved Questions")
+                    for q in st.session_state[solve_key]:
+                        with st.expander(f"Question {q['number']}"):
+                            st.caption("Original question (as extracted from the PDF):")
+                            st.code(q["text"], language=None)
+                            render_steps(q["steps"])
 
 # =====================================================
 # PAST PAPERS LIBRARY
@@ -1069,46 +1107,20 @@ elif mode == "🗄️ Past Papers Library":
                         st.rerun()
 
                 if st.session_state.get(view_key):
-                    _, view_data = get_past_paper_file(p["id"])
-                    b64_pdf = base64.b64encode(view_data).decode("utf-8")
+                    # A base64 data: URI iframe only reliably shows page 1 of
+                    # a multi-page PDF (the browser's embedded viewer doesn't
+                    # scroll/paginate past it reliably at that size) - pointing
+                    # the iframe at a real URL (the same download endpoint the
+                    # mobile app already uses) instead lets the browser fetch
+                    # and render it the normal way, with full scrolling.
+                    if "view_api_token" not in st.session_state:
+                        st.session_state["view_api_token"] = create_api_token(auth_user["id"])
+                    pdf_url = f"{API_BASE_URL}/past-papers/{p['id']}/download?token={st.session_state['view_api_token']}"
                     st.markdown(
-                        f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
-                        f'width="100%" height="600" style="border:1px solid #e1e0d9;border-radius:8px;">'
-                        f'</iframe>',
+                        f'<iframe src="{pdf_url}" width="100%" height="800" '
+                        f'style="border:1px solid #e1e0d9;border-radius:8px;"></iframe>',
                         unsafe_allow_html=True,
                     )
-
-                # AI batch-solve - Question Papers only (a Memo already
-                # contains the answers), Premium-gated same as the LLM
-                # fallback everywhere else.
-                solve_key = f"solved_paper_{p['id']}"
-                if p["document_type"] == "Question Paper" and can_use_llm_fallback(effective_tier):
-                    if not st.session_state.get(solve_key):
-                        if st.button("🧠 Solve all questions with AI", key=f"solve_btn_{p['id']}"):
-                            with st.spinner(
-                                "Reading the paper and solving every question with AI — "
-                                "this can take a minute for a full paper…"
-                            ):
-                                _, paper_bytes = get_past_paper_file(p["id"])
-                                paper_text = extract_pdf_text(paper_bytes)
-                                solved = solve_full_paper(paper_text, paper_title=p["title"])
-                            if not solved:
-                                st.warning("Couldn't detect individual questions in this document.")
-                            else:
-                                st.session_state[solve_key] = solved
-                                st.rerun()
-                    else:
-                        if st.button("🔄 Re-solve with AI", key=f"resolve_btn_{p['id']}"):
-                            del st.session_state[solve_key]
-                            st.rerun()
-
-                if st.session_state.get(solve_key):
-                    st.markdown("###### 🧠 AI-Solved Questions")
-                    for q in st.session_state[solve_key]:
-                        with st.expander(f"Question {q['number']}"):
-                            st.caption("Original question (as extracted from the PDF):")
-                            st.code(q["text"], language=None)
-                            render_steps(q["steps"])
 
             years = sorted({p["year"] for p in papers}, reverse=True)
             for i, year in enumerate(years):
@@ -1174,15 +1186,68 @@ elif mode=="🎯 Learner Profile":
         st.info("Solve some practice questions to see your progress here!")
 
     st.markdown("#### 🕒 Recent Activity")
-    recent = get_recent_solved(auth_user["id"])
+    recent = get_recent_solved(auth_user["id"], limit=100)
     if recent:
+        # Practice-source questions are already proper LaTeX (backslash
+        # commands like \text{}); AI Tutor questions are whatever the
+        # learner typed, which ranges from a clean expression to a full
+        # English word problem - blindly running everything through
+        # st.latex() mangles a word problem (math mode ignores spaces and
+        # italicises every letter), so only genuine LaTeX or a short,
+        # word-free expression gets typeset; anything else stays plain text.
+        _CLEAN_EXPR_RE = re.compile(r"[0-9a-zA-Z\s\^\+\-\*/=<>().,;:]+")
+        _LONG_WORD_RE = re.compile(r"[a-zA-Z]{4,}")
+
+        def _render_activity_question(text):
+            if not text:
+                return
+            if "\\" in text or (_CLEAN_EXPR_RE.fullmatch(text) and not _LONG_WORD_RE.search(text)):
+                st.latex(text)
+            else:
+                st.markdown(text)
+
+        def _count_activities(node):
+            if isinstance(node, list):
+                return len(node)
+            return sum(_count_activities(v) for v in node.values())
+
+        def _plural(n):
+            return "activity" if n == 1 else "activities"
+
+        # Type -> Date -> Paper -> Topic -> activities (newest first at
+        # every level, since get_recent_solved() already returns newest
+        # first and dict insertion order preserves that as we group).
+        grouped: dict = {}
         for r in recent:
-            source_label = "AI Tutor" if r["source"] == "ai_tutor" else "Practice"
-            when = r["solved_at"].strftime("%d %b %Y, %H:%M") if r["solved_at"] else ""
-            paper_topic = " · ".join(p for p in (r["paper"], r["topic"]) if p)
-            st.caption(f"**{source_label}** — {paper_topic} — {when}")
-            if r["question"]:
-                st.code(r["question"], language=None)
+            type_label = "AI Tutor" if r["source"] == "ai_tutor" else "Practice Question"
+            date_label = r["solved_at"].strftime("%d %b %Y") if r["solved_at"] else "Unknown date"
+            paper_label = r["paper"] or "No paper specified"
+            topic_label = r["topic"] or "No topic specified"
+            (grouped.setdefault(type_label, {})
+                    .setdefault(date_label, {})
+                    .setdefault(paper_label, {})
+                    .setdefault(topic_label, [])
+                    .append(r))
+
+        for ti, (type_label, by_date) in enumerate(grouped.items()):
+            type_count = _count_activities(by_date)
+            with st.expander(f"🗂️ {type_label} — {type_count} {_plural(type_count)}", expanded=(ti == 0)):
+                for di, (date_label, by_paper) in enumerate(by_date.items()):
+                    date_count = _count_activities(by_paper)
+                    with st.expander(f"📅 {date_label} — {date_count} {_plural(date_count)}", expanded=(ti == 0 and di == 0)):
+                        for pi, (paper_label, by_topic) in enumerate(by_paper.items()):
+                            paper_count = _count_activities(by_topic)
+                            with st.expander(f"📄 {paper_label} — {paper_count} {_plural(paper_count)}", expanded=(ti == 0 and di == 0 and pi == 0)):
+                                for toi, (topic_label, activities) in enumerate(by_topic.items()):
+                                    with st.expander(
+                                        f"{topic_label} — {len(activities)} {_plural(len(activities))}",
+                                        expanded=(ti == 0 and di == 0 and pi == 0 and toi == 0),
+                                    ):
+                                        for r in activities:
+                                            when = r["solved_at"].strftime("%H:%M") if r["solved_at"] else ""
+                                            st.caption(when)
+                                            _render_activity_question(r["question"])
+                                            st.divider()
     else:
         st.info("No solved-question history yet — this fills in as you use the AI Tutor or Practice Questions.")
 
@@ -1290,8 +1355,8 @@ else:
         {"mode": "📷 OCR Question", "icon": "📷", "title": "OCR Question",
          "desc": "Snap a photo of a question and let us read it for you.",
          "css_class": "tile-c3", "illustration": _SVG_CAMERA},
-        {"mode": "📚 Past Papers (PDF)", "icon": "📚", "title": "Past Papers",
-         "desc": "Upload a past paper PDF and pull questions straight from it.",
+        {"mode": "📄 Upload PDF Document", "icon": "📄", "title": "Upload PDF Document",
+         "desc": "Upload any PDF with maths questions and get them solved with AI.",
          "css_class": "tile-c4", "illustration": _SVG_BOOKS},
         {"mode": "🗄️ Past Papers Library", "icon": "🗄️", "title": "Past Papers Library",
          "desc": "Browse and download real NSC past exam papers.",

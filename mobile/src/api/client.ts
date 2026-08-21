@@ -257,11 +257,15 @@ export function pastPaperDownloadUrl(token: string, paperId: number) {
   return `${API_BASE_URL}/past-papers/${paperId}/download?token=${encodeURIComponent(token)}`;
 }
 
-export type SolvedPaperQuestion = { number: string; text: string; steps: SolveStep[] };
+export type SolvedPdfQuestion = { number: string; text: string; steps: SolveStep[] };
 
-export function solvePastPaper(token: string, paperId: number) {
-  return request<{ questions: SolvedPaperQuestion[] }>(`/past-papers/${paperId}/solve-all`, {
+// Solves every question in a learner-uploaded PDF's already-extracted text
+// (from pdfExtract() below) - not offered on the curated Past Papers
+// Library, which also holds memos that don't make sense to "solve".
+export function solvePdfText(token: string, text: string, title: string = "") {
+  return request<{ questions: SolvedPdfQuestion[] }>("/pdf-extract/solve-all", {
     method: "POST",
+    body: { text, title },
     token,
   });
 }

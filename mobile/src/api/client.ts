@@ -76,6 +76,7 @@ export type RegisterParams = {
   password: string;
   province: string;
   city_town: string;
+  id_number: string;
   school?: string;
 };
 
@@ -98,9 +99,16 @@ export function logout(token: string) {
 }
 
 export function forgotPassword(email: string) {
-  return request<{ message: string }>("/auth/forgot-password", {
+  return request<{ message: string; reset_token: string | null }>("/auth/forgot-password", {
     method: "POST",
     body: { email },
+  });
+}
+
+export function resetPassword(token: string, newPassword: string) {
+  return request<{ ok: boolean }>("/auth/reset-password", {
+    method: "POST",
+    body: { token, new_password: newPassword },
   });
 }
 
@@ -247,4 +255,13 @@ export function fetchPastPapers(token: string) {
 
 export function pastPaperDownloadUrl(token: string, paperId: number) {
   return `${API_BASE_URL}/past-papers/${paperId}/download?token=${encodeURIComponent(token)}`;
+}
+
+export type SolvedPaperQuestion = { number: string; text: string; steps: SolveStep[] };
+
+export function solvePastPaper(token: string, paperId: number) {
+  return request<{ questions: SolvedPaperQuestion[] }>(`/past-papers/${paperId}/solve-all`, {
+    method: "POST",
+    token,
+  });
 }

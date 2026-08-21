@@ -94,18 +94,47 @@ export default function PastPapersScreen({ navigation }: any) {
                         .filter((p) => p.exam_series === series)
                         .map((p) => (
                           <View key={p.id} style={styles.paperCard}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.paperTitle}>
-                                {p.subject} Paper {p.paper_number} · {p.document_type} · {p.variant}
-                              </Text>
-                              <Text style={styles.paperMeta}>{Math.round(p.file_size / 1024)} KB</Text>
+                            <View style={styles.paperCardTopRow}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.paperTitle}>
+                                  {p.subject} Paper {p.paper_number} · {p.document_type} · {p.variant}
+                                </Text>
+                                <Text style={styles.paperMeta}>{Math.round(p.file_size / 1024)} KB</Text>
+                              </View>
+                              <View style={styles.actionRow}>
+                                <Pressable
+                                  style={styles.viewButton}
+                                  onPress={() =>
+                                    token &&
+                                    navigation.navigate("PastPaperViewer", {
+                                      url: pastPaperDownloadUrl(token, p.id),
+                                      title: `${p.subject} Paper ${p.paper_number} · ${p.document_type}`,
+                                    })
+                                  }
+                                >
+                                  <Text style={styles.viewButtonText}>👁️ View</Text>
+                                </Pressable>
+                                <Pressable
+                                  style={styles.downloadButton}
+                                  onPress={() => token && Linking.openURL(pastPaperDownloadUrl(token, p.id))}
+                                >
+                                  <Text style={styles.downloadButtonText}>⬇️</Text>
+                                </Pressable>
+                              </View>
                             </View>
-                            <Pressable
-                              style={styles.downloadButton}
-                              onPress={() => token && Linking.openURL(pastPaperDownloadUrl(token, p.id))}
-                            >
-                              <Text style={styles.downloadButtonText}>⬇️ Open</Text>
-                            </Pressable>
+                            {p.document_type === "Question Paper" && (
+                              <Pressable
+                                style={styles.solveButton}
+                                onPress={() =>
+                                  navigation.navigate("SolvedPaper", {
+                                    paperId: p.id,
+                                    title: `${p.subject} Paper ${p.paper_number} (${p.exam_series} ${p.year})`,
+                                  })
+                                }
+                              >
+                                <Text style={styles.solveButtonText}>🧠 Solve all questions with AI</Text>
+                              </Pressable>
+                            )}
                           </View>
                         ))}
                     </View>
@@ -175,20 +204,42 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14,
     marginTop: 10,
+  },
+  paperCardTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
+  solveButton: {
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 12,
+  },
+  solveButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
   paperTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   paperMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
-  downloadButton: {
+  actionRow: { flexDirection: "row", alignItems: "center", marginLeft: 10 },
+  viewButton: {
     backgroundColor: colors.primary,
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    marginLeft: 10,
   },
-  downloadButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  viewButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  downloadButton: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginLeft: 8,
+  },
+  downloadButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
   emptyState: {
     backgroundColor: colors.surface,
     borderRadius: 16,

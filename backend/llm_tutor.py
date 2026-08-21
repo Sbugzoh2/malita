@@ -16,10 +16,19 @@ current Claude model (see the cost estimate delivered separately).
 Requires ANTHROPIC_API_KEY to be set in the environment.
 """
 
+import base64
+import io
 import json
 import re
 
+import matplotlib
+matplotlib.use("Agg")  # headless - this module never runs inside a GUI
+import matplotlib.pyplot as plt
+import numpy as np
+import sympy as sp
+
 from .llm_client import get_client
+from .math_utils import safe_parse
 
 LLM_MODEL = "claude-haiku-4-5"
 MAX_OUTPUT_TOKENS = 1024
@@ -27,8 +36,11 @@ MAX_OUTPUT_TOKENS = 1024
 # app.py's render_steps() does a direct dict lookup with no fallback for
 # an unrecognised "type" - a step type outside this set would crash the
 # page rather than just render oddly, so any type the model invents gets
-# coerced to "markdown" below instead of trusted as-is.
-VALID_STEP_TYPES = {"markdown", "latex", "write", "info", "warning", "error", "success", "caption"}
+# coerced to "markdown" below instead of trusted as-is. "plot" is an
+# internal-only pseudo-type: the model is allowed to emit it, but it never
+# reaches a caller as-is - solve_with_llm renders it into a real "image"
+# step (see _render_plot_step) before returning.
+VALID_STEP_TYPES = {"markdown", "latex", "write", "info", "warning", "error", "success", "caption", "plot"}
 
 
 # Deliberately short - see the module docstring on prompt caching (it's
@@ -46,8 +58,13 @@ Each element is a step object shaped exactly like: {"type": "markdown", "content
 Use "type": "success" for exactly one final step stating the final answer clearly.
 Keep it concise: 3-6 steps is typical.
 
+If, and only if, the question explicitly asks you to sketch, draw, or plot a graph/function, include ONE extra step shaped like {"type": "plot", "content": "x**2 - 4"} at the point where the sketch belongs. "content" must be ONLY a plottable expression in terms of x, using Python/SymPy syntax (** for powers, sin/cos/tan/exp/log/sqrt/pi as needed) - Malita renders the actual image itself from this expression, so never describe the graph in words instead of (or in addition to) giving this step; never use "type": "plot" for anything that isn't a real function to graph.
+
 Example of a complete, correct response:
-[{"type": "markdown", "content": "Let $x$ be the number of years."}, {"type": "success", "content": "$x = 5$"}]"""
+[{"type": "markdown", "content": "Let $x$ be the number of years."}, {"type": "success", "content": "$x = 5$"}]
+
+Example including a sketch:
+[{"type": "markdown", "content": "This is a downward parabola with turning point at $(0, 4)$."}, {"type": "plot", "content": "4 - x**2"}, {"type": "success", "content": "x-intercepts: $x = -2$ and $x = 2$"}]"""
 
 
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
@@ -63,17 +80,77 @@ def _strip_json_fence(text: str) -> str:
     return match.group(1).strip() if match else text
 
 
-def solve_with_llm(question: str, topic: str = "", paper: str = ""):
+def _render_plot_step(expr_str: str) -> dict:
+    """Actually sketches a single-variable expression via SymPy + matplotlib
+    and returns it as the same base64 PNG data-URI "image" step shape
+    backend/solver.py's StepRecorder.pyplot() produces. The LLM can only
+    describe what to plot, never generate real image bytes itself - this is
+    what lets the AI fallback genuinely draw the graph a question asks for,
+    instead of only explaining what the learner would need to sketch by
+    hand. Never eval()s the model's text: parsing goes through the same
+    sandboxed safe_parse() every user-typed expression in this app uses."""
+    cleaned = expr_str.strip().replace("^", "**")
+    cleaned = re.sub(r"^[yf]\s*(\(\s*x\s*\))?\s*=\s*", "", cleaned, flags=re.IGNORECASE)
+
+    x = sp.symbols("x")
+    expr = safe_parse(cleaned, {"x": x})
+    is_trig = any(f in cleaned.lower() for f in ("sin", "cos", "tan", "sec", "csc"))
+    x_min, x_max = (-2 * np.pi, 2 * np.pi) if is_trig else (-10, 10)
+
+    f = sp.lambdify(x, expr, "numpy")
+    xs = np.linspace(x_min, x_max, 1000)
+    with np.errstate(all="ignore"):
+        ys = np.asarray(f(xs), dtype=float)
+    ys = np.where(np.isfinite(ys) & (np.abs(ys) < 1e4), ys, np.nan)
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(xs, ys, linewidth=2, color="#2563eb")
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.axvline(0, color="black", linewidth=0.8)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title(f"y = {cleaned}")
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)
+    plt.close(fig)
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return {"type": "image", "content": f"data:image/png;base64,{encoded}"}
+
+
+def _resolve_plot_steps(steps: list) -> list:
+    """Replaces every {"type": "plot", ...} step the model emitted with a
+    real rendered image - or, if that expression can't be parsed/plotted,
+    a markdown note saying so, rather than silently dropping the sketch or
+    crashing the whole solve over one bad expression."""
+    resolved = []
+    for s in steps:
+        if s["type"] != "plot":
+            resolved.append(s)
+            continue
+        try:
+            resolved.append(_render_plot_step(s["content"]))
+        except Exception:
+            resolved.append({
+                "type": "warning",
+                "content": f"Couldn't render a sketch for \"{s['content']}\" automatically - work through it on paper using the steps above.",
+            })
+    return resolved
+
+
+def solve_with_llm(question: str, topic: str = "", paper: str = "", max_tokens: int = MAX_OUTPUT_TOKENS):
     """Returns a list of step dicts in the same {"type", "content"} shape
     backend/solver.py's StepRecorder produces, so callers can render the
     result exactly like a normal SymPy solve. Raises on any API failure -
     callers should catch that and fall back to their normal error
     message, the same as an unparseable SymPy input would."""
     client = get_client()
-    context = f"Paper: {paper}. Topic: {topic}.\n" if topic else ""
+    context_bits = [b for b in (f"Paper: {paper}." if paper else "", f"Topic: {topic}." if topic else "") if b]
+    context = (" ".join(context_bits) + "\n") if context_bits else ""
     response = client.messages.create(
         model=LLM_MODEL,
-        max_tokens=MAX_OUTPUT_TOKENS,
+        max_tokens=max_tokens,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": f"{context}Question: {question}"}],
     )
@@ -82,14 +159,39 @@ def solve_with_llm(question: str, topic: str = "", paper: str = ""):
         steps = json.loads(_strip_json_fence(raw))
         if not isinstance(steps, list) or not steps:
             raise ValueError("empty or non-list response")
-        return [
+        steps = [
             {
                 "type": s.get("type") if s.get("type") in VALID_STEP_TYPES else "markdown",
                 "content": str(s.get("content", "")),
             }
             for s in steps
         ]
+        return _resolve_plot_steps(steps)
     except (json.JSONDecodeError, ValueError, AttributeError):
         # The model didn't return clean JSON this time - show the raw
         # text as a single step rather than losing the explanation.
         return [{"type": "markdown", "content": raw}]
+
+
+def solve_full_paper(paper_text: str, paper_title: str = ""):
+    """Runs every question detected in a past exam paper's extracted text
+    through the LLM fallback, one at a time - powers the Past Papers
+    Library's "Solve with AI" action. A single question failing doesn't
+    take down the rest of the batch; it's recorded as an error step instead
+    of propagating, the same way solve_with_llm's own JSON-parse fallback
+    degrades gracefully rather than raising."""
+    from .pdf_extract import split_into_questions
+
+    questions = split_into_questions(paper_text)
+    results = []
+    for q in questions:
+        prompt_text = (
+            f"{q['text']}\n\n(This question may have multiple sub-parts, e.g. "
+            f"{q['number']}.1, {q['number']}.2 - work through each sub-part in turn.)"
+        )
+        try:
+            steps = solve_with_llm(prompt_text, paper=paper_title, max_tokens=2048)
+        except Exception as e:
+            steps = [{"type": "error", "content": f"Couldn't solve this question: {e}"}]
+        results.append({"number": q["number"], "text": q["text"], "steps": steps})
+    return results

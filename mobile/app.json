@@ -1,23 +1,19 @@
 {
   "expo": {
     "name": "Malita",
-    "slug": "mobileapp",
-    "owner": "malita-app",
+    "slug": "malita",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-  "extra": {
-    "apiBaseUrl": "https://malita-api.onrender.com",
-    "eas": {
-     "projectId": "dea19c46-b69f-485e-95d3-0694e5ab06f2"
-         }
-       },
-  "ios": {
+    "extra": {
+      "apiBaseUrl": "https://malita-api.onrender.com"
+    },
+    "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.malita.mathstutor"
-          },
-  "android": {
+    },
+    "android": {
       "package": "com.malita.mathstutor",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

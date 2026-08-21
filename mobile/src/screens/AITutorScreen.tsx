@@ -181,7 +181,7 @@ export default function AITutorScreen({ route }: any) {
   );
 }
 
-function StepView({ step }: { step: SolveStep }) {
+export function StepView({ step }: { step: SolveStep }) {
   if (step.type === "latex") {
     return (
       <View style={styles.latexBox}>

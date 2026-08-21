@@ -34,7 +34,7 @@ from backend.auth import (
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, daily_limit
 from backend.usage import can_solve, record_solve, get_today_count, reset_today_usage
-from backend.records import record_solved_question, get_recent_solved
+from backend.records import record_solved_question, get_recent_solved, get_learner_stats
 from backend.payfast import build_checkout_payload, build_checkout_redirect_snippet
 from backend.math_utils import safe_parse, detect_variables, _fmt_num
 from backend.solver import (
@@ -47,7 +47,7 @@ from backend.ocr import preprocess_image, ocr_with_exponents, clean_for_sympy
 from backend.pdf_extract import extract_pdf_text
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
-from backend.llm_tutor import solve_with_llm
+from backend.llm_tutor import solve_with_llm, solve_full_paper
 from backend.llm_ocr import read_math_photo
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -198,7 +198,7 @@ if st.session_state.auth_user is None:
             submitted = st.form_submit_button("Log In")
             if submitted:
                 try:
-                    user = login_user(login_email, login_password)
+                    user = login_user(login_email, login_password, source="web")
                     st.session_state.auth_user = user
                     st.rerun()
                 except AuthError as e:
@@ -235,6 +235,8 @@ if st.session_state.auth_user is None:
             reg_school = st.text_input("School (optional)")
             reg_province = st.selectbox("Province", SA_PROVINCES)
             reg_city = st.text_input("City / Town")
+            reg_id_number = st.text_input("ID number", key="reg_id_number", max_chars=13)
+            st.caption("We use this to work out your date of birth automatically - no need to type it separately.")
             reg_password = st.text_input("Password", type="password", key="reg_pw")
             reg_password_confirm = st.text_input("Confirm password", type="password")
             st.caption(
@@ -249,7 +251,7 @@ if st.session_state.auth_user is None:
                     try:
                         user = register_user(
                             reg_name, reg_email, reg_password, reg_school,
-                            province=reg_province, city_town=reg_city,
+                            province=reg_province, city_town=reg_city, id_number=reg_id_number,
                         )
                         st.success("Account created! Please log in on the 'Log In' tab.")
                     except AuthError as e:
@@ -970,6 +972,8 @@ elif mode=="📷 OCR Question":
 
             if st.button("Transfer to Solver"):
                 st.session_state.copied_text = cleaned
+                st.session_state["pending_nav"] = "🧮 AI Tutor"
+                st.rerun()
 
 # =====================================================
 # PDF
@@ -986,6 +990,8 @@ elif mode=="📚 Past Papers (PDF)":
             edited = st.text_area("Extracted Text", text, height=300)
             if st.button("Transfer to Solver"):
                 st.session_state.copied_text = edited
+                st.session_state["pending_nav"] = "🧮 AI Tutor"
+                st.rerun()
 
 # =====================================================
 # PAST PAPERS LIBRARY
@@ -1041,13 +1047,17 @@ elif mode == "🗄️ Past Papers Library":
             st.info("No papers uploaded yet — check back soon.")
         else:
             def _render_paper_row(p):
-                pc1, pc2 = st.columns([3, 1])
+                pc1, pc2, pc3 = st.columns([3, 1, 1])
                 with pc1:
                     st.markdown(
                         f"{p['subject']} Paper {p['paper_number']} · {p['document_type']} · {p['variant']}"
                     )
                     st.caption(f"{p['file_size'] // 1024} KB")
+                view_key = f"view_paper_{p['id']}"
                 with pc2:
+                    if st.button("👁️ View", key=f"view_btn_{p['id']}"):
+                        st.session_state[view_key] = not st.session_state.get(view_key, False)
+                with pc3:
                     fname, fdata = get_past_paper_file(p["id"])
                     st.download_button(
                         "⬇️ Download", data=fdata, file_name=fname,
@@ -1057,6 +1067,48 @@ elif mode == "🗄️ Past Papers Library":
                     if st.button("🗑️ Delete", key=f"del_{p['id']}"):
                         delete_past_paper(p["id"])
                         st.rerun()
+
+                if st.session_state.get(view_key):
+                    _, view_data = get_past_paper_file(p["id"])
+                    b64_pdf = base64.b64encode(view_data).decode("utf-8")
+                    st.markdown(
+                        f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
+                        f'width="100%" height="600" style="border:1px solid #e1e0d9;border-radius:8px;">'
+                        f'</iframe>',
+                        unsafe_allow_html=True,
+                    )
+
+                # AI batch-solve - Question Papers only (a Memo already
+                # contains the answers), Premium-gated same as the LLM
+                # fallback everywhere else.
+                solve_key = f"solved_paper_{p['id']}"
+                if p["document_type"] == "Question Paper" and can_use_llm_fallback(effective_tier):
+                    if not st.session_state.get(solve_key):
+                        if st.button("🧠 Solve all questions with AI", key=f"solve_btn_{p['id']}"):
+                            with st.spinner(
+                                "Reading the paper and solving every question with AI — "
+                                "this can take a minute for a full paper…"
+                            ):
+                                _, paper_bytes = get_past_paper_file(p["id"])
+                                paper_text = extract_pdf_text(paper_bytes)
+                                solved = solve_full_paper(paper_text, paper_title=p["title"])
+                            if not solved:
+                                st.warning("Couldn't detect individual questions in this document.")
+                            else:
+                                st.session_state[solve_key] = solved
+                                st.rerun()
+                    else:
+                        if st.button("🔄 Re-solve with AI", key=f"resolve_btn_{p['id']}"):
+                            del st.session_state[solve_key]
+                            st.rerun()
+
+                if st.session_state.get(solve_key):
+                    st.markdown("###### 🧠 AI-Solved Questions")
+                    for q in st.session_state[solve_key]:
+                        with st.expander(f"Question {q['number']}"):
+                            st.caption("Original question (as extracted from the PDF):")
+                            st.code(q["text"], language=None)
+                            render_steps(q["steps"])
 
             years = sorted({p["year"] for p in papers}, reverse=True)
             for i, year in enumerate(years):
@@ -1085,7 +1137,9 @@ elif mode == "🗄️ Past Papers Library":
 # =====================================================
 elif mode=="🎯 Learner Profile":
     st.title("🎯 Learner Profile")
-    learner = st.session_state.learner
+    # Built from the solved_questions table, not st.session_state, so
+    # progress survives logging out/in or switching devices.
+    learner = get_learner_stats(auth_user["id"])
 
     col1, col2 = st.columns(2)
     col1.metric("Questions Solved", learner["solved"])

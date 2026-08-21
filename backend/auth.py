@@ -12,7 +12,7 @@ import secrets
 import datetime as dt
 import bcrypt
 
-from .db import get_session, User, Subscription, PasswordReset, ApiToken
+from .db import get_session, User, Subscription, PasswordReset, ApiToken, LoginEvent
 from .payfast import cancel_payfast_subscription
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -35,12 +35,47 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+def parse_sa_id_number(id_number: str) -> dt.date:
+    """Validate a 13-digit South African ID number (date-of-birth prefix +
+    Luhn checksum digit) and return the date of birth encoded in its first
+    6 digits (YYMMDD) - so a learner only has to type the ID number once
+    instead of typing their birth date separately too.
+
+    Century disambiguation: YY alone is ambiguous between 19XX and 20XX.
+    The standard heuristic is used - a YY greater than the current two-digit
+    year is assumed 19XX (a future birth year is never valid), otherwise 20XX."""
+    id_number = (id_number or "").strip()
+    if not re.fullmatch(r"\d{13}", id_number):
+        raise AuthError("ID number must be exactly 13 digits.")
+
+    digits = [int(c) for c in id_number]
+    total = 0
+    for i, d in enumerate(digits[:-1]):
+        if i % 2 == 0:
+            total += d
+        else:
+            doubled = d * 2
+            total += doubled - 9 if doubled > 9 else doubled
+    check_digit = (10 - total % 10) % 10
+    if check_digit != digits[-1]:
+        raise AuthError("That doesn't look like a valid ID number - please check the digits.")
+
+    yy, mm, dd = int(id_number[0:2]), int(id_number[2:4]), int(id_number[4:6])
+    current_yy = dt.date.today().year % 100
+    century = 1900 if yy > current_yy else 2000
+    try:
+        return dt.date(century + yy, mm, dd)
+    except ValueError:
+        raise AuthError("ID number contains an invalid birth date.")
+
+
 def register_user(name: str, email: str, password: str, school: str = "",
-                   province: str = "", city_town: str = "") -> dict:
+                   province: str = "", city_town: str = "", id_number: str = "") -> dict:
     name = (name or "").strip()
     email = (email or "").strip().lower()
     province = (province or "").strip()
     city_town = (city_town or "").strip()
+    id_number = (id_number or "").strip()
 
     if not name:
         raise AuthError("Please enter your name.")
@@ -52,11 +87,17 @@ def register_user(name: str, email: str, password: str, school: str = "",
         raise AuthError("Please select your province.")
     if not city_town:
         raise AuthError("Please enter your city or town.")
+    if not id_number:
+        raise AuthError("Please enter your ID number.")
+    date_of_birth = parse_sa_id_number(id_number)
 
     with get_session() as db:
         existing = db.query(User).filter(User.email == email).first()
         if existing:
             raise AuthError("An account with this email already exists. Try logging in instead.")
+        existing_id = db.query(User).filter(User.id_number == id_number).first()
+        if existing_id:
+            raise AuthError("An account with this ID number already exists. Try logging in instead.")
 
         user = User(
             name=name,
@@ -65,6 +106,8 @@ def register_user(name: str, email: str, password: str, school: str = "",
             school=school.strip() if school else None,
             province=province,
             city_town=city_town,
+            id_number=id_number,
+            date_of_birth=date_of_birth,
         )
         db.add(user)
         db.flush()  # get user.id before commit
@@ -77,13 +120,15 @@ def register_user(name: str, email: str, password: str, school: str = "",
         return {"id": user.id, "name": user.name, "email": user.email}
 
 
-def login_user(email: str, password: str) -> dict:
+def login_user(email: str, password: str, source: str = None) -> dict:
     email = (email or "").strip().lower()
 
     with get_session() as db:
         user = db.query(User).filter(User.email == email).first()
         if not user or not _verify_password(password, user.password_hash):
             raise AuthError("Incorrect email or password.")
+
+        db.add(LoginEvent(user_id=user.id, source=source))
 
         tier = user.subscription.tier if user.subscription else "free"
         status = user.subscription.status if user.subscription else "active"

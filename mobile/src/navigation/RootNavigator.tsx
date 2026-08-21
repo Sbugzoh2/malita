@@ -13,6 +13,8 @@ import PDFScreen from "../screens/PDFScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
 import PracticeScreen from "../screens/PracticeScreen";
 import PastPapersScreen from "../screens/PastPapersScreen";
+import PastPaperViewerScreen from "../screens/PastPaperViewerScreen";
+import SolvedPaperScreen from "../screens/SolvedPaperScreen";
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
@@ -55,6 +57,8 @@ function AppNavigator() {
       <AppStack.Screen name="Subscription" component={SubscriptionScreen} options={{ title: "Subscription" }} />
       <AppStack.Screen name="PracticeQuestions" component={PracticeScreen} options={{ title: "Practice Questions" }} />
       <AppStack.Screen name="PastPapersLibrary" component={PastPapersScreen} options={{ title: "Past Papers Library" }} />
+      <AppStack.Screen name="PastPaperViewer" component={PastPaperViewerScreen} options={{ title: "View Document" }} />
+      <AppStack.Screen name="SolvedPaper" component={SolvedPaperScreen} options={{ title: "AI-Solved Paper" }} />
     </AppStack.Navigator>
   );
 }

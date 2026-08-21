@@ -42,6 +42,7 @@ from backend.auth import (
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
 )
+from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback
 from backend.usage import can_solve, record_solve, get_today_count
 from backend.records import record_solved_question
@@ -57,7 +58,7 @@ from backend.pdf_extract import extract_pdf_text
 from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file
-from backend.llm_tutor import solve_with_llm
+from backend.llm_tutor import solve_with_llm, solve_full_paper
 from backend.llm_ocr import read_math_photo
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
@@ -105,6 +106,7 @@ class RegisterRequest(BaseModel):
     password: str
     province: str
     city_town: str
+    id_number: str
     school: str = ""
 
 
@@ -169,7 +171,7 @@ def register(body: RegisterRequest):
     try:
         user = register_user(
             body.name, body.email, body.password, body.school,
-            province=body.province, city_town=body.city_town,
+            province=body.province, city_town=body.city_town, id_number=body.id_number,
         )
     except AuthError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -177,13 +179,13 @@ def register(body: RegisterRequest):
     # Auto-login right after registering — a native app shouldn't force a
     # second "now log in" screen right after sign-up.
     token = create_api_token(user["id"])
-    return {"token": token, "user": login_user(body.email, body.password)}
+    return {"token": token, "user": login_user(body.email, body.password, source="api")}
 
 
 @app.post("/auth/login")
 def login(body: LoginRequest):
     try:
-        user = login_user(body.email, body.password)
+        user = login_user(body.email, body.password, source="api")
     except AuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
     token = create_api_token(user["id"])
@@ -199,10 +201,26 @@ def logout(authorization: str = Header(None)):
 
 @app.post("/auth/forgot-password")
 def forgot_password(body: ForgotPasswordRequest):
-    # Deliberately the same response either way — never reveal whether an
-    # email is registered (see create_password_reset's own docstring).
-    create_password_reset(body.email)
-    return {"message": "If an account exists for that email, a reset link has been generated."}
+    token = create_password_reset(body.email)
+    if not token:
+        # Never reveal whether an email is registered - same generic
+        # message as the "sent" case below.
+        return {"message": "If an account exists for that email, a reset link has been generated.", "reset_token": None}
+
+    sent = send_email(
+        body.email,
+        "Reset your Malita password",
+        f"Use this code in the Malita app to set a new password (valid for 1 hour):\n\n{token}",
+    )
+    if sent:
+        return {"message": "Check your email for a password reset code (valid for 1 hour).", "reset_token": None}
+
+    # SMTP isn't configured yet - hand the token straight back so the app
+    # can still complete the reset (same fallback app.py uses on web).
+    return {
+        "message": "Email sending isn't configured yet, so here's your reset code directly (valid for 1 hour):",
+        "reset_token": token,
+    }
 
 
 @app.post("/auth/reset-password")
@@ -498,6 +516,39 @@ def past_papers_download(paper_id: int, authorization: str = Header(None), token
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{file_name}"'},
     )
+
+
+@app.post("/past-papers/{paper_id}/solve-all")
+def past_papers_solve_all(paper_id: int, authorization: str = Header(None)):
+    """Extracts every question from a past paper's PDF and solves each one
+    with the LLM fallback - the API twin of app.py's "Solve all questions
+    with AI" button. Premium-gated same as the rest of the library, plus
+    the LLM-fallback tier gate since this always calls the paid model
+    (there's no free/SymPy path for a whole scanned exam paper)."""
+    user = _auth_user(authorization)
+    is_admin = is_user_admin(user["id"])
+    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    if not can_use_past_papers(effective_tier):
+        raise HTTPException(
+            status_code=403,
+            detail="The Past Papers Library is a Premium feature. Upgrade to unlock it.",
+        )
+    if not can_use_llm_fallback(effective_tier):
+        raise HTTPException(
+            status_code=403,
+            detail="Solving a full paper with AI is a Learner/Premium feature. Upgrade to unlock it.",
+        )
+    papers = {p["id"]: p for p in list_past_papers()}
+    paper = papers.get(paper_id)
+    if paper is None:
+        raise HTTPException(status_code=404, detail="Past paper not found.")
+    if paper["document_type"] != "Question Paper":
+        raise HTTPException(status_code=400, detail="AI solving is only available for question papers, not memos.")
+
+    _, file_data = get_past_paper_file(paper_id)
+    paper_text = extract_pdf_text(file_data)
+    questions = solve_full_paper(paper_text, paper_title=paper["title"])
+    return {"questions": questions}
 
 
 @app.get("/terms", response_class=HTMLResponse)

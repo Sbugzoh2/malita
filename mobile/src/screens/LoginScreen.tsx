@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, forgotPassword } from "../api/client";
+import { ApiError, forgotPassword, resetPassword } from "../api/client";
 
 export default function LoginScreen({ navigation }: any) {
   const { login } = useAuth();
@@ -21,6 +21,13 @@ export default function LoginScreen({ navigation }: any) {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   async function handleLogin() {
     setError(null);
@@ -38,6 +45,7 @@ export default function LoginScreen({ navigation }: any) {
   async function handleForgotPassword() {
     setError(null);
     setInfo(null);
+    setResetDone(false);
     if (!email.trim()) {
       setError("Enter your email above first, then tap 'Forgot password?'");
       return;
@@ -45,8 +53,46 @@ export default function LoginScreen({ navigation }: any) {
     try {
       const res = await forgotPassword(email.trim().toLowerCase());
       setInfo(res.message);
+      // SMTP isn't configured yet in this environment, so the API hands the
+      // reset code straight back - reveal the code + new-password fields
+      // right here instead of leaving the learner stuck with no inbox to check.
+      if (res.reset_token) {
+        setResetToken(res.reset_token);
+        setResetCode(res.reset_token);
+      } else {
+        setResetToken(null);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong.");
+    }
+  }
+
+  async function handleResetPassword() {
+    setError(null);
+    if (!resetCode.trim()) {
+      setError("Enter the reset code first.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters long.");
+      return;
+    }
+    if (newPassword !== newPasswordConfirm) {
+      setError("Passwords don't match.");
+      return;
+    }
+    setResetSubmitting(true);
+    try {
+      await resetPassword(resetCode.trim(), newPassword);
+      setResetDone(true);
+      setResetToken(null);
+      setInfo("Password updated! You can now log in with your new password.");
+      setNewPassword("");
+      setNewPasswordConfirm("");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Something went wrong.");
+    } finally {
+      setResetSubmitting(false);
     }
   }
 
@@ -97,6 +143,49 @@ export default function LoginScreen({ navigation }: any) {
           <Pressable onPress={handleForgotPassword} style={styles.linkButton}>
             <Text style={styles.link}>Forgot your password?</Text>
           </Pressable>
+
+          {resetToken && !resetDone ? (
+            <View style={styles.resetBox}>
+              <Text style={styles.label}>Reset code</Text>
+              <TextInput
+                style={styles.input}
+                value={resetCode}
+                onChangeText={setResetCode}
+                autoCapitalize="none"
+                placeholder="Reset code"
+              />
+
+              <Text style={styles.label}>New password</Text>
+              <TextInput
+                style={styles.input}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry
+                placeholder="••••••••"
+              />
+
+              <Text style={styles.label}>Confirm new password</Text>
+              <TextInput
+                style={styles.input}
+                value={newPasswordConfirm}
+                onChangeText={setNewPasswordConfirm}
+                secureTextEntry
+                placeholder="••••••••"
+              />
+
+              <Pressable
+                style={[styles.button, resetSubmitting && styles.buttonDisabled]}
+                onPress={handleResetPassword}
+                disabled={resetSubmitting}
+              >
+                {resetSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>Update Password</Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         <Pressable onPress={() => navigation.navigate("Register")} style={styles.linkButton}>
@@ -109,6 +198,12 @@ export default function LoginScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
+  resetBox: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
   container: { flexGrow: 1, padding: 24, justifyContent: "center" },
   title: { fontSize: 32, fontWeight: "700", textAlign: "center", color: colors.text },
   subtitle: { fontSize: 16, textAlign: "center", color: colors.textSecondary, marginBottom: 24 },

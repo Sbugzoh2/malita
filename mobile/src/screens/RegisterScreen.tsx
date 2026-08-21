@@ -22,6 +22,7 @@ export default function RegisterScreen({ navigation }: any) {
   const [school, setSchool] = useState("");
   const [province, setProvince] = useState("");
   const [cityTown, setCityTown] = useState("");
+  const [idNumber, setIdNumber] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [provinces, setProvinces] = useState<string[]>([]);
@@ -46,6 +47,10 @@ export default function RegisterScreen({ navigation }: any) {
       setError("Please enter your province.");
       return;
     }
+    if (!/^\d{13}$/.test(idNumber.trim())) {
+      setError("ID number must be exactly 13 digits.");
+      return;
+    }
     setSubmitting(true);
     try {
       await register({
@@ -54,6 +59,7 @@ export default function RegisterScreen({ navigation }: any) {
         password,
         province: province.trim(),
         city_town: cityTown.trim(),
+        id_number: idNumber.trim(),
         school: school.trim(),
       });
     } catch (e) {
@@ -91,6 +97,19 @@ export default function RegisterScreen({ navigation }: any) {
 
           <Text style={styles.label}>City / Town</Text>
           <TextInput style={styles.input} value={cityTown} onChangeText={setCityTown} />
+
+          <Text style={styles.label}>ID number</Text>
+          <TextInput
+            style={styles.input}
+            value={idNumber}
+            onChangeText={setIdNumber}
+            keyboardType="number-pad"
+            maxLength={13}
+            placeholder="13-digit South African ID number"
+          />
+          <Text style={styles.helperText}>
+            We use this to work out your date of birth automatically - no need to type it separately.
+          </Text>
 
           <Text style={styles.label}>Password</Text>
           <TextInput style={styles.input} value={password} onChangeText={setPassword} secureTextEntry />
@@ -153,6 +172,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   label: { fontSize: 13, color: colors.textSecondary, marginBottom: 4, marginTop: 12 },
+  helperText: { fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 16 },
   input: {
     borderWidth: 1,
     borderColor: colors.border,

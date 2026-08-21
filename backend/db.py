@@ -49,6 +49,11 @@ class User(Base):
     school = Column(String(255), nullable=True)
     province = Column(String(50), nullable=True, index=True)
     city_town = Column(String(120), nullable=True, index=True)
+    # Nullable so existing rows (predating ID-number collection) stay valid -
+    # register_user() requires it for every new signup, deriving date_of_birth
+    # from it so learners don't type both.
+    id_number = Column(String(13), nullable=True, unique=True, index=True)
+    date_of_birth = Column(Date, nullable=True)
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
@@ -67,6 +72,9 @@ class User(Base):
     )
     api_tokens = relationship(
         "ApiToken", back_populates="user", cascade="all, delete-orphan"
+    )
+    login_events = relationship(
+        "LoginEvent", back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -114,6 +122,21 @@ class SolvedQuestion(Base):
     solved_at = Column(DateTime, default=dt.datetime.utcnow)
 
     user = relationship("User", back_populates="solved_questions")
+
+
+class LoginEvent(Base):
+    """One row per successful login, for auditing/analytics (e.g. active-user
+    counts, detecting unusual login patterns) — logged_at carries both the
+    date and time; source distinguishes the Streamlit web app from the
+    native mobile app, since both funnel through the same login_user()."""
+    __tablename__ = "login_events"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    logged_in_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    source = Column(String(20), nullable=True)  # "web" | "api"
+
+    user = relationship("User", back_populates="login_events")
 
 
 class PasswordReset(Base):

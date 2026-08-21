@@ -1,6 +1,41 @@
 from .db import get_session, SolvedQuestion
 
 
+def get_learner_stats(user_id: int):
+    """Aggregate Learner Profile stats straight from the solved_questions
+    table, so progress persists across logins/devices instead of resetting
+    every time the Streamlit session restarts (the old st.session_state.learner
+    behaviour). Repeat solves of the exact same question only count once,
+    matching how the in-session tracker used to dedupe via its solved_set."""
+    from .practice import practice_data
+
+    with get_session() as db:
+        rows = (
+            db.query(SolvedQuestion)
+            .filter(SolvedQuestion.user_id == user_id)
+            .all()
+        )
+        seen = set()
+        marks = 0
+        topic_counts: dict[str, int] = {}
+        for r in rows:
+            key = (r.source, r.paper, r.topic, r.question)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            if r.topic:
+                topic_counts[r.topic] = topic_counts.get(r.topic, 0) + 1
+
+            if r.source == "practice" and r.paper and r.topic:
+                for q in practice_data.get(r.paper, {}).get(r.topic, []):
+                    if q["question"] == r.question:
+                        marks += q["Marks"]
+                        break
+
+        return {"solved": len(seen), "Marks": marks, "topic_counts": topic_counts}
+
+
 def get_recent_solved(user_id: int, limit: int = 25):
     """Most recent solved-question records for this user, newest first —
     used to show a learner (or admin) their own activity history."""

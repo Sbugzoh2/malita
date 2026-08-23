@@ -1194,23 +1194,52 @@ elif mode=="🎯 Learner Profile":
                     .setdefault(topic_label, [])
                     .append(r))
 
+        _INDENT = " " * 4  # non-breaking spaces - a plain leading " " collapses in HTML
+
+        def _toggle_section(label, key, indent_level=0, default_open=False):
+            # Streamlit forbids nesting an st.expander inside another
+            # st.expander, and also caps st.columns at one level of nesting -
+            # both ruled out a "real" nested container per level. Only the
+            # outermost Type level below is a real expander; Date/Paper/Topic
+            # are plain buttons toggling session_state, indented with
+            # leading spaces instead of a layout container.
+            if key not in st.session_state:
+                st.session_state[key] = default_open
+            icon = "▾" if st.session_state[key] else "▸"
+            if st.button(f"{_INDENT * indent_level}{icon} {label}", key=f"btn_{key}"):
+                st.session_state[key] = not st.session_state[key]
+            return st.session_state[key]
+
         for ti, (type_label, by_date) in enumerate(grouped.items()):
             type_count = _count_activities(by_date)
             with st.expander(f"🗂️ {type_label} — {type_count} {_plural(type_count)}", expanded=(ti == 0)):
                 for di, (date_label, by_paper) in enumerate(by_date.items()):
                     date_count = _count_activities(by_paper)
-                    with st.expander(f"📅 {date_label} — {date_count} {_plural(date_count)}", expanded=(ti == 0 and di == 0)):
+                    date_key = f"activity_open_date_{ti}_{di}"
+                    date_open = _toggle_section(
+                        f"📅 {date_label} — {date_count} {_plural(date_count)}",
+                        date_key, indent_level=1, default_open=(ti == 0 and di == 0),
+                    )
+                    if date_open:
                         for pi, (paper_label, by_topic) in enumerate(by_paper.items()):
                             paper_count = _count_activities(by_topic)
-                            with st.expander(f"📄 {paper_label} — {paper_count} {_plural(paper_count)}", expanded=(ti == 0 and di == 0 and pi == 0)):
+                            paper_key = f"activity_open_paper_{ti}_{di}_{pi}"
+                            paper_open = _toggle_section(
+                                f"📄 {paper_label} — {paper_count} {_plural(paper_count)}",
+                                paper_key, indent_level=2, default_open=(ti == 0 and di == 0 and pi == 0),
+                            )
+                            if paper_open:
                                 for toi, (topic_label, activities) in enumerate(by_topic.items()):
-                                    with st.expander(
+                                    topic_key = f"activity_open_topic_{ti}_{di}_{pi}_{toi}"
+                                    topic_open = _toggle_section(
                                         f"{topic_label} — {len(activities)} {_plural(len(activities))}",
-                                        expanded=(ti == 0 and di == 0 and pi == 0 and toi == 0),
-                                    ):
+                                        topic_key, indent_level=3,
+                                        default_open=(ti == 0 and di == 0 and pi == 0 and toi == 0),
+                                    )
+                                    if topic_open:
                                         for r in activities:
                                             when = r["solved_at"].strftime("%H:%M") if r["solved_at"] else ""
-                                            st.caption(when)
+                                            st.caption(f"{_INDENT * 4}{when}")
                                             _render_activity_question(r["question"])
                                             st.divider()
     else:

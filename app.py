@@ -41,11 +41,10 @@ from backend.solver import (
     solve_statistics, solve_probability, solve_euclidean_geometry_topic,
     steps_contain_error,
 )
-from backend.pdf_extract import extract_pdf_text
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
 from backend.llm_tutor import solve_with_llm, solve_full_paper
-from backend.llm_ocr import solve_photo_with_llm
+from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
@@ -963,7 +962,8 @@ elif mode=="📄 Upload PDF Document":
     st.title("📄 Upload PDF Document")
     st.caption(
         "Upload any PDF containing maths questions — a past paper, a worksheet, homework, "
-        "anything with problems on it — not just official exam papers."
+        "anything with problems on it — not just official exam papers. Malita reads and solves "
+        "every question directly here, no need to retype anything."
     )
     if not can_use_pdf(effective_tier):
         st.warning("📄 PDF upload is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
@@ -971,39 +971,30 @@ elif mode=="📄 Upload PDF Document":
         pdf = st.file_uploader("Upload PDF", type=["pdf"])
         if pdf:
             pdf_bytes = pdf.read()
-            text = extract_pdf_text(pdf_bytes)
-            edited = st.text_area("Extracted Text", text, height=300)
-            if st.button("Transfer to Solver"):
-                st.session_state.copied_text = edited
-                st.session_state["pending_nav"] = "🧮 AI Tutor"
-                st.rerun()
+            st.caption(f"{pdf.name} · {len(pdf_bytes) // 1024} KB")
 
-            if can_use_llm_fallback(effective_tier):
-                solve_key = f"solved_pdf_{pdf.file_id}"
-                if not st.session_state.get(solve_key):
-                    if st.button("🧠 Solve all questions with AI"):
-                        with st.spinner(
-                            "Reading the document and solving every question with AI — "
-                            "this can take a minute for a full document…"
-                        ):
-                            solved = solve_full_paper(text, paper_title=pdf.name)
-                        if not solved:
-                            st.warning("Couldn't detect individual questions in this document.")
-                        else:
-                            st.session_state[solve_key] = solved
-                            st.rerun()
-                else:
-                    if st.button("🔄 Re-solve with AI"):
-                        del st.session_state[solve_key]
-                        st.rerun()
+            solve_key = f"pdf_solved_{pdf.file_id}"
+            if solve_key not in st.session_state:
+                with st.spinner("Reading and solving every question in this document with AI — this may take a minute…"):
+                    try:
+                        transcribed = transcribe_pdf_with_llm(pdf_bytes)
+                        st.session_state[solve_key] = solve_full_paper(transcribed, paper_title=pdf.name) if transcribed.strip() else []
+                    except Exception:
+                        st.session_state[solve_key] = None
+                        st.error("Couldn't read that document. Please try a clearer scan or a different file.")
 
-                if st.session_state.get(solve_key):
-                    st.markdown("###### 🧠 AI-Solved Questions")
-                    for q in st.session_state[solve_key]:
-                        with st.expander(f"Question {q['number']}"):
-                            st.caption("Original question (as extracted from the PDF):")
-                            st.code(q["text"], language=None)
-                            render_steps(q["steps"])
+            solved = st.session_state.get(solve_key)
+            if solved:
+                for q in solved:
+                    st.markdown(f"#### Question {q['number']}")
+                    render_steps(q["steps"])
+                    st.divider()
+
+                if st.button("🔄 Not right? Re-read and re-solve this document"):
+                    del st.session_state[solve_key]
+                    st.rerun()
+            elif solved == []:
+                st.warning("Couldn't detect individual questions in this document.")
 
 # =====================================================
 # PAST PAPERS LIBRARY

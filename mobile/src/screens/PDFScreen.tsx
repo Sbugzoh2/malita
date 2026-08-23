@@ -1,73 +1,54 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  TextInput,
-} from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, pdfExtract, solvePdfText, SolvedPdfQuestion } from "../api/client";
+import { ApiError, solvePdfWithAI, SolvedPdfQuestion } from "../api/client";
 import { StepView } from "./AITutorScreen";
 
 export default function PDFScreen({ navigation }: any) {
   const { token, me } = useAuth();
-  const [extractedText, setExtractedText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<SolvedPdfQuestion[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [solving, setSolving] = useState(false);
-  const [solveError, setSolveError] = useState<string | null>(null);
-  const [questions, setQuestions] = useState<SolvedPdfQuestion[] | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [lastPicked, setLastPicked] = useState<{ uri: string; name: string } | null>(null);
 
   const pdfLocked = me?.effective_tier === "free";
 
-  async function pickPdf() {
-    const result = await DocumentPicker.getDocumentAsync({ type: "application/pdf" });
-    if (result.canceled || !result.assets?.[0] || !token) return;
-
-    const asset = result.assets[0];
-    setFileName(asset.name);
-    setExtractedText("");
-    setError(null);
+  async function solvePdf(uri: string, name: string) {
+    if (!token) return;
+    setFileName(name);
+    setLastPicked({ uri, name });
     setQuestions(null);
-    setSolveError(null);
+    setError(null);
+    setExpanded(new Set());
     setLoading(true);
     try {
-      const res = await pdfExtract(token, asset.uri, asset.name);
-      setExtractedText(res.text);
+      const res = await solvePdfWithAI(token, uri, name);
+      setQuestions(res.questions);
+      if (res.questions.length > 0) setExpanded(new Set([res.questions[0].number]));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not read that PDF. Please try again.");
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : "Couldn't read that document. Please try a clearer scan or a different file."
+      );
     } finally {
       setLoading(false);
     }
   }
 
-  function sendToSolver() {
-    navigation.navigate("AITutor", { prefillQuestion: extractedText });
+  async function pickPdf() {
+    const result = await DocumentPicker.getDocumentAsync({ type: "application/pdf" });
+    if (result.canceled || !result.assets?.[0] || !token) return;
+    const asset = result.assets[0];
+    await solvePdf(asset.uri, asset.name);
   }
 
-  async function solveAll() {
-    if (!token || !extractedText) return;
-    setSolving(true);
-    setSolveError(null);
-    try {
-      const res = await solvePdfText(token, extractedText, fileName ?? "");
-      setQuestions(res.questions);
-      if (res.questions.length === 0) {
-        setSolveError("Couldn't detect individual questions in this document.");
-      }
-    } catch (e) {
-      setSolveError(e instanceof ApiError ? e.message : "Could not solve this document. Please try again.");
-    } finally {
-      setSolving(false);
-    }
+  function retry() {
+    if (lastPicked) solvePdf(lastPicked.uri, lastPicked.name);
   }
 
   function toggle(number: string) {
@@ -81,10 +62,9 @@ export default function PDFScreen({ navigation }: any) {
 
   function reset() {
     setFileName(null);
-    setExtractedText("");
-    setError(null);
     setQuestions(null);
-    setSolveError(null);
+    setError(null);
+    setLastPicked(null);
   }
 
   return (
@@ -95,7 +75,8 @@ export default function PDFScreen({ navigation }: any) {
       <Text style={styles.title}>📄 Upload PDF Document</Text>
       <Text style={styles.subtitle}>
         Upload any PDF with maths questions — a past paper, a worksheet, homework, anything with
-        problems on it — not just official exam papers.
+        problems on it — not just official exam papers. Malita reads and solves every question
+        directly here, no need to retype anything.
       </Text>
 
       {pdfLocked ? (
@@ -121,49 +102,17 @@ export default function PDFScreen({ navigation }: any) {
           {loading && (
             <View style={styles.loadingRow}>
               <ActivityIndicator color={colors.primary} />
-              <Text style={styles.loadingText}>Extracting text…</Text>
+              <Text style={styles.loadingText}>
+                Reading and solving every question in this document with AI — this may take a
+                minute…
+              </Text>
             </View>
           )}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          {extractedText ? (
-            <View style={styles.resultCard}>
-              <Text style={styles.label}>Extracted text (select the part you want, then edit if needed)</Text>
-              <TextInput
-                style={styles.input}
-                value={extractedText}
-                onChangeText={setExtractedText}
-                multiline
-              />
-              <Pressable style={styles.solveButton} onPress={sendToSolver}>
-                <Text style={styles.solveButtonText}>Send to AI Tutor →</Text>
-              </Pressable>
-
-              <Pressable
-                style={[styles.aiSolveButton, solving && styles.buttonDisabled]}
-                onPress={solveAll}
-                disabled={solving}
-              >
-                {solving ? (
-                  <ActivityIndicator color={colors.primary} />
-                ) : (
-                  <Text style={styles.aiSolveButtonText}>🧠 Solve all questions with AI</Text>
-                )}
-              </Pressable>
-              {solving && (
-                <Text style={styles.solvingHint}>
-                  Reading the document and solving every question with AI — this can take a minute
-                  for a full document…
-                </Text>
-              )}
-              {solveError ? <Text style={styles.error}>{solveError}</Text> : null}
-            </View>
-          ) : null}
-
           {questions && questions.length > 0 && (
             <View style={{ marginTop: 16 }}>
-              <Text style={styles.sectionTitle}>🧠 AI-Solved Questions</Text>
               {questions.map((q) => {
                 const isOpen = expanded.has(q.number);
                 return (
@@ -174,10 +123,6 @@ export default function PDFScreen({ navigation }: any) {
                     </Pressable>
                     {isOpen && (
                       <View style={styles.questionBody}>
-                        <Text style={styles.originalLabel}>
-                          Original question (as extracted from the PDF):
-                        </Text>
-                        <Text style={styles.originalText}>{q.text}</Text>
                         {q.steps.map((step, i) => (
                           <StepView key={i} step={step} />
                         ))}
@@ -186,7 +131,15 @@ export default function PDFScreen({ navigation }: any) {
                   </View>
                 );
               })}
+
+              <Pressable style={styles.retryButton} onPress={retry}>
+                <Text style={styles.retryButtonText}>🔄 Not right? Re-read and re-solve this document</Text>
+              </Pressable>
             </View>
+          )}
+
+          {questions && questions.length === 0 && (
+            <Text style={styles.error}>Couldn't detect individual questions in this document.</Text>
           )}
         </>
       )}
@@ -212,41 +165,8 @@ const styles = StyleSheet.create({
   cancelButton: { marginTop: 10, alignSelf: "flex-start" },
   cancelButtonText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
   loadingRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16 },
-  loadingText: { color: colors.textSecondary },
+  loadingText: { color: colors.textSecondary, flexShrink: 1 },
   error: { color: colors.error, marginTop: 16 },
-  resultCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, marginTop: 16 },
-  label: { fontSize: 13, color: colors.textSecondary, marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 15,
-    backgroundColor: "#fff",
-    minHeight: 220,
-    textAlignVertical: "top",
-  },
-  solveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 14,
-  },
-  solveButtonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  aiSolveButton: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 10,
-  },
-  aiSolveButtonText: { color: colors.primary, fontWeight: "700", fontSize: 16 },
-  buttonDisabled: { opacity: 0.6 },
-  solvingHint: { fontSize: 12, color: colors.textSecondary, marginTop: 8, textAlign: "center" },
-  sectionTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 10 },
   questionCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,
@@ -263,15 +183,15 @@ const styles = StyleSheet.create({
   questionHeaderText: { fontSize: 15, fontWeight: "700", color: colors.text },
   chevron: { fontSize: 12, color: colors.textSecondary },
   questionBody: { paddingHorizontal: 16, paddingBottom: 16 },
-  originalLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
-  originalText: {
-    fontSize: 13,
-    color: colors.text,
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
+  retryButton: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 4,
   },
+  retryButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
   lockedBanner: {
     backgroundColor: "#fff4e5",
     borderRadius: 12,

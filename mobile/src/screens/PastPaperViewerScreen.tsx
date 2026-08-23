@@ -3,13 +3,18 @@ import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-nati
 import { WebView } from "react-native-webview";
 import { colors } from "../theme";
 
-// Renders a past paper PDF right inside the app (Android's and iOS's
-// built-in WebView both know how to display a PDF loaded by URL) instead
-// of handing the learner off to an external browser/download prompt.
+// Renders a past paper PDF right inside the app. Android's WebView has no
+// built-in PDF renderer of its own (unlike desktop Chrome) - loading a
+// raw application/pdf response directly just shows a blank page or "This
+// page has been blocked" - so the URL is routed through Google's web-
+// based PDF viewer instead, which is a normal HTML page any WebView can
+// render, with the actual file fetched by Google's servers, not the
+// device (works identically on iOS, which renders PDFs natively anyway).
 export default function PastPaperViewerScreen({ route, navigation }: any) {
   const { url, title } = route.params ?? {};
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const viewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url ?? "")}&embedded=true`;
 
   return (
     <View style={styles.flex}>
@@ -30,7 +35,7 @@ export default function PastPaperViewerScreen({ route, navigation }: any) {
             </View>
           )}
           <WebView
-            source={{ uri: url }}
+            source={{ uri: viewerUrl }}
             style={styles.webview}
             onLoadEnd={() => setLoading(false)}
             onError={() => {

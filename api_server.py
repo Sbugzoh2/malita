@@ -53,12 +53,11 @@ from backend.solver import (
     solve_statistics, solve_probability, solve_euclidean_geometry_topic,
     steps_contain_error,
 )
-from backend.pdf_extract import extract_pdf_text
 from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.practice import practice_data, check_practice_answer
 from backend.past_papers import list_past_papers, get_past_paper_file
 from backend.llm_tutor import solve_with_llm, solve_full_paper
-from backend.llm_ocr import solve_photo_with_llm
+from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
 # through the same webhook, so both apps' PayFast configuration must agree.
@@ -138,11 +137,6 @@ class PracticeRecordRequest(BaseModel):
     paper: str
     topic: str
     question: str
-
-
-class PdfSolveAllRequest(BaseModel):
-    text: str
-    title: str = ""
 
 
 def _auth_user(authorization: str | None):
@@ -328,27 +322,32 @@ async def ocr_solve(file: UploadFile = File(...), authorization: str = Header(No
     return {"questions": questions}
 
 
-@app.post("/pdf-extract")
-async def pdf_extract(file: UploadFile = File(...), authorization: str = Header(None)):
-    """Accepts a past-paper PDF and returns its raw extracted text, the
-    same way app.py's Past Papers (PDF) mode does (same
-    backend.pdf_extract function) - the native app can then let the
-    learner edit/select from it before sending a question to /solve."""
+@app.post("/pdf/solve")
+async def pdf_solve(file: UploadFile = File(...), authorization: str = Header(None)):
+    """Accepts a learner-uploaded PDF (past paper, worksheet, homework -
+    not just an official exam paper), reads every question in it, and
+    solves each one directly - the "Upload PDF Document" mode's primary
+    path now. Renders every page as an image and reads them with Claude
+    vision rather than relying on backend.pdf_extract's text-layer
+    extraction, which returns nothing at all for a scanned/image-only PDF
+    (the common case for a real past paper). Mirrors app.py's Upload PDF
+    Document mode exactly (same backend.llm_ocr/llm_tutor functions)."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
     effective_tier = "premium" if is_admin else get_user_tier(user["id"])
     if not can_use_pdf(effective_tier):
         raise HTTPException(
             status_code=403,
-            detail="Past paper PDF extraction is a Learner/Premium feature. Upgrade to unlock it.",
+            detail="PDF upload is a Learner/Premium feature. Upgrade to unlock it.",
         )
 
     pdf_bytes = await file.read()
     try:
-        text = extract_pdf_text(pdf_bytes)
+        transcribed = transcribe_pdf_with_llm(pdf_bytes)
+        questions = solve_full_paper(transcribed, paper_title=file.filename or "") if transcribed.strip() else []
     except Exception:
-        raise HTTPException(status_code=400, detail="Could not read that PDF file.")
-    return {"text": text}
+        raise HTTPException(status_code=502, detail="Couldn't read that document. Please try a clearer scan or a different file.")
+    return {"questions": questions}
 
 
 @app.get("/billing/tiers")
@@ -493,31 +492,6 @@ def past_papers_download(paper_id: int, authorization: str = Header(None), token
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{file_name}"'},
     )
-
-
-@app.post("/pdf-extract/solve-all")
-def pdf_extract_solve_all(body: PdfSolveAllRequest, authorization: str = Header(None)):
-    """Solves every question detected in a learner-uploaded PDF's already-
-    extracted text - the API twin of app.py's "Upload PDF Document" mode's
-    "Solve all questions with AI" button. Takes the text directly (not the
-    PDF file itself) since the client already has it from /pdf-extract.
-    Not offered on the curated Past Papers Library, which also holds memos
-    that don't make sense to "solve"."""
-    user = _auth_user(authorization)
-    is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
-    if not can_use_pdf(effective_tier):
-        raise HTTPException(
-            status_code=403,
-            detail="PDF upload is a Learner/Premium feature. Upgrade to unlock it.",
-        )
-    if not can_use_llm_fallback(effective_tier):
-        raise HTTPException(
-            status_code=403,
-            detail="Solving a full document with AI is a Learner/Premium feature. Upgrade to unlock it.",
-        )
-    questions = solve_full_paper(body.text, paper_title=body.title)
-    return {"questions": questions}
 
 
 @app.get("/terms", response_class=HTMLResponse)

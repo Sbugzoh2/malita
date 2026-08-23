@@ -168,8 +168,20 @@ export function solvePhotoWithAI(token: string, imageUri: string, mimeType: stri
   });
 }
 
-export function pdfExtract(token: string, fileUri: string, fileName: string = "paper.pdf") {
-  return uploadFile("/pdf-extract", token, { uri: fileUri, name: fileName, type: "application/pdf" });
+export type SolvedPdfQuestion = { number: string; steps: SolveStep[] };
+
+// Reads every question in a learner-uploaded PDF (past paper, worksheet,
+// homework - not just an official exam paper) and solves each one
+// directly - the "Upload PDF Document" screen's primary path. Renders
+// every page as an image and reads them with Claude vision server-side,
+// rather than relying on the PDF's text layer, which is empty for a
+// scanned/image-only PDF (the common case for a real past paper).
+export function solvePdfWithAI(token: string, fileUri: string, fileName: string = "paper.pdf") {
+  return uploadFile<{ questions: SolvedPdfQuestion[] }>("/pdf/solve", token, {
+    uri: fileUri,
+    name: fileName,
+    type: "application/pdf",
+  });
 }
 
 export type TierInfo = {
@@ -259,15 +271,3 @@ export function pastPaperDownloadUrl(token: string, paperId: number) {
   return `${API_BASE_URL}/past-papers/${paperId}/download?token=${encodeURIComponent(token)}`;
 }
 
-export type SolvedPdfQuestion = { number: string; text: string; steps: SolveStep[] };
-
-// Solves every question in a learner-uploaded PDF's already-extracted text
-// (from pdfExtract() below) - not offered on the curated Past Papers
-// Library, which also holds memos that don't make sense to "solve".
-export function solvePdfText(token: string, text: string, title: string = "") {
-  return request<{ questions: SolvedPdfQuestion[] }>("/pdf-extract/solve-all", {
-    method: "POST",
-    body: { text, title },
-    token,
-  });
-}

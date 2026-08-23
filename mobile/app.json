@@ -7,7 +7,10 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "extra": {
-      "apiBaseUrl": "https://malita-api.onrender.com"
+      "apiBaseUrl": "https://malita-api.onrender.com",
+      "eas": {
+        "projectId": "dea19c46-b69f-485e-95d3-0694e5ab06f2"
+      }
     },
     "ios": {
       "supportsTablet": true,
@@ -24,7 +27,7 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/hero-student.png"
     },
     "plugins": [
       [

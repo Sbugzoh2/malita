@@ -18,11 +18,14 @@ RUN IT WITH:
 """
 
 import datetime as dt
+import logging
 import os
 import uuid
 
 from dotenv import load_dotenv
 load_dotenv()
+
+logger = logging.getLogger("malita.api")
 
 from io import BytesIO
 
@@ -311,13 +314,19 @@ async def ocr_solve(file: UploadFile = File(...), authorization: str = Header(No
 
     image_bytes = await file.read()
     try:
-        Image.open(BytesIO(image_bytes))
+        # .load() forces PIL to actually decode the pixel data now, rather
+        # than just the header - Image.open() alone is lazy and would let a
+        # file truncated mid-upload (e.g. a flaky mobile connection) pass
+        # this check, only to fail later inside solve_photo_with_llm with a
+        # far less specific error.
+        Image.open(BytesIO(image_bytes)).load()
     except Exception:
-        raise HTTPException(status_code=400, detail="Could not read that image file.")
+        raise HTTPException(status_code=400, detail="Could not read that image file. Please try again.")
 
     try:
         questions = solve_photo_with_llm(image_bytes)
     except Exception:
+        logger.exception("ocr_solve failed for user %s", user["id"])
         raise HTTPException(status_code=502, detail="Couldn't read that photo. Please try a clearer picture, better lighting, or less glare.")
     return {"questions": questions}
 
@@ -346,6 +355,7 @@ async def pdf_solve(file: UploadFile = File(...), authorization: str = Header(No
         transcribed = transcribe_pdf_with_llm(pdf_bytes)
         questions = solve_full_paper(transcribed, paper_title=file.filename or "") if transcribed.strip() else []
     except Exception:
+        logger.exception("pdf_solve failed for user %s", user["id"])
         raise HTTPException(status_code=502, detail="Couldn't read that document. Please try a clearer scan or a different file.")
     return {"questions": questions}
 

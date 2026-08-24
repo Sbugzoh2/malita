@@ -103,7 +103,7 @@ export default function LoginScreen({ navigation }: any) {
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>🎓 Malita</Text>
-        <Text style={styles.subtitle}>Matric Maths Master</Text>
+        <Text style={styles.subtitle}>Matric Study Master</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Email</Text>

@@ -28,14 +28,14 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/hero-student.png"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
         "expo-image-picker",
         {
-          "photosPermission": "Malita needs access to your photos so you can upload a picture of a maths question.",
-          "cameraPermission": "Malita needs access to your camera so you can take a photo of a maths question."
+          "photosPermission": "Malita needs access to your photos so you can upload a picture of a Mathematics or Physical Sciences question.",
+          "cameraPermission": "Malita needs access to your camera so you can take a photo of a Mathematics or Physical Sciences question."
         }
       ]
     ]

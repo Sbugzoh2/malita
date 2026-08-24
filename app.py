@@ -78,7 +78,7 @@ except FileNotFoundError:
 # =====================================================
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-st.set_page_config("Matric Math Master", layout="wide", page_icon="🎓")
+st.set_page_config("Matric Study Master", layout="wide", page_icon="🎓")
 
 # =====================================================
 # PWA SUPPORT (installable on Android/iOS home screens)
@@ -151,8 +151,8 @@ if "auth_user" not in st.session_state:
     st.session_state.auth_user = None
 
 if st.session_state.auth_user is None:
-    st.title("🎓 Malita — Matric Maths Master")
-    st.caption("AI-powered Grade 12 Mathematics tutoring, built for South African learners 🇿🇦")
+    st.title("🎓 Malita — Matric Study Master")
+    st.caption("AI-powered Grade 12 Mathematics & Physical Sciences tutoring, built for South African learners 🇿🇦")
 
     reset_token = st.query_params.get("reset_token")
 
@@ -311,6 +311,23 @@ TOPIC_COLORS = {
     "Organic Chemistry": "#e87ba4",
 }
 _DEFAULT_TOPIC_COLOR = "#2a78d6"
+
+# Lets any Subject-filtered view (Learner Profile, Past Papers Library)
+# classify an existing solved_questions/past_papers row by subject without
+# a DB migration - topic/paper names never collide between the two
+# subjects (Mathematics uses "Paper 1"/"Paper 2", Physical Sciences uses
+# "Physics"/"Chemistry"), so a name-based set membership check is reliable.
+MATHEMATICS_TOPICS = {
+    "Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs",
+    "Analytical Geometry", "Trigonometry", "Statistics", "Statistics & Probability",
+    "Probability", "Euclidean Geometry",
+}
+PHYSICAL_SCIENCES_TOPICS = {
+    "Momentum", "Vertical Projectile Motion", "Work, Energy & Power", "Doppler Effect",
+    "Electrostatics", "Electric Circuits", "Electrodynamics",
+    "Stoichiometry", "Rate and Extent of Reaction", "Chemical Equilibrium",
+    "Acids and Bases", "Electrochemistry", "Organic Chemistry",
+}
 
 def topic_badge(topic):
     """Render a small coloured pill naming the current topic — used next
@@ -527,7 +544,7 @@ if "copied_text" not in st.session_state:
 # =====================================================
 # SIDEBAR
 # =====================================================
-st.sidebar.title("🎓 Matric Maths Master")
+st.sidebar.title("🎓 Matric Study Master")
 
 # Always re-check the tier from the DB (not a cached value from login),
 # since a PayFast webhook may have upgraded/cancelled it since then.
@@ -770,7 +787,7 @@ elif mode == "🧮 AI Tutor":
             st.markdown("""
             <h3 style="margin-bottom:0;">AI Tutor</h3>
             <p style="font-size:1.1rem; color:#475569; margin-top:0;">
-                Grade 12 Mathematics help, worked out one step at a time.
+                Grade 12 Mathematics & Physical Sciences help, worked out one step at a time.
             </p>
             """, unsafe_allow_html=True)
 
@@ -991,7 +1008,7 @@ elif mode == "🧮 AI Tutor":
 
     elif input_method == "📷 Photo":
         st.caption(
-            "Take or upload a photo of one or more maths questions — Malita reads and solves "
+            "Take or upload a photo of one or more Mathematics or Physical Sciences questions — Malita reads and solves "
             "every question directly here, no need to retype anything."
         )
         if not can_use_ocr(effective_tier):
@@ -1025,7 +1042,7 @@ elif mode == "🧮 AI Tutor":
 
     else:  # 📄 PDF Document
         st.caption(
-            "Upload any PDF containing maths questions — a past paper, a worksheet, homework, "
+            "Upload any PDF containing Mathematics or Physical Sciences questions — a past paper, a worksheet, homework, "
             "anything with problems on it — not just official exam papers. Malita reads and solves "
             "every question directly here, no need to retype anything."
         )
@@ -1112,16 +1129,12 @@ elif mode == "🗄️ Past Papers Library":
     if not can_use_past_papers(effective_tier):
         st.warning("🗄️ The Past Papers Library is a Premium feature. Upgrade from the sidebar to unlock it.")
     else:
-        all_papers = list_past_papers()
-        if not all_papers:
-            st.info("No papers uploaded yet — check back soon.")
+        pp_subject = st.radio("Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="pp_subject")
+        subject_filter = "Mathematics" if pp_subject == "🧮 Mathematics" else "Physical Sciences"
+        papers = [p for p in list_past_papers() if p["subject"] == subject_filter]
+        if not papers:
+            st.info(f"No {subject_filter} papers uploaded yet — check back soon.")
         else:
-            available_subjects = sorted({p["subject"] for p in all_papers})
-            subject_filter = (
-                st.radio("Subject", available_subjects, horizontal=True, key="pp_subject_filter")
-                if len(available_subjects) > 1 else available_subjects[0]
-            )
-            papers = [p for p in all_papers if p["subject"] == subject_filter]
 
             def _render_paper_row(p):
                 pc1, pc2, pc3 = st.columns([3, 1, 1])
@@ -1188,9 +1201,16 @@ elif mode == "🗄️ Past Papers Library":
 # =====================================================
 elif mode=="🎯 Learner Profile":
     st.title("🎯 Learner Profile")
+
+    lp_subject = st.radio("Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="lp_subject")
+    lp_topics = MATHEMATICS_TOPICS if lp_subject == "🧮 Mathematics" else PHYSICAL_SCIENCES_TOPICS
+
     # Built from the solved_questions table, not st.session_state, so
-    # progress survives logging out/in or switching devices.
-    learner = get_learner_stats(auth_user["id"])
+    # progress survives logging out/in or switching devices. Filtered to
+    # the selected Subject's topics - Mathematics and Physical Sciences
+    # never share a topic name, so this is a reliable split without a DB
+    # migration (see MATHEMATICS_TOPICS/PHYSICAL_SCIENCES_TOPICS above).
+    learner = get_learner_stats(auth_user["id"], topics=lp_topics)
 
     col1, col2 = st.columns(2)
     col1.metric("Questions Solved", learner["solved"])
@@ -1225,7 +1245,7 @@ elif mode=="🎯 Learner Profile":
         st.info("Solve some practice questions to see your progress here!")
 
     st.markdown("#### 🕒 Recent Activity")
-    recent = get_recent_solved(auth_user["id"], limit=100)
+    recent = get_recent_solved(auth_user["id"], limit=100, topics=lp_topics)
     if recent:
         # Practice-source questions are already proper LaTeX (backslash
         # commands like \text{}); AI Tutor questions are whatever the

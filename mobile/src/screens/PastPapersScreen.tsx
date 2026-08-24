@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
 import { useAuth } from "../context/AuthContext";
-import { colors } from "../theme";
+import { colors, SUBJECTS, Subject } from "../theme";
 import { ApiError, fetchPastPapers, pastPaperDownloadUrl, PastPaper } from "../api/client";
 
 // Same chronological order as app.py's EXAM_SERIES_OPTIONS, so a year's
@@ -16,12 +16,14 @@ const EXAM_SERIES_ORDER = [
 
 export default function PastPapersScreen({ navigation }: any) {
   const { token, me } = useAuth();
+  const [subject, setSubject] = useState<Subject>("Mathematics");
   const [papers, setPapers] = useState<PastPaper[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedYears, setExpandedYears] = useState<Set<number>>(new Set());
 
   const locked = me != null && me.effective_tier !== "premium";
+  const subjectPapers = papers?.filter((p) => p.subject === subject) ?? null;
 
   useEffect(() => {
     if (!token || locked) {
@@ -29,14 +31,19 @@ export default function PastPapersScreen({ navigation }: any) {
       return;
     }
     fetchPastPapers(token)
-      .then((res) => {
-        setPapers(res.papers);
-        const years = [...new Set(res.papers.map((p) => p.year))].sort((a, b) => b - a);
-        if (years.length > 0) setExpandedYears(new Set([years[0]]));
-      })
+      .then((res) => setPapers(res.papers))
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load past papers."))
       .finally(() => setLoading(false));
   }, [token, locked]);
+
+  // Re-derive which year is auto-expanded whenever the Subject switch
+  // changes which papers are in view - the previously-expanded year might
+  // not exist at all for the newly selected subject.
+  useEffect(() => {
+    if (!subjectPapers) return;
+    const years = [...new Set(subjectPapers.map((p) => p.year))].sort((a, b) => b - a);
+    setExpandedYears(years.length > 0 ? new Set([years[0]]) : new Set());
+  }, [subject, papers]);
 
   function toggleYear(year: number) {
     setExpandedYears((prev) => {
@@ -53,7 +60,21 @@ export default function PastPapersScreen({ navigation }: any) {
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
       </Pressable>
       <Text style={styles.title}>📚 Past Papers Library</Text>
-      <Text style={styles.subtitle}>Browse real past exam papers, organised by year and subject.</Text>
+      <Text style={styles.subtitle}>Browse real past exam papers, organised by year.</Text>
+
+      {!locked && (
+        <View style={styles.row}>
+          {SUBJECTS.map((s) => (
+            <Pressable
+              key={s}
+              style={[styles.chip, subject === s && styles.chipActive]}
+              onPress={() => setSubject(s)}
+            >
+              <Text style={[styles.chipText, subject === s && styles.chipTextActive]}>{s}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       {locked ? (
         <View style={styles.lockedBanner}>
@@ -68,11 +89,11 @@ export default function PastPapersScreen({ navigation }: any) {
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : error ? (
         <Text style={styles.error}>{error}</Text>
-      ) : papers && papers.length > 0 ? (
-        [...new Set(papers.map((p) => p.year))]
+      ) : subjectPapers && subjectPapers.length > 0 ? (
+        [...new Set(subjectPapers.map((p) => p.year))]
           .sort((a, b) => b - a)
           .map((year) => {
-            const yearPapers = papers.filter((p) => p.year === year);
+            const yearPapers = subjectPapers.filter((p) => p.year === year);
             const isExpanded = expandedYears.has(year);
             const seriesForYear = [
               ...EXAM_SERIES_ORDER.filter((s) => yearPapers.some((p) => p.exam_series === s)),
@@ -152,6 +173,19 @@ const styles = StyleSheet.create({
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 16 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: "#fff",
+    alignSelf: "flex-start",
+  },
+  chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
+  chipText: { color: colors.text, fontSize: 13 },
+  chipTextActive: { color: "#fff", fontWeight: "700" },
   error: { color: colors.error, marginTop: 12 },
   lockedBanner: {
     backgroundColor: "#fff4e5",

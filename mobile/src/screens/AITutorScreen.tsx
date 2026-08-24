@@ -46,8 +46,8 @@ export default function AITutorScreen() {
     >
       <Text style={styles.title}>🧮 AI Tutor</Text>
       <Text style={styles.subtitle}>
-        Grade 12 Mathematics help, worked out one step at a time — type a question, snap or
-        upload a photo, or upload a whole PDF.
+        Grade 12 Mathematics & Physical Sciences help, worked out one step at a time — type a
+        question, snap or upload a photo, or upload a whole PDF.
       </Text>
 
       <View style={styles.methodRow}>

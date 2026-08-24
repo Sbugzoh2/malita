@@ -345,7 +345,7 @@ def topic_badge(topic):
 
 st.markdown("""
 <div class="top-banner">
-    Algebra · Functions · Finance · Trigonometry · Statistics — worked out step by step
+    Mathematics & Physical Sciences — Grade 12 CAPS, worked out step by step
 </div>
 <style>
 .top-banner {

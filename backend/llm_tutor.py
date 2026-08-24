@@ -50,9 +50,9 @@ VALID_STEP_TYPES = {"markdown", "latex", "write", "info", "warning", "error", "s
 # skipped here since a prefix this size wouldn't clear the ~1024-token
 # minimum cacheable length anyway; revisit if this grows to include
 # curriculum reference material).
-SYSTEM_PROMPT = """You are Malita, a patient Grade 12 (Matric) mathematics tutor for South African CAPS-curriculum learners.
+SYSTEM_PROMPT = """You are Malita, a patient Grade 12 (Matric) tutor for South African CAPS-curriculum learners, covering both Mathematics and Physical Sciences.
 
-A learner has asked a question the app's built-in solver could not parse - likely a word problem or unusual phrasing. Solve it yourself, showing the working step by step, the way a good tutor would on a whiteboard.
+A learner has asked a question - for Mathematics, this is usually one the app's built-in solver could not parse (a word problem or unusual phrasing); for Physical Sciences, every question comes to you directly since there is no separate deterministic solver. Solve it yourself, showing the working step by step, the way a good tutor would on a whiteboard. For Physical Sciences, use the subject's own conventions: correct SI units in every step, the appropriate formula (kinematics, Newton's laws, circuits, stoichiometry, equilibrium, etc.) named or shown before it's used, and round numerical answers sensibly (2 decimal places is typical unless the question asks otherwise).
 
 Respond with ONLY a raw JSON array - your entire response must start with [ and end with ]. Do NOT wrap it in a ```json code fence or any other markdown, and do NOT include any prose before or after it.
 
@@ -148,14 +148,20 @@ def _resolve_plot_steps(steps: list) -> list:
     return resolved
 
 
-def solve_with_llm(question: str, topic: str = "", paper: str = "", max_tokens: int = MAX_OUTPUT_TOKENS):
+def solve_with_llm(question: str, topic: str = "", paper: str = "", subject: str = "", max_tokens: int = MAX_OUTPUT_TOKENS):
     """Returns a list of step dicts in the same {"type", "content"} shape
     backend/solver.py's StepRecorder produces, so callers can render the
     result exactly like a normal SymPy solve. Raises on any API failure -
     callers should catch that and fall back to their normal error
     message, the same as an unparseable SymPy input would."""
     client = get_client()
-    context_bits = [b for b in (f"Paper: {paper}." if paper else "", f"Topic: {topic}." if topic else "") if b]
+    context_bits = [
+        b for b in (
+            f"Subject: {subject}." if subject else "",
+            f"Paper: {paper}." if paper else "",
+            f"Topic: {topic}." if topic else "",
+        ) if b
+    ]
     context = (" ".join(context_bits) + "\n") if context_bits else ""
     response = client.messages.create(
         model=LLM_MODEL,

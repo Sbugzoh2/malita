@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
-import { colors, topicColors } from "../theme";
+import { colors, topicColors, SUBJECTS, Subject } from "../theme";
 import {
   ApiError,
   fetchPracticeTopics,
@@ -22,6 +22,7 @@ import LatexView from "../latex/LatexView";
 
 export default function PracticeScreen({ navigation }: any) {
   const { token } = useAuth();
+  const [subject, setSubject] = useState<Subject>("Mathematics");
   const [topicsByPaper, setTopicsByPaper] = useState<Record<string, string[]> | null>(null);
   const [paper, setPaper] = useState<string | null>(null);
   const [topic, setTopic] = useState<string | null>(null);
@@ -38,7 +39,8 @@ export default function PracticeScreen({ navigation }: any) {
 
   useEffect(() => {
     if (!token) return;
-    fetchPracticeTopics(token)
+    setTopicsByPaper(null);
+    fetchPracticeTopics(token, subject)
       .then((res) => {
         setTopicsByPaper(res);
         const firstPaper = Object.keys(res)[0];
@@ -46,16 +48,16 @@ export default function PracticeScreen({ navigation }: any) {
         setTopic(res[firstPaper]?.[0] ?? null);
       })
       .catch(() => setError("Could not load practice topics. Please try again."));
-  }, [token]);
+  }, [token, subject]);
 
   useEffect(() => {
     if (!token || !paper || !topic) return;
     setQuestions(null);
     resetQuestionState();
-    fetchPracticeQuestions(token, paper, topic)
+    fetchPracticeQuestions(token, paper, topic, subject)
       .then((res) => setQuestions(res.questions))
       .catch(() => setError("Could not load practice questions. Please try again."));
-  }, [token, paper, topic]);
+  }, [token, paper, topic, subject]);
 
   function resetQuestionState() {
     setQIndex(0);
@@ -113,6 +115,21 @@ export default function PracticeScreen({ navigation }: any) {
       <Text style={styles.subtitle}>Work through real Grade 12 style questions, topic by topic.</Text>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Text style={styles.label}>Subject</Text>
+      <View style={styles.row}>
+        {SUBJECTS.map((s) => (
+          <Pressable
+            key={s}
+            style={[styles.chip, subject === s && styles.chipActive]}
+            onPress={() => setSubject(s)}
+          >
+            <Text textBreakStrategy="simple" style={[styles.chipText, subject === s && styles.chipTextActive]}>
+              {s}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       {!topicsByPaper ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />

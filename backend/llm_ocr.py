@@ -56,9 +56,9 @@ Rules:
 - Reply with ONLY the transcribed text. No explanation, no markdown formatting, no code fences, no quotation marks around it."""
 
 
-SOLVE_SYSTEM_PROMPT = """You are Malita, a patient Grade 12 (Matric) mathematics tutor for South African CAPS-curriculum learners.
+SOLVE_SYSTEM_PROMPT = """You are Malita, a patient Grade 12 (Matric) tutor for South African CAPS-curriculum learners, covering both Mathematics and Physical Sciences.
 
-A learner has photographed one or more mathematics questions - there may be several distinct questions or sub-parts in the photo (e.g. 1.1.1, 1.1.2, 1.1.3, 1.2, or entirely separate questions). Read every one of them and solve each fully, showing the working step by step, the way a good tutor would on a whiteboard.
+A learner has photographed one or more questions - there may be several distinct questions or sub-parts in the photo (e.g. 1.1.1, 1.1.2, 1.1.3, 1.2, or entirely separate questions), from either subject. Read every one of them and solve each fully, showing the working step by step, the way a good tutor would on a whiteboard. For a Physical Sciences question, use the subject's own conventions: correct SI units in every step, the relevant formula named or shown before it's used, and sensible rounding (2 decimal places is typical unless the question says otherwise).
 
 Respond with ONLY a raw JSON array - your entire response must start with [ and end with ]. Do NOT wrap it in a ```json code fence or any other markdown, and do NOT include any prose before or after it.
 
@@ -83,7 +83,7 @@ Example of a complete, correct response for a photo with two sub-questions:
 [{"number": "1.1", "steps": [{"type": "markdown", "content": "Let x = number of years."}, {"type": "markdown", "content": "Set up the equation:"}, {"type": "latex", "content": "5000(1.08)^x = 10000"}, {"type": "success", "content": "$x \\approx 9.01$"}]}, {"number": "1.2", "steps": [{"type": "markdown", "content": "Factorise:"}, {"type": "latex", "content": "(x-2)(x-3)=0"}, {"type": "success", "content": "$x = 2$ or $x = 3$"}]}]"""
 
 
-TRANSCRIBE_PDF_SYSTEM_PROMPT = """You transcribe a South African Grade 12 (CAPS) mathematics document (an exam paper, worksheet, or homework sheet) from scanned/photographed pages into plain text.
+TRANSCRIBE_PDF_SYSTEM_PROMPT = """You transcribe a South African Grade 12 (CAPS) Mathematics or Physical Sciences document (an exam paper, worksheet, or homework sheet) from scanned/photographed pages into plain text.
 
 You will be shown every page of the document, in order. Transcribe the full text of every question exactly as written, preserving:
 - Question numbering exactly as shown (e.g. QUESTION 1, 1.1, 1.1.1, (a))

@@ -294,6 +294,21 @@ TOPIC_COLORS = {
     "Statistics & Probability": "#e34948",
     "Probability": "#2a78d6",
     "Euclidean Geometry": "#eb6834",
+    # Physical Sciences topics reuse the same 8 validated hues (cycled, not
+    # invented) rather than introducing new, unchecked colors.
+    "Momentum": "#2a78d6",
+    "Vertical Projectile Motion": "#eb6834",
+    "Work, Energy & Power": "#1baf7a",
+    "Doppler Effect": "#eda100",
+    "Electrostatics": "#e87ba4",
+    "Electric Circuits": "#008300",
+    "Electrodynamics": "#4a3aa7",
+    "Stoichiometry": "#e34948",
+    "Rate and Extent of Reaction": "#2a78d6",
+    "Chemical Equilibrium": "#eb6834",
+    "Acids and Bases": "#1baf7a",
+    "Electrochemistry": "#eda100",
+    "Organic Chemistry": "#e87ba4",
 }
 _DEFAULT_TOPIC_COLOR = "#2a78d6"
 
@@ -644,24 +659,31 @@ st.sidebar.caption(
 if mode=="📝 Practice Questions":
     st.title("📝 Practice Questions")
 
+    subject = st.radio("Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="pq_subject")
+    subject_key = "Mathematics" if subject == "🧮 Mathematics" else "Physical Sciences"
+    subject_data = practice_data[subject_key]
+
     if st.button("🎲 Surprise me with a random question"):
-        rand_paper = random.choice(list(practice_data.keys()))
-        rand_topic = random.choice(list(practice_data[rand_paper].keys()))
-        rand_idx = random.randrange(len(practice_data[rand_paper][rand_topic]))
+        rand_paper = random.choice(list(subject_data.keys()))
+        rand_topic = random.choice(list(subject_data[rand_paper].keys()))
+        rand_idx = random.randrange(len(subject_data[rand_paper][rand_topic]))
         st.session_state["pq_paper"] = rand_paper
         st.session_state["pq_topic"] = rand_topic
         st.session_state["pq_qnum"] = f"Q{rand_idx + 1}"
         st.rerun()
 
-    paper = st.selectbox("Select Paper", list(practice_data.keys()), key="pq_paper")
+    paper_options = list(subject_data.keys())
+    if st.session_state.get("pq_paper") not in paper_options:
+        st.session_state["pq_paper"] = paper_options[0]
+    paper = st.selectbox("Select Paper", paper_options, key="pq_paper")
 
-    topic_options = list(practice_data[paper].keys())
+    topic_options = list(subject_data[paper].keys())
     if st.session_state.get("pq_topic") not in topic_options:
         st.session_state["pq_topic"] = topic_options[0]
     topic = st.selectbox("Select Topic", topic_options, key="pq_topic")
     topic_badge(topic)
 
-    questions = practice_data[paper][topic]
+    questions = subject_data[paper][topic]
     q_numbers = [f"Q{i+1}" for i in range(len(questions))]
     if st.session_state.get("pq_qnum") not in q_numbers:
         st.session_state["pq_qnum"] = q_numbers[0]
@@ -761,18 +783,34 @@ elif mode == "🧮 AI Tutor":
     )
 
     if input_method == "✍️ Type a Question":
-        paper = st.selectbox("Select Paper", ["Paper 1", "Paper 2"])
+        subject = st.radio("Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="ai_tutor_subject")
 
-        if paper == "Paper 1":
-            topic = st.selectbox(
-                "Topic",
-                ["Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs"]
-            )
+        if subject == "🧮 Mathematics":
+            paper = st.selectbox("Select Paper", ["Paper 1", "Paper 2"], key="ai_tutor_paper_maths")
+            if paper == "Paper 1":
+                topic = st.selectbox(
+                    "Topic",
+                    ["Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs"]
+                )
+            else:
+                topic = st.selectbox(
+                    "Topic",
+                    ["Analytical Geometry", "Trigonometry", "Statistics", "Probability", "Euclidean Geometry"]
+                )
         else:
-            topic = st.selectbox(
-                "Topic",
-                ["Analytical Geometry", "Trigonometry", "Statistics", "Probability", "Euclidean Geometry"]
-            )
+            paper = st.selectbox("Select Paper", ["Physics", "Chemistry"], key="ai_tutor_paper_physci")
+            if paper == "Physics":
+                topic = st.selectbox(
+                    "Topic",
+                    ["Momentum", "Vertical Projectile Motion", "Work, Energy & Power", "Doppler Effect",
+                     "Electrostatics", "Electric Circuits", "Electrodynamics"]
+                )
+            else:
+                topic = st.selectbox(
+                    "Topic",
+                    ["Stoichiometry", "Rate and Extent of Reaction", "Chemical Equilibrium",
+                     "Acids and Bases", "Electrochemistry", "Organic Chemistry"]
+                )
         topic_badge(topic)
 
         with st.expander("💡 Not sure what to type? See examples for this topic"):
@@ -795,6 +833,19 @@ elif mode == "🧮 AI Tutor":
                     "P(A)=0.4, P(B)=0.3, A and B are mutually exclusive. Find P(A or B).",
                 ],
                 "Euclidean Geometry": ["angle at centre = 100, find angle at circumference", "cyclic quadrilateral angle A = 110, find angle C"],
+                "Momentum": ["A 0.5 kg ball at 4 m/s hits a stationary 1.5 kg ball. After, the 0.5 kg ball moves at 1 m/s. Find the other ball's velocity."],
+                "Vertical Projectile Motion": ["A ball is thrown upward at 15 m/s. Find the maximum height reached (g=9.8 m/s^2)."],
+                "Work, Energy & Power": ["A 60 kg cyclist speeds up from 4 m/s to 10 m/s. Find the increase in kinetic energy."],
+                "Doppler Effect": ["An ambulance emits 600 Hz moving towards you at 30 m/s. Find the frequency heard (speed of sound = 340 m/s)."],
+                "Electrostatics": ["Find the force between charges of +3x10^-6 C and +5x10^-6 C that are 0.2 m apart (k=9x10^9)."],
+                "Electric Circuits": ["A 12 V battery with internal resistance 0.5 ohm is connected to a 5.5 ohm resistor. Find the current."],
+                "Electrodynamics": ["A 200 turn coil has its flux change from 0.002 Wb to 0.008 Wb in 0.4 s. Find the induced emf."],
+                "Stoichiometry": ["Calculate the number of moles in 11 g of CO2 (M(C)=12, M(O)=16)."],
+                "Rate and Extent of Reaction": ["Concentration drops from 0.80 to 0.50 mol/dm^3 in 25 s. Find the average rate."],
+                "Chemical Equilibrium": ["0.4 mol A and 0.6 mol B in a 2 dm^3 container at equilibrium for A<=>B. Calculate Kc."],
+                "Acids and Bases": ["Calculate the pH of a solution with [H3O+]=1x10^-3 mol/dm^3."],
+                "Electrochemistry": ["Given Cu2+/Cu, E°=+0.34 V and Zn2+/Zn, E°=-0.76 V, calculate E°cell."],
+                "Organic Chemistry": ["Give the IUPAC name of CH3-CH2-CH2-CH3."],
             }
             for ex in EXAMPLE_QUESTIONS.get(topic, []):
                 st.code(ex, language=None)
@@ -832,94 +883,111 @@ elif mode == "🧮 AI Tutor":
             )
         x = sp.symbols("x")
 
-        solve_clicked = st.button("Solve")
-        if solve_clicked and question:
-            allowed, limit_message = can_solve(auth_user["id"], effective_tier)
-            if not allowed:
-                st.warning(limit_message)
-                st.stop()
-            record_solve(auth_user["id"])
-            record_solved_question(auth_user["id"], "ai_tutor", paper=paper, topic=topic, question=question)
-            try:
-                # ------------------------------
-                # CLEAN & PARSE INPUT
-                # ------------------------------
-                # Replace ^ with ** for SymPy and remove spaces
-                q_clean = question.replace("^", "**").replace(" ", "")
+        # Physical Sciences has no deterministic solver at all - every
+        # question goes straight through the LLM, the same fallback path
+        # Mathematics only reaches when its SymPy solver can't parse
+        # something. That makes it a paid-tier feature, same as OCR/PDF -
+        # see tiers.py's llm_fallback_enabled.
+        if subject == "🔬 Physical Sciences" and not can_use_llm_fallback(effective_tier):
+            st.warning("🔬 Physical Sciences is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
+        else:
+            solve_clicked = st.button("Solve")
+            if solve_clicked and question:
+                allowed, limit_message = can_solve(auth_user["id"], effective_tier)
+                if not allowed:
+                    st.warning(limit_message)
+                    st.stop()
+                record_solve(auth_user["id"])
+                record_solved_question(auth_user["id"], "ai_tutor", paper=paper, topic=topic, question=question)
 
-                # Split by comma to handle simultaneous equations
-                raw_eqs = q_clean.split(",")
-
-                # Identify all variable symbols (e.g., x, y) - works for ANY letter(s)
-                # the learner uses, not just x/y.
-                symbols_in_expr = detect_variables(q_clean)
-                symbols_dict = {s: sp.symbols(s) for s in symbols_in_expr}
-                var_list = list(symbols_dict.values())
-
-                # =====================================================
-                # PAPER 1
-                # =====================================================
-                if topic == "Algebra":
-                    steps = solve_algebra(question)
-
-                elif topic == "Sequences":
-                    steps = solve_sequences(question)
-
-                elif topic == "Financial Mathematics":
-                    steps = solve_financial_mathematics(question)
-
-                elif topic == "Calculus":
-                    steps = solve_calculus(question)
-
-                elif topic == "Functions & Graphs":
-                    steps = solve_functions_graphs(question)
-
-                elif topic == "Analytical Geometry":
-                    steps = solve_analytical_geometry(question)
-
-                elif topic == "Trigonometry":
-                    steps = solve_trigonometry(question)
-
-                elif topic == "Statistics":
-                    steps = solve_statistics(question)
-
-                elif topic == "Probability":
-                    steps = solve_probability(question)
-
-                elif topic == "Euclidean Geometry":
-                    steps = solve_euclidean_geometry_topic(question)
-
-                else:
-                    steps = []
-
-                # Every solve_* function catches its own parsing failures
-                # internally and returns an "error" step rather than raising -
-                # so a failed solve has to be detected here, not just in the
-                # except block below (which only ever catches the rarer case
-                # of something crashing before it can even build a step list).
-                if steps_contain_error(steps) and can_use_llm_fallback(effective_tier):
-                    with st.spinner("That one needs a closer look — let me work through it…"):
+                if subject == "🔬 Physical Sciences":
+                    with st.spinner("Working through it…"):
                         try:
-                            steps = solve_with_llm(question, topic=topic, paper=paper)
-                            render_steps(steps)
-                            st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
-                        except Exception:
-                            render_steps(steps)
-                else:
-                    render_steps(steps)
-
-            except Exception as e:
-                if can_use_llm_fallback(effective_tier):
-                    with st.spinner("That one needs a closer look — let me work through it…"):
-                        try:
-                            render_steps(solve_with_llm(question, topic=topic, paper=paper))
-                            st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
-                        except Exception:
-                            st.error("Invalid expression or input")
+                            render_steps(solve_with_llm(question, topic=topic, paper=paper, subject="Physical Sciences"))
+                        except Exception as e:
+                            st.error("Couldn't solve that question. Please try rephrasing it.")
                             st.caption(str(e))
                 else:
-                    st.error("Invalid expression or input")
-                    st.caption(str(e))
+                    try:
+                        # ------------------------------
+                        # CLEAN & PARSE INPUT
+                        # ------------------------------
+                        # Replace ^ with ** for SymPy and remove spaces
+                        q_clean = question.replace("^", "**").replace(" ", "")
+
+                        # Split by comma to handle simultaneous equations
+                        raw_eqs = q_clean.split(",")
+
+                        # Identify all variable symbols (e.g., x, y) - works for ANY letter(s)
+                        # the learner uses, not just x/y.
+                        symbols_in_expr = detect_variables(q_clean)
+                        symbols_dict = {s: sp.symbols(s) for s in symbols_in_expr}
+                        var_list = list(symbols_dict.values())
+
+                        # =====================================================
+                        # PAPER 1
+                        # =====================================================
+                        if topic == "Algebra":
+                            steps = solve_algebra(question)
+
+                        elif topic == "Sequences":
+                            steps = solve_sequences(question)
+
+                        elif topic == "Financial Mathematics":
+                            steps = solve_financial_mathematics(question)
+
+                        elif topic == "Calculus":
+                            steps = solve_calculus(question)
+
+                        elif topic == "Functions & Graphs":
+                            steps = solve_functions_graphs(question)
+
+                        elif topic == "Analytical Geometry":
+                            steps = solve_analytical_geometry(question)
+
+                        elif topic == "Trigonometry":
+                            steps = solve_trigonometry(question)
+
+                        elif topic == "Statistics":
+                            steps = solve_statistics(question)
+
+                        elif topic == "Probability":
+                            steps = solve_probability(question)
+
+                        elif topic == "Euclidean Geometry":
+                            steps = solve_euclidean_geometry_topic(question)
+
+                        else:
+                            steps = []
+
+                        # Every solve_* function catches its own parsing failures
+                        # internally and returns an "error" step rather than raising -
+                        # so a failed solve has to be detected here, not just in the
+                        # except block below (which only ever catches the rarer case
+                        # of something crashing before it can even build a step list).
+                        if steps_contain_error(steps) and can_use_llm_fallback(effective_tier):
+                            with st.spinner("That one needs a closer look — let me work through it…"):
+                                try:
+                                    steps = solve_with_llm(question, topic=topic, paper=paper, subject="Mathematics")
+                                    render_steps(steps)
+                                    st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
+                                except Exception:
+                                    render_steps(steps)
+                        else:
+                            render_steps(steps)
+
+                    except Exception as e:
+                        if can_use_llm_fallback(effective_tier):
+                            with st.spinner("That one needs a closer look — let me work through it…"):
+                                try:
+                                    render_steps(solve_with_llm(question, topic=topic, paper=paper, subject="Mathematics"))
+                                    st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
+                                except Exception:
+                                    st.error("Invalid expression or input")
+                                    st.caption(str(e))
+                        else:
+                            st.error("Invalid expression or input")
+                            st.caption(str(e))
 
     elif input_method == "📷 Photo":
         st.caption(
@@ -1010,12 +1078,14 @@ elif mode == "🗄️ Past Papers Library":
         "November (Final)",
     ]
     DOCUMENT_TYPE_OPTIONS = ["Question Paper", "Memo"]
+    SUBJECT_OPTIONS = ["Mathematics", "Physical Sciences"]
 
     if is_admin_user:
         with st.expander("➕ Add a new past paper (admin only)"):
             with st.form("add_past_paper_form", clear_on_submit=True):
                 up_col1, up_col2 = st.columns(2)
                 with up_col1:
+                    up_subject = st.selectbox("Subject", SUBJECT_OPTIONS)
                     up_year = st.number_input("Year", min_value=2000, max_value=2100, value=2021, step=1)
                     up_paper_number = st.selectbox("Paper", [1, 2])
                     up_document_type = st.selectbox("Document type", DOCUMENT_TYPE_OPTIONS)
@@ -1033,18 +1103,26 @@ elif mode == "🗄️ Past Papers Library":
                             title=title, year=int(up_year), paper_number=int(up_paper_number),
                             file_name=up_file.name, file_data=up_file.read(),
                             variant=up_variant, exam_series=up_exam_series,
-                            document_type=up_document_type, uploaded_by=auth_user["id"],
+                            document_type=up_document_type, subject=up_subject,
+                            uploaded_by=auth_user["id"],
                         )
-                        st.success(f"Uploaded {title} — Paper {up_paper_number} {up_document_type} ({up_variant}).")
+                        st.success(f"Uploaded {title} — {up_subject} Paper {up_paper_number} {up_document_type} ({up_variant}).")
                         st.rerun()
 
     if not can_use_past_papers(effective_tier):
         st.warning("🗄️ The Past Papers Library is a Premium feature. Upgrade from the sidebar to unlock it.")
     else:
-        papers = list_past_papers()
-        if not papers:
+        all_papers = list_past_papers()
+        if not all_papers:
             st.info("No papers uploaded yet — check back soon.")
         else:
+            available_subjects = sorted({p["subject"] for p in all_papers})
+            subject_filter = (
+                st.radio("Subject", available_subjects, horizontal=True, key="pp_subject_filter")
+                if len(available_subjects) > 1 else available_subjects[0]
+            )
+            papers = [p for p in all_papers if p["subject"] == subject_filter]
+
             def _render_paper_row(p):
                 pc1, pc2, pc3 = st.columns([3, 1, 1])
                 with pc1:
@@ -1245,45 +1323,108 @@ elif mode=="🎯 Learner Profile":
 # FORMULA SHEET
 # =====================================================
 elif mode == "📏 Formula Sheet":
-    st.title("📏 Complete Matric Formula Sheet")
-    st.info("Grouped according to NSC Papers")
+    fs_subject = st.radio("Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="fs_subject")
 
+    if fs_subject == "🧮 Mathematics":
+        st.title("📏 Complete Matric Formula Sheet")
+        st.info("Grouped according to NSC Papers")
 
-    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-    with col1:
-        st.header("📑 Paper 1")
-        with st.expander("Algebra & Sequences", expanded=True):
-            st.latex(r"x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}")
-            st.latex(r"T_n = a + (n-1)d")
-            st.latex(r"S_n = \frac{n}{2}[2a + (n-1)d]")
-            st.latex(r"T_n = ar^{n-1}")
-            st.latex(r"S_\infty = \frac{a}{1-r}")
+        with col1:
+            st.header("📑 Paper 1")
+            with st.expander("Algebra & Sequences", expanded=True):
+                st.latex(r"x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}")
+                st.latex(r"T_n = a + (n-1)d")
+                st.latex(r"S_n = \frac{n}{2}[2a + (n-1)d]")
+                st.latex(r"T_n = ar^{n-1}")
+                st.latex(r"S_\infty = \frac{a}{1-r}")
 
-        with st.expander("Financial Mathematics"):
-            st.latex(r"A = P(1 + i)^n")
-            st.latex(r"A = P(1 + ni)")
-            st.latex(r"F = \frac{x[(1+i)^n - 1]}{i}")
-            st.latex(r"P = \frac{x[1-(1+i)^{-n}]}{i}")
+            with st.expander("Financial Mathematics"):
+                st.latex(r"A = P(1 + i)^n")
+                st.latex(r"A = P(1 + ni)")
+                st.latex(r"F = \frac{x[(1+i)^n - 1]}{i}")
+                st.latex(r"P = \frac{x[1-(1+i)^{-n}]}{i}")
 
-        with st.expander("Calculus"):
-            st.latex(r"f'(x)=\lim_{h\to0}\frac{f(x+h)-f(x)}{h}")
-            st.latex(r"\frac{d}{dx}[x^n]=nx^{n-1}")
+            with st.expander("Calculus"):
+                st.latex(r"f'(x)=\lim_{h\to0}\frac{f(x+h)-f(x)}{h}")
+                st.latex(r"\frac{d}{dx}[x^n]=nx^{n-1}")
 
-    with col2:
-        st.header("📑 Paper 2")
-        with st.expander("Analytical Geometry", expanded=True):
-            st.latex(r"d=\sqrt{(x_2-x_1)^2+(y_2-y_1)^2}")
-            st.latex(r"(x-a)^2+(y-b)^2=r^2")
+        with col2:
+            st.header("📑 Paper 2")
+            with st.expander("Analytical Geometry", expanded=True):
+                st.latex(r"d=\sqrt{(x_2-x_1)^2+(y_2-y_1)^2}")
+                st.latex(r"(x-a)^2+(y-b)^2=r^2")
 
-        with st.expander("Trigonometry"):
-            st.latex(r"\frac{a}{\sin A}=\frac{b}{\sin B}")
-            st.latex(r"a^2=b^2+c^2-2bc\cos A")
+            with st.expander("Trigonometry"):
+                st.latex(r"\frac{a}{\sin A}=\frac{b}{\sin B}")
+                st.latex(r"a^2=b^2+c^2-2bc\cos A")
 
-        with st.expander("Statistics & Probability"):
-            st.latex(r"\bar{x}=\frac{\sum x}{n}")
-            st.latex(r"\sigma^2=\frac{\sum(x-\bar{x})^2}{n}")
-            st.latex(r"P(A)=\frac{n(A)}{n(S)}")
+            with st.expander("Statistics & Probability"):
+                st.latex(r"\bar{x}=\frac{\sum x}{n}")
+                st.latex(r"\sigma^2=\frac{\sum(x-\bar{x})^2}{n}")
+                st.latex(r"P(A)=\frac{n(A)}{n(S)}")
+
+    else:
+        st.title("📏 Physical Sciences Data Sheet")
+        st.info("The core constants and formulas from the NSC Information Sheet — for tables not included here (e.g. standard electrode potentials), refer to your exam data booklet.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.header("📑 Paper 1 — Physics")
+            with st.expander("Physical Constants", expanded=True):
+                st.latex(r"g = 9.8\ \text{m}\cdot\text{s}^{-2}")
+                st.latex(r"G = 6.67\times10^{-11}\ \text{N}\cdot\text{m}^2\cdot\text{kg}^{-2}")
+                st.latex(r"c = 3.0\times10^{8}\ \text{m}\cdot\text{s}^{-1}")
+                st.latex(r"e = 1.6\times10^{-19}\ \text{C}")
+                st.latex(r"m_e = 9.11\times10^{-31}\ \text{kg}")
+                st.latex(r"h = 6.63\times10^{-34}\ \text{J}\cdot\text{s}")
+                st.latex(r"k = 9.0\times10^{9}\ \text{N}\cdot\text{m}^2\cdot\text{C}^{-2}")
+
+            with st.expander("Mechanics"):
+                st.latex(r"v = u + at")
+                st.latex(r"\Delta x = ut + \tfrac12at^2")
+                st.latex(r"v^2 = u^2 + 2a\Delta x")
+                st.latex(r"F_{net} = ma")
+                st.latex(r"p = mv \qquad F\Delta t = \Delta p")
+                st.latex(r"W = F\Delta x\cos\theta \qquad P = \frac{W}{\Delta t} = Fv")
+                st.latex(r"E_p = mgh \qquad E_k = \tfrac12mv^2")
+                st.latex(r"F_g = \frac{Gm_1m_2}{d^2}")
+
+            with st.expander("Waves, Sound & Light"):
+                st.latex(r"v = f\lambda")
+                st.latex(r"f_L = f_s\left(\frac{v\pm v_L}{v\pm v_s}\right) \quad \text{(Doppler Effect)}")
+
+        with col2:
+            st.header("📑 Paper 1 — Electricity & Magnetism")
+            with st.expander("Electrostatics & Circuits", expanded=True):
+                st.latex(r"F = \frac{kQ_1Q_2}{r^2} \qquad E = \frac{kQ}{r^2}")
+                st.latex(r"V = \frac{W}{Q} \qquad I = \frac{\Delta Q}{\Delta t}")
+                st.latex(r"R = \frac{V}{I} \qquad P = VI = I^2R = \frac{V^2}{R}")
+                st.latex(r"\varepsilon = I(R+r)")
+                st.latex(r"R_s = R_1+R_2+\dots \qquad \frac{1}{R_p} = \frac{1}{R_1}+\frac{1}{R_2}+\dots")
+
+            with st.expander("Electrodynamics"):
+                st.latex(r"\varepsilon = N\frac{\Delta\Phi}{\Delta t} \quad \text{(Faraday's Law)}")
+                st.latex(r"\Phi = BA\cos\theta")
+
+            st.header("📑 Paper 2 — Chemistry")
+            with st.expander("Stoichiometry & Gases", expanded=True):
+                st.latex(r"N_A = 6.02\times10^{23}\ \text{mol}^{-1}")
+                st.latex(r"V_m = 22.4\ \text{dm}^3\cdot\text{mol}^{-1}\ \text{at STP}")
+                st.latex(r"R = 8.31\ \text{J}\cdot\text{K}^{-1}\cdot\text{mol}^{-1}")
+                st.latex(r"n = \frac{m}{M} \qquad n = \frac{N}{N_A} \qquad n = cV")
+                st.latex(r"pV = nRT")
+
+            with st.expander("Equilibrium, Acids & Bases"):
+                st.latex(r"K_c = \frac{[\text{products}]}{[\text{reactants}]}")
+                st.latex(r"pH = -\log[H_3O^+] \qquad pOH = -\log[OH^-]")
+                st.latex(r"K_w = [H_3O^+][OH^-] = 1\times10^{-14}\ \text{at } 25^\circ\text{C}")
+                st.latex(r"pH + pOH = 14")
+
+            with st.expander("Electrochemistry"):
+                st.latex(r"E^\circ_{cell} = E^\circ_{cathode} - E^\circ_{anode}")
 
 # =====================================================
 # HOME DASHBOARD

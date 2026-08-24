@@ -129,6 +129,7 @@ class SolveRequest(BaseModel):
     paper: str
     topic: str
     question: str
+    subject: str = "Mathematics"
 
 
 class PracticeCheckRequest(BaseModel):
@@ -260,6 +261,25 @@ def solve(body: SolveRequest, authorization: str = Header(None)):
     if not allowed:
         raise HTTPException(status_code=429, detail=limit_message)
 
+    # Physical Sciences has no deterministic solver at all (unlike
+    # Mathematics' SymPy-based solve_* functions) - every question goes
+    # straight through the LLM, the same fallback path Mathematics only
+    # reaches when its SymPy solver can't parse something. That makes it
+    # a paid-tier feature, same as OCR/PDF/llm_fallback - see tiers.py.
+    if body.subject == "Physical Sciences":
+        if not can_use_llm_fallback(effective_tier):
+            raise HTTPException(
+                status_code=403,
+                detail="Physical Sciences is a Learner/Premium feature. Upgrade to unlock it.",
+            )
+        record_solve(user["id"])
+        record_solved_question(user["id"], "ai_tutor", paper=body.paper, topic=body.topic, question=body.question)
+        try:
+            steps = solve_with_llm(body.question, topic=body.topic, paper=body.paper, subject=body.subject)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not solve that question. Try rephrasing it.")
+        return {"steps": steps}
+
     solver = SUPPORTED_SOLVE_TOPICS.get(body.topic)
     if solver is None:
         raise HTTPException(
@@ -281,13 +301,13 @@ def solve(body: SolveRequest, authorization: str = Header(None)):
         # build a step list).
         if steps_contain_error(steps) and can_use_llm_fallback(effective_tier):
             try:
-                steps = solve_with_llm(body.question, topic=body.topic, paper=body.paper)
+                steps = solve_with_llm(body.question, topic=body.topic, paper=body.paper, subject=body.subject)
             except Exception:
                 pass  # keep the original error steps rather than losing them
     except Exception:
         if can_use_llm_fallback(effective_tier):
             try:
-                steps = solve_with_llm(body.question, topic=body.topic, paper=body.paper)
+                steps = solve_with_llm(body.question, topic=body.topic, paper=body.paper, subject=body.subject)
             except Exception:
                 raise HTTPException(status_code=400, detail="Could not solve that question. Try rephrasing it.")
         else:
@@ -414,25 +434,29 @@ def billing_cancel(authorization: str = Header(None)):
 
 
 @app.get("/practice/topics")
-def practice_topics(authorization: str = Header(None)):
-    """Available paper/topic combinations - same practice_data app.py's
-    Practice Questions mode reads from, just as JSON."""
+def practice_topics(subject: str = "Mathematics", authorization: str = Header(None)):
+    """Available paper/topic combinations for one subject - same
+    practice_data app.py's Practice Questions mode reads from, just as
+    JSON."""
     _auth_user(authorization)
+    papers = practice_data.get(subject, {})
     return {
         paper: list(topics.keys())
-        for paper, topics in practice_data.items()
+        for paper, topics in papers.items()
     }
 
 
 @app.get("/practice/questions")
-def practice_questions(paper: str, topic: str, authorization: str = Header(None)):
-    """Every question for one paper/topic, including hint/solution_steps/
-    final_answer - the mobile client decides when to reveal those client
-    side, exactly like app.py's "Show Solution" button does."""
+def practice_questions(paper: str, topic: str, subject: str = "Mathematics", authorization: str = Header(None)):
+    """Every question for one subject/paper/topic, including hint/
+    solution_steps/final_answer - the mobile client decides when to
+    reveal those client side, exactly like app.py's "Show Solution"
+    button does."""
     _auth_user(authorization)
-    topics = practice_data.get(paper)
+    papers = practice_data.get(subject)
+    topics = papers.get(paper) if papers else None
     if topics is None or topic not in topics:
-        raise HTTPException(status_code=404, detail="Unknown paper/topic.")
+        raise HTTPException(status_code=404, detail="Unknown subject/paper/topic.")
     return {"questions": topics[topic]}
 
 

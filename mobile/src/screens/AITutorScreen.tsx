@@ -14,7 +14,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { useAuth } from "../context/AuthContext";
-import { colors, PAPER_TOPICS, SOLVABLE_TOPICS, topicColors, EXAMPLE_QUESTIONS } from "../theme";
+import { colors, PAPER_TOPICS_BY_SUBJECT, SOLVABLE_TOPICS, topicColors, EXAMPLE_QUESTIONS, SUBJECTS, Subject } from "../theme";
 import {
   ApiError,
   solve,
@@ -73,7 +73,8 @@ export default function AITutorScreen() {
 
 function TextSolver() {
   const { token, me, refreshMe } = useAuth();
-  const [paper, setPaper] = useState<"Paper 1" | "Paper 2">("Paper 1");
+  const [subject, setSubject] = useState<Subject>("Mathematics");
+  const [paper, setPaper] = useState<string>("Paper 1");
   const [topic, setTopic] = useState("Algebra");
   const [question, setQuestion] = useState("");
   const [steps, setSteps] = useState<SolveStep[] | null>(null);
@@ -82,12 +83,28 @@ function TextSolver() {
   const [showExamples, setShowExamples] = useState(false);
   const [solveCount, setSolveCount] = useState(0);
 
-  function selectPaper(p: "Paper 1" | "Paper 2") {
-    setPaper(p);
-    setTopic(PAPER_TOPICS[p][0]);
+  const paperOptions = Object.keys(PAPER_TOPICS_BY_SUBJECT[subject]);
+
+  function selectSubject(s: Subject) {
+    setSubject(s);
+    const firstPaper = Object.keys(PAPER_TOPICS_BY_SUBJECT[s])[0];
+    setPaper(firstPaper);
+    setTopic(PAPER_TOPICS_BY_SUBJECT[s][firstPaper][0]);
     setSteps(null);
     setError(null);
   }
+
+  function selectPaper(p: string) {
+    setPaper(p);
+    setTopic(PAPER_TOPICS_BY_SUBJECT[subject][p][0]);
+    setSteps(null);
+    setError(null);
+  }
+
+  // Physical Sciences has no deterministic solver at all - every question
+  // goes through the LLM fallback server-side, the same paid-tier gate
+  // OCR/PDF already use (see api_server.py's /solve).
+  const physicalSciencesLocked = subject === "Physical Sciences" && me?.effective_tier === "free";
 
   async function handleSolve() {
     if (!token || !question.trim()) return;
@@ -95,7 +112,7 @@ function TextSolver() {
     setError(null);
     setSteps(null);
     try {
-      const res = await solve(token, { paper, topic, question: question.trim() });
+      const res = await solve(token, { paper, topic, question: question.trim(), subject });
       setSteps(res.steps);
       setSolveCount((c) => c + 1);
       await refreshMe();
@@ -108,9 +125,24 @@ function TextSolver() {
 
   return (
     <>
+      <Text style={styles.label}>Subject</Text>
+      <View style={styles.row}>
+        {SUBJECTS.map((s) => (
+          <Pressable
+            key={s}
+            style={[styles.chip, subject === s && styles.chipActive]}
+            onPress={() => selectSubject(s)}
+          >
+            <Text textBreakStrategy="simple" style={[styles.chipText, subject === s && styles.chipTextActive]}>
+              {s}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
       <Text style={styles.label}>Paper</Text>
       <View style={styles.row}>
-        {(["Paper 1", "Paper 2"] as const).map((p) => (
+        {paperOptions.map((p) => (
           <Pressable
             key={p}
             style={[styles.chip, paper === p && styles.chipActive]}
@@ -125,7 +157,7 @@ function TextSolver() {
 
       <Text style={styles.label}>Topic</Text>
       <View style={styles.row}>
-        {PAPER_TOPICS[paper].map((t) => {
+        {PAPER_TOPICS_BY_SUBJECT[subject][paper].map((t) => {
           const solvable = SOLVABLE_TOPICS.has(t);
           return (
             <Pressable
@@ -150,69 +182,79 @@ function TextSolver() {
         })}
       </View>
 
-      <Pressable style={styles.examplesToggle} onPress={() => setShowExamples((v) => !v)}>
-        <Text style={styles.examplesToggleText}>
-          {showExamples ? "▾" : "▸"} 💡 Not sure what to type? See examples for this topic
-        </Text>
-      </Pressable>
-      {showExamples && (
-        <View style={styles.examplesBox}>
-          {(EXAMPLE_QUESTIONS[topic] ?? []).map((ex, i) => (
-            <Pressable
-              key={i}
-              style={styles.exampleRow}
-              onPress={() => {
-                setQuestion(ex);
-                setShowExamples(false);
-              }}
-            >
-              <Text style={styles.exampleText}>{ex}</Text>
-            </Pressable>
-          ))}
+      {physicalSciencesLocked ? (
+        <View style={styles.lockedBanner}>
+          <Text style={styles.lockedText}>
+            Physical Sciences is a Learner/Premium feature. Upgrade from the Home screen to unlock it.
+          </Text>
         </View>
-      )}
+      ) : (
+        <>
+          <Pressable style={styles.examplesToggle} onPress={() => setShowExamples((v) => !v)}>
+            <Text style={styles.examplesToggleText}>
+              {showExamples ? "▾" : "▸"} 💡 Not sure what to type? See examples for this topic
+            </Text>
+          </Pressable>
+          {showExamples && (
+            <View style={styles.examplesBox}>
+              {(EXAMPLE_QUESTIONS[topic] ?? []).map((ex, i) => (
+                <Pressable
+                  key={i}
+                  style={styles.exampleRow}
+                  onPress={() => {
+                    setQuestion(ex);
+                    setShowExamples(false);
+                  }}
+                >
+                  <Text style={styles.exampleText}>{ex}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
 
-      <Text style={styles.label}>Enter your expression or question</Text>
-      <TextInput
-        style={styles.input}
-        value={question}
-        onChangeText={setQuestion}
-        placeholder="e.g. x^2-5x+6=0"
-        autoCapitalize="none"
-      />
+          <Text style={styles.label}>Enter your expression or question</Text>
+          <TextInput
+            style={styles.input}
+            value={question}
+            onChangeText={setQuestion}
+            placeholder="e.g. x^2-5x+6=0"
+            autoCapitalize="none"
+          />
 
-      {!SOLVABLE_TOPICS.has(topic) && (
-        <Text style={styles.notice}>
-          {topic} isn't available in the app yet — try Algebra here, or use the web version for this topic.
-        </Text>
-      )}
+          {!SOLVABLE_TOPICS.has(topic) && (
+            <Text style={styles.notice}>
+              {topic} isn't available in the app yet — try Algebra here, or use the web version for this topic.
+            </Text>
+          )}
 
-      <Pressable
-        style={[styles.solveButton, (solving || !question.trim()) && styles.buttonDisabled]}
-        onPress={handleSolve}
-        disabled={solving || !question.trim()}
-      >
-        {solving ? <ActivityIndicator color="#fff" /> : <Text style={styles.solveButtonText}>Solve</Text>}
-      </Pressable>
+          <Pressable
+            style={[styles.solveButton, (solving || !question.trim()) && styles.buttonDisabled]}
+            onPress={handleSolve}
+            disabled={solving || !question.trim()}
+          >
+            {solving ? <ActivityIndicator color="#fff" /> : <Text style={styles.solveButtonText}>Solve</Text>}
+          </Pressable>
 
-      {me?.daily_limit != null && (
-        <Text style={styles.usage}>
-          {me.used_today}/{me.daily_limit} solves used today
-        </Text>
-      )}
+          {me?.daily_limit != null && (
+            <Text style={styles.usage}>
+              {me.used_today}/{me.daily_limit} solves used today
+            </Text>
+          )}
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {steps && (
-        // key forces a full fresh mount per solve (not an in-place patch
-        // of the previous result's views) - a defensive measure against
-        // Android sometimes carrying over stale text measurements when
-        // ScrollView content is updated rather than freshly laid out.
-        <View key={solveCount} style={styles.resultCard}>
-          {steps.map((step, i) => (
-            <StepView key={i} step={step} />
-          ))}
-        </View>
+          {steps && (
+            // key forces a full fresh mount per solve (not an in-place patch
+            // of the previous result's views) - a defensive measure against
+            // Android sometimes carrying over stale text measurements when
+            // ScrollView content is updated rather than freshly laid out.
+            <View key={solveCount} style={styles.resultCard}>
+              {steps.map((step, i) => (
+                <StepView key={i} step={step} />
+              ))}
+            </View>
+          )}
+        </>
       )}
     </>
   );

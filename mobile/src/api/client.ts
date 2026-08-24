@@ -116,7 +116,7 @@ export function getMe(token: string) {
   return request<MeResponse>("/me", { token });
 }
 
-export function solve(token: string, params: { paper: string; topic: string; question: string }) {
+export function solve(token: string, params: { paper: string; topic: string; question: string; subject?: string }) {
   return request<{ steps: SolveStep[] }>("/solve", { method: "POST", body: params, token });
 }
 
@@ -222,12 +222,12 @@ export type PracticeQuestion = {
   difficulty?: string;
 };
 
-export function fetchPracticeTopics(token: string) {
-  return request<Record<string, string[]>>("/practice/topics", { token });
+export function fetchPracticeTopics(token: string, subject: string = "Mathematics") {
+  return request<Record<string, string[]>>(`/practice/topics?subject=${encodeURIComponent(subject)}`, { token });
 }
 
-export function fetchPracticeQuestions(token: string, paper: string, topic: string) {
-  const params = `?paper=${encodeURIComponent(paper)}&topic=${encodeURIComponent(topic)}`;
+export function fetchPracticeQuestions(token: string, paper: string, topic: string, subject: string = "Mathematics") {
+  const params = `?paper=${encodeURIComponent(paper)}&topic=${encodeURIComponent(topic)}&subject=${encodeURIComponent(subject)}`;
   return request<{ questions: PracticeQuestion[] }>(`/practice/questions${params}`, { token });
 }
 

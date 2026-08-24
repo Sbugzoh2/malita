@@ -1968,7 +1968,14 @@ def solve_probability(question: str) -> list:
     result = interpret_probability_text(question)
 
     if result is None:
-        st.info(
+        # An "error" step (not "info") is what signals a failed solve to
+        # steps_contain_error() - app.py/api_server.py check that to decide
+        # whether to hand the question to the LLM fallback. st.info() here
+        # would silently look like a successful solve to that check, so the
+        # AI fallback would never kick in even for a learner whose tier
+        # allows it - it would just always see this generic example instead
+        # of an actual answer to what they asked.
+        st.error(
             "Couldn't automatically interpret this as a word problem — "
             "try phrasing like the examples shown above (e.g. dice, coins, "
             "or a bag of coloured balls). Showing a generic 1-in-6 example below."
@@ -2139,7 +2146,10 @@ def solve_euclidean_geometry_topic(question: str) -> list:
         result = solve_euclidean_geometry(question)
 
         if result is None:
-            st.info(
+            # st.error (not st.info) so steps_contain_error() correctly
+            # flags this as a failed solve - see the matching comment in
+            # solve_probability() above for why that distinction matters.
+            st.error(
                 "Type a question using keywords like 'angle at centre', "
                 "'angle at circumference', 'cyclic quadrilateral', or "
                 "'tangent chord' — or browse the theorem reference below."

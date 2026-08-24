@@ -608,8 +608,6 @@ _NAV_OPTIONS = [
     "🏠 Home",
     "🧮 AI Tutor",
     "📝 Practice Questions",
-    "📷 OCR Question",
-    "📄 Upload PDF Document",
     "🗄️ Past Papers Library",
     "🎯 Learner Profile",
     "📏 Formula Sheet",
@@ -756,245 +754,243 @@ elif mode == "🧮 AI Tutor":
 
 
 
-    paper = st.selectbox("Select Paper", ["Paper 1", "Paper 2"])
-
-    if paper == "Paper 1":
-        topic = st.selectbox(
-            "Topic",
-            ["Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs"]
-        )
-    else:
-        topic = st.selectbox(
-            "Topic",
-            ["Analytical Geometry", "Trigonometry", "Statistics", "Probability", "Euclidean Geometry"]
-        )
-    topic_badge(topic)
-
-    with st.expander("💡 Not sure what to type? See examples for this topic"):
-        EXAMPLE_QUESTIONS = {
-            "Algebra": ["x^2-5x+6=0", "2x+3<11", "x+y=10, 2x-y=2"],
-            "Sequences": ["3,7,11,...,99", "2,6,18,54"],
-            "Financial Mathematics": [
-                "R5000 is invested at 8% p.a. compounded quarterly for 3 years. Find the accumulated amount.",
-                "A car worth R240000 depreciates at 12% p.a. on the reducing balance method. Find its value after 5 years.",
-                "Thabo saves R800 at the end of every month for 4 years in an account earning 9% p.a. compounded monthly. Find the future value.",
-            ],
-            "Calculus": ["differentiate 3x^2-5x+4", "f(x) = x^3 - 2x"],
-            "Functions & Graphs": ["y=x^2-4x+3", "x=y^2", "y=2/(x-1)+3"],
-            "Analytical Geometry": ["Find the distance between A(1,2) and B(4,6)", "gradient of A(1,1) and B(5,9)"],
-            "Trigonometry": ["solve 2sin(x)=1 for 0<=x<=360", "sin(30)"],
-            "Statistics": ["2,4,6,8,10,12", "mean and standard deviation of 5,8,12,15,20"],
-            "Probability": [
-                "A bag contains 5 red and 3 blue balls. Find the probability of drawing a red ball.",
-                "A die is rolled and a coin is tossed. Find the probability of getting a 6 and a head.",
-                "P(A)=0.4, P(B)=0.3, A and B are mutually exclusive. Find P(A or B).",
-            ],
-            "Euclidean Geometry": ["angle at centre = 100, find angle at circumference", "cyclic quadrilateral angle A = 110, find angle C"],
-        }
-        for ex in EXAMPLE_QUESTIONS.get(topic, []):
-            st.code(ex, language=None)
-
-    # A plain `value=` text_input "locks in" whatever the learner types and
-    # ignores value= on later reruns — so a Clear button that only resets
-    # copied_text wouldn't actually clear text already typed. Using an
-    # explicit key lets both Clear and OCR/PDF "Transfer to Solver" update
-    # the box reliably: copied_text is treated as a one-shot pending value,
-    # adopted into the keyed widget then immediately consumed (reset to
-    # "") so it can't re-overwrite a later manual edit or Clear.
-    QUESTION_KEY = "ai_tutor_question_input"
-    if QUESTION_KEY not in st.session_state:
-        st.session_state[QUESTION_KEY] = st.session_state.copied_text
-    if st.session_state.copied_text and st.session_state.copied_text != st.session_state[QUESTION_KEY]:
-        st.session_state[QUESTION_KEY] = st.session_state.copied_text
-    st.session_state.copied_text = ""
-
-    # Create the Clear button (and apply its effect) BEFORE the text_input
-    # below is instantiated — Streamlit raises an exception if a keyed
-    # widget's session_state is written to AFTER that same widget has
-    # already been created in this run, so the write order here matters
-    # even though the button renders visually to the right of the input.
-    col_input, col_clear = st.columns([6, 1])
-    with col_clear:
-        st.write("")  # spacer so the button lines up with the input box, not its label
-        clear_clicked = st.button("🗑️ Clear")
-    if clear_clicked:
-        st.session_state[QUESTION_KEY] = ""
-
-    with col_input:
-        question = st.text_input(
-            "Enter your expression or type your question in words:",
-            key=QUESTION_KEY,
-        )
-    x = sp.symbols("x")
-
-    solve_clicked = st.button("Solve")
-    if solve_clicked and question:
-        allowed, limit_message = can_solve(auth_user["id"], effective_tier)
-        if not allowed:
-            st.warning(limit_message)
-            st.stop()
-        record_solve(auth_user["id"])
-        record_solved_question(auth_user["id"], "ai_tutor", paper=paper, topic=topic, question=question)
-        try:
-            # ------------------------------
-            # CLEAN & PARSE INPUT
-            # ------------------------------
-            # Replace ^ with ** for SymPy and remove spaces
-            q_clean = question.replace("^", "**").replace(" ", "")
-            
-            # Split by comma to handle simultaneous equations
-            raw_eqs = q_clean.split(",")
-            
-            # Identify all variable symbols (e.g., x, y) - works for ANY letter(s)
-            # the learner uses, not just x/y.
-            symbols_in_expr = detect_variables(q_clean)
-            symbols_dict = {s: sp.symbols(s) for s in symbols_in_expr}
-            var_list = list(symbols_dict.values())
-
-            # =====================================================
-            # PAPER 1
-            # =====================================================
-            if topic == "Algebra":
-                steps = solve_algebra(question)
-
-            elif topic == "Sequences":
-                steps = solve_sequences(question)
-
-            elif topic == "Financial Mathematics":
-                steps = solve_financial_mathematics(question)
-
-            elif topic == "Calculus":
-                steps = solve_calculus(question)
-
-            elif topic == "Functions & Graphs":
-                steps = solve_functions_graphs(question)
-
-            elif topic == "Analytical Geometry":
-                steps = solve_analytical_geometry(question)
-
-            elif topic == "Trigonometry":
-                steps = solve_trigonometry(question)
-
-            elif topic == "Statistics":
-                steps = solve_statistics(question)
-
-            elif topic == "Probability":
-                steps = solve_probability(question)
-
-            elif topic == "Euclidean Geometry":
-                steps = solve_euclidean_geometry_topic(question)
-
-            else:
-                steps = []
-
-            # Every solve_* function catches its own parsing failures
-            # internally and returns an "error" step rather than raising -
-            # so a failed solve has to be detected here, not just in the
-            # except block below (which only ever catches the rarer case
-            # of something crashing before it can even build a step list).
-            if steps_contain_error(steps) and can_use_llm_fallback(effective_tier):
-                with st.spinner("That one needs a closer look — let me work through it…"):
-                    try:
-                        steps = solve_with_llm(question, topic=topic, paper=paper)
-                        render_steps(steps)
-                        st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
-                    except Exception:
-                        render_steps(steps)
-            else:
-                render_steps(steps)
-
-        except Exception as e:
-            if can_use_llm_fallback(effective_tier):
-                with st.spinner("That one needs a closer look — let me work through it…"):
-                    try:
-                        render_steps(solve_with_llm(question, topic=topic, paper=paper))
-                        st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
-                    except Exception:
-                        st.error("Invalid expression or input")
-                        st.caption(str(e))
-            else:
-                st.error("Invalid expression or input")
-                st.caption(str(e))
-
-# =====================================================
-# OCR
-# =====================================================
-elif mode=="📷 OCR Question":
-    st.title("📷 OCR Question")
-    st.caption(
-        "Take or upload a photo of one or more maths questions — Malita reads and solves "
-        "every question directly here, no need to retype anything."
+    input_method = st.radio(
+        "How would you like to ask your question?",
+        ["✍️ Type a Question", "📷 Photo", "📄 PDF Document"],
+        horizontal=True,
     )
-    if not can_use_ocr(effective_tier):
-        st.warning("📷 Photo upload & OCR is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
-    else:
-        img_file = st.file_uploader("Upload image", type=["png","jpg","jpeg"])
-        if img_file:
-            img_bytes = img_file.getvalue()
-            img = Image.open(img_file)
-            st.image(img, use_column_width=True)
 
-            solve_key = f"ocr_solved_{img_file.file_id}"
-            if solve_key not in st.session_state:
-                with st.spinner("Reading and solving every question in this photo with AI — this may take a moment…"):
-                    try:
-                        st.session_state[solve_key] = solve_photo_with_llm(img_bytes)
-                    except Exception:
-                        st.session_state[solve_key] = None
-                        st.error("Couldn't read that photo. Please try a clearer picture, better lighting, or less glare.")
+    if input_method == "✍️ Type a Question":
+        paper = st.selectbox("Select Paper", ["Paper 1", "Paper 2"])
 
-            solved = st.session_state.get(solve_key)
-            if solved:
-                for q in solved:
-                    st.markdown(f"#### Question {q['number']}")
-                    render_steps(q["steps"])
-                    st.divider()
+        if paper == "Paper 1":
+            topic = st.selectbox(
+                "Topic",
+                ["Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs"]
+            )
+        else:
+            topic = st.selectbox(
+                "Topic",
+                ["Analytical Geometry", "Trigonometry", "Statistics", "Probability", "Euclidean Geometry"]
+            )
+        topic_badge(topic)
 
-                if st.button("🔄 Not right? Re-read and re-solve this photo"):
-                    del st.session_state[solve_key]
-                    st.rerun()
+        with st.expander("💡 Not sure what to type? See examples for this topic"):
+            EXAMPLE_QUESTIONS = {
+                "Algebra": ["x^2-5x+6=0", "2x+3<11", "x+y=10, 2x-y=2"],
+                "Sequences": ["3,7,11,...,99", "2,6,18,54"],
+                "Financial Mathematics": [
+                    "R5000 is invested at 8% p.a. compounded quarterly for 3 years. Find the accumulated amount.",
+                    "A car worth R240000 depreciates at 12% p.a. on the reducing balance method. Find its value after 5 years.",
+                    "Thabo saves R800 at the end of every month for 4 years in an account earning 9% p.a. compounded monthly. Find the future value.",
+                ],
+                "Calculus": ["differentiate 3x^2-5x+4", "f(x) = x^3 - 2x"],
+                "Functions & Graphs": ["y=x^2-4x+3", "x=y^2", "y=2/(x-1)+3"],
+                "Analytical Geometry": ["Find the distance between A(1,2) and B(4,6)", "gradient of A(1,1) and B(5,9)"],
+                "Trigonometry": ["solve 2sin(x)=1 for 0<=x<=360", "sin(30)"],
+                "Statistics": ["2,4,6,8,10,12", "mean and standard deviation of 5,8,12,15,20"],
+                "Probability": [
+                    "A bag contains 5 red and 3 blue balls. Find the probability of drawing a red ball.",
+                    "A die is rolled and a coin is tossed. Find the probability of getting a 6 and a head.",
+                    "P(A)=0.4, P(B)=0.3, A and B are mutually exclusive. Find P(A or B).",
+                ],
+                "Euclidean Geometry": ["angle at centre = 100, find angle at circumference", "cyclic quadrilateral angle A = 110, find angle C"],
+            }
+            for ex in EXAMPLE_QUESTIONS.get(topic, []):
+                st.code(ex, language=None)
 
-# =====================================================
-# PDF
-# =====================================================
+        # A plain `value=` text_input "locks in" whatever the learner types and
+        # ignores value= on later reruns — so a Clear button that only resets
+        # copied_text wouldn't actually clear text already typed. Using an
+        # explicit key lets both Clear and a one-shot prefill update the box
+        # reliably: copied_text is treated as a one-shot pending value,
+        # adopted into the keyed widget then immediately consumed (reset to
+        # "") so it can't re-overwrite a later manual edit or Clear.
+        QUESTION_KEY = "ai_tutor_question_input"
+        if QUESTION_KEY not in st.session_state:
+            st.session_state[QUESTION_KEY] = st.session_state.copied_text
+        if st.session_state.copied_text and st.session_state.copied_text != st.session_state[QUESTION_KEY]:
+            st.session_state[QUESTION_KEY] = st.session_state.copied_text
+        st.session_state.copied_text = ""
 
-elif mode=="📄 Upload PDF Document":
-    st.title("📄 Upload PDF Document")
-    st.caption(
-        "Upload any PDF containing maths questions — a past paper, a worksheet, homework, "
-        "anything with problems on it — not just official exam papers. Malita reads and solves "
-        "every question directly here, no need to retype anything."
-    )
-    if not can_use_pdf(effective_tier):
-        st.warning("📄 PDF upload is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
-    else:
-        pdf = st.file_uploader("Upload PDF", type=["pdf"])
-        if pdf:
-            pdf_bytes = pdf.read()
-            st.caption(f"{pdf.name} · {len(pdf_bytes) // 1024} KB")
+        # Create the Clear button (and apply its effect) BEFORE the text_input
+        # below is instantiated — Streamlit raises an exception if a keyed
+        # widget's session_state is written to AFTER that same widget has
+        # already been created in this run, so the write order here matters
+        # even though the button renders visually to the right of the input.
+        col_input, col_clear = st.columns([6, 1])
+        with col_clear:
+            st.write("")  # spacer so the button lines up with the input box, not its label
+            clear_clicked = st.button("🗑️ Clear")
+        if clear_clicked:
+            st.session_state[QUESTION_KEY] = ""
 
-            solve_key = f"pdf_solved_{pdf.file_id}"
-            if solve_key not in st.session_state:
-                with st.spinner("Reading and solving every question in this document with AI — this may take a minute…"):
-                    try:
-                        transcribed = transcribe_pdf_with_llm(pdf_bytes)
-                        st.session_state[solve_key] = solve_full_paper(transcribed, paper_title=pdf.name) if transcribed.strip() else []
-                    except Exception:
-                        st.session_state[solve_key] = None
-                        st.error("Couldn't read that document. Please try a clearer scan or a different file.")
+        with col_input:
+            question = st.text_input(
+                "Enter your expression or type your question in words:",
+                key=QUESTION_KEY,
+            )
+        x = sp.symbols("x")
 
-            solved = st.session_state.get(solve_key)
-            if solved:
-                for q in solved:
-                    st.markdown(f"#### Question {q['number']}")
-                    render_steps(q["steps"])
-                    st.divider()
+        solve_clicked = st.button("Solve")
+        if solve_clicked and question:
+            allowed, limit_message = can_solve(auth_user["id"], effective_tier)
+            if not allowed:
+                st.warning(limit_message)
+                st.stop()
+            record_solve(auth_user["id"])
+            record_solved_question(auth_user["id"], "ai_tutor", paper=paper, topic=topic, question=question)
+            try:
+                # ------------------------------
+                # CLEAN & PARSE INPUT
+                # ------------------------------
+                # Replace ^ with ** for SymPy and remove spaces
+                q_clean = question.replace("^", "**").replace(" ", "")
 
-                if st.button("🔄 Not right? Re-read and re-solve this document"):
-                    del st.session_state[solve_key]
-                    st.rerun()
-            elif solved == []:
-                st.warning("Couldn't detect individual questions in this document.")
+                # Split by comma to handle simultaneous equations
+                raw_eqs = q_clean.split(",")
+
+                # Identify all variable symbols (e.g., x, y) - works for ANY letter(s)
+                # the learner uses, not just x/y.
+                symbols_in_expr = detect_variables(q_clean)
+                symbols_dict = {s: sp.symbols(s) for s in symbols_in_expr}
+                var_list = list(symbols_dict.values())
+
+                # =====================================================
+                # PAPER 1
+                # =====================================================
+                if topic == "Algebra":
+                    steps = solve_algebra(question)
+
+                elif topic == "Sequences":
+                    steps = solve_sequences(question)
+
+                elif topic == "Financial Mathematics":
+                    steps = solve_financial_mathematics(question)
+
+                elif topic == "Calculus":
+                    steps = solve_calculus(question)
+
+                elif topic == "Functions & Graphs":
+                    steps = solve_functions_graphs(question)
+
+                elif topic == "Analytical Geometry":
+                    steps = solve_analytical_geometry(question)
+
+                elif topic == "Trigonometry":
+                    steps = solve_trigonometry(question)
+
+                elif topic == "Statistics":
+                    steps = solve_statistics(question)
+
+                elif topic == "Probability":
+                    steps = solve_probability(question)
+
+                elif topic == "Euclidean Geometry":
+                    steps = solve_euclidean_geometry_topic(question)
+
+                else:
+                    steps = []
+
+                # Every solve_* function catches its own parsing failures
+                # internally and returns an "error" step rather than raising -
+                # so a failed solve has to be detected here, not just in the
+                # except block below (which only ever catches the rarer case
+                # of something crashing before it can even build a step list).
+                if steps_contain_error(steps) and can_use_llm_fallback(effective_tier):
+                    with st.spinner("That one needs a closer look — let me work through it…"):
+                        try:
+                            steps = solve_with_llm(question, topic=topic, paper=paper)
+                            render_steps(steps)
+                            st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
+                        except Exception:
+                            render_steps(steps)
+                else:
+                    render_steps(steps)
+
+            except Exception as e:
+                if can_use_llm_fallback(effective_tier):
+                    with st.spinner("That one needs a closer look — let me work through it…"):
+                        try:
+                            render_steps(solve_with_llm(question, topic=topic, paper=paper))
+                            st.caption("✨ Solved with AI assistance — this question needed extra help beyond our standard solver.")
+                        except Exception:
+                            st.error("Invalid expression or input")
+                            st.caption(str(e))
+                else:
+                    st.error("Invalid expression or input")
+                    st.caption(str(e))
+
+    elif input_method == "📷 Photo":
+        st.caption(
+            "Take or upload a photo of one or more maths questions — Malita reads and solves "
+            "every question directly here, no need to retype anything."
+        )
+        if not can_use_ocr(effective_tier):
+            st.warning("📷 Photo upload & OCR is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
+        else:
+            img_file = st.file_uploader("Upload image", type=["png","jpg","jpeg"])
+            if img_file:
+                img_bytes = img_file.getvalue()
+                img = Image.open(img_file)
+                st.image(img, use_column_width=True)
+
+                solve_key = f"ocr_solved_{img_file.file_id}"
+                if solve_key not in st.session_state:
+                    with st.spinner("Reading and solving every question in this photo with AI — this may take a moment…"):
+                        try:
+                            st.session_state[solve_key] = solve_photo_with_llm(img_bytes)
+                        except Exception:
+                            st.session_state[solve_key] = None
+                            st.error("Couldn't read that photo. Please try a clearer picture, better lighting, or less glare.")
+
+                solved = st.session_state.get(solve_key)
+                if solved:
+                    for q in solved:
+                        st.markdown(f"#### Question {q['number']}")
+                        render_steps(q["steps"])
+                        st.divider()
+
+                    if st.button("🔄 Not right? Re-read and re-solve this photo"):
+                        del st.session_state[solve_key]
+                        st.rerun()
+
+    else:  # 📄 PDF Document
+        st.caption(
+            "Upload any PDF containing maths questions — a past paper, a worksheet, homework, "
+            "anything with problems on it — not just official exam papers. Malita reads and solves "
+            "every question directly here, no need to retype anything."
+        )
+        if not can_use_pdf(effective_tier):
+            st.warning("📄 PDF upload is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
+        else:
+            pdf = st.file_uploader("Upload PDF", type=["pdf"])
+            if pdf:
+                pdf_bytes = pdf.read()
+                st.caption(f"{pdf.name} · {len(pdf_bytes) // 1024} KB")
+
+                solve_key = f"pdf_solved_{pdf.file_id}"
+                if solve_key not in st.session_state:
+                    with st.spinner("Reading and solving every question in this document with AI — this may take a minute…"):
+                        try:
+                            transcribed = transcribe_pdf_with_llm(pdf_bytes)
+                            st.session_state[solve_key] = solve_full_paper(transcribed, paper_title=pdf.name) if transcribed.strip() else []
+                        except Exception:
+                            st.session_state[solve_key] = None
+                            st.error("Couldn't read that document. Please try a clearer scan or a different file.")
+
+                solved = st.session_state.get(solve_key)
+                if solved:
+                    for q in solved:
+                        st.markdown(f"#### Question {q['number']}")
+                        render_steps(q["steps"])
+                        st.divider()
+
+                    if st.button("🔄 Not right? Re-read and re-solve this document"):
+                        del st.session_state[solve_key]
+                        st.rerun()
+                elif solved == []:
+                    st.warning("Couldn't detect individual questions in this document.")
 
 # =====================================================
 # PAST PAPERS LIBRARY
@@ -1312,16 +1308,6 @@ else:
         <rect x="28" y="52" width="20" height="6" rx="2" fill-opacity="0.5"/>
         <path d="M60 60 L80 40 L88 48 L68 68 L58 70 Z"/>
         </svg>"""
-    _SVG_CAMERA = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
-        <rect x="10" y="30" width="80" height="55" rx="8"/>
-        <rect x="35" y="18" width="30" height="14" rx="4"/>
-        <circle cx="50" cy="58" r="18" fill="none" stroke="white" stroke-width="6"/>
-        </svg>"""
-    _SVG_BOOKS = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
-        <rect x="15" y="65" width="70" height="12" rx="2"/>
-        <rect x="20" y="50" width="60" height="12" rx="2"/>
-        <rect x="25" y="35" width="50" height="12" rx="2"/>
-        </svg>"""
     _SVG_PROGRESS = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
         <rect x="15" y="55" width="14" height="30"/>
         <rect x="35" y="40" width="14" height="45"/>
@@ -1341,17 +1327,11 @@ else:
 
     HOME_TILES = [
         {"mode": "🧮 AI Tutor", "icon": "🧮", "title": "AI Tutor",
-         "desc": "Get any Grade 12 question solved step by step.",
+         "desc": "Type a question, snap or upload a photo, or upload a PDF — all solved step by step.",
          "css_class": "tile-c1", "illustration": _SVG_TUTOR},
         {"mode": "📝 Practice Questions", "icon": "📝", "title": "Practice Questions",
          "desc": "Work through curated questions with hints and full solutions.",
          "css_class": "tile-c2", "illustration": _SVG_PENCIL_NOTES},
-        {"mode": "📷 OCR Question", "icon": "📷", "title": "OCR Question",
-         "desc": "Snap a photo of a question and let us read it for you.",
-         "css_class": "tile-c3", "illustration": _SVG_CAMERA},
-        {"mode": "📄 Upload PDF Document", "icon": "📄", "title": "Upload PDF Document",
-         "desc": "Upload any PDF with maths questions and get them solved with AI.",
-         "css_class": "tile-c4", "illustration": _SVG_BOOKS},
         {"mode": "🗄️ Past Papers Library", "icon": "🗄️", "title": "Past Papers Library",
          "desc": "Browse and download real NSC past exam papers.",
          "css_class": "tile-c7", "illustration": _SVG_LIBRARY},

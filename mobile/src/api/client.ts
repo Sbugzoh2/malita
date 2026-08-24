@@ -158,7 +158,7 @@ async function uploadFile<T = { text: string }>(
 export type SolvedPhotoQuestion = { number: string; steps: SolveStep[] };
 
 // Reads every question/sub-part in a photographed maths problem and
-// solves each one directly - the OCR screen's primary path (Tesseract
+// solves each one directly - the AI Tutor's Photo input path (Tesseract
 // proved too unreliable to trust as a default).
 export function solvePhotoWithAI(token: string, imageUri: string, mimeType: string = "image/jpeg") {
   return uploadFile<{ questions: SolvedPhotoQuestion[] }>("/ocr/solve", token, {
@@ -172,10 +172,10 @@ export type SolvedPdfQuestion = { number: string; steps: SolveStep[] };
 
 // Reads every question in a learner-uploaded PDF (past paper, worksheet,
 // homework - not just an official exam paper) and solves each one
-// directly - the "Upload PDF Document" screen's primary path. Renders
-// every page as an image and reads them with Claude vision server-side,
-// rather than relying on the PDF's text layer, which is empty for a
-// scanned/image-only PDF (the common case for a real past paper).
+// directly - the AI Tutor's PDF input path. Renders every page as an
+// image and reads them with Claude vision server-side, rather than
+// relying on the PDF's text layer, which is empty for a scanned/image-only
+// PDF (the common case for a real past paper).
 export function solvePdfWithAI(token: string, fileUri: string, fileName: string = "paper.pdf") {
   return uploadFile<{ questions: SolvedPdfQuestion[] }>("/pdf/solve", token, {
     uri: fileUri,

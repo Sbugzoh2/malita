@@ -10,7 +10,7 @@ const TILES: Tile[] = [
     key: "AITutor",
     icon: "🧮",
     title: "AI Tutor",
-    desc: "Get any Grade 12 question solved step by step.",
+    desc: "Type a question, snap or upload a photo, or upload a PDF — all solved step by step.",
     color: "#2a78d6",
   },
   {
@@ -19,20 +19,6 @@ const TILES: Tile[] = [
     title: "Practice Questions",
     desc: "Work through real Grade 12 questions with hints and worked solutions.",
     color: "#eb6834",
-  },
-  {
-    key: "OCR",
-    icon: "📷",
-    title: "OCR Question",
-    desc: "Snap a photo of a question and let us read it for you.",
-    color: "#1baf7a",
-  },
-  {
-    key: "PDF",
-    icon: "📄",
-    title: "Upload PDF Document",
-    desc: "Upload any PDF with maths questions and get them solved with AI.",
-    color: "#eda100",
   },
   {
     key: "PastPapersLibrary",

@@ -9,13 +9,69 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
+  Alert,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import { useAuth } from "../context/AuthContext";
 import { colors, PAPER_TOPICS, SOLVABLE_TOPICS, topicColors, EXAMPLE_QUESTIONS } from "../theme";
-import { ApiError, solve, SolveStep } from "../api/client";
+import {
+  ApiError,
+  solve,
+  SolveStep,
+  solvePhotoWithAI,
+  SolvedPhotoQuestion,
+  solvePdfWithAI,
+  SolvedPdfQuestion,
+} from "../api/client";
 import LatexView from "../latex/LatexView";
 
-export default function AITutorScreen({ route }: any) {
+type Method = "text" | "photo" | "pdf";
+
+const METHODS: { key: Method; label: string }[] = [
+  { key: "text", label: "✍️ Type a Question" },
+  { key: "photo", label: "📷 Photo" },
+  { key: "pdf", label: "📄 PDF" },
+];
+
+export default function AITutorScreen() {
+  const { me } = useAuth();
+  const [method, setMethod] = useState<Method>("text");
+
+  return (
+    <ScrollView
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+      removeClippedSubviews={false}
+    >
+      <Text style={styles.title}>🧮 AI Tutor</Text>
+      <Text style={styles.subtitle}>
+        Grade 12 Mathematics help, worked out one step at a time — type a question, snap or
+        upload a photo, or upload a whole PDF.
+      </Text>
+
+      <View style={styles.methodRow}>
+        {METHODS.map((m) => (
+          <Pressable
+            key={m.key}
+            style={[styles.methodChip, method === m.key && styles.methodChipActive]}
+            onPress={() => setMethod(m.key)}
+          >
+            <Text style={[styles.methodChipText, method === m.key && styles.methodChipTextActive]}>
+              {m.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {method === "text" && <TextSolver />}
+      {method === "photo" && <PhotoSolver locked={me?.effective_tier === "free"} />}
+      {method === "pdf" && <PdfSolver locked={me?.effective_tier === "free"} />}
+    </ScrollView>
+  );
+}
+
+function TextSolver() {
   const { token, me, refreshMe } = useAuth();
   const [paper, setPaper] = useState<"Paper 1" | "Paper 2">("Paper 1");
   const [topic, setTopic] = useState("Algebra");
@@ -25,18 +81,6 @@ export default function AITutorScreen({ route }: any) {
   const [solving, setSolving] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
   const [solveCount, setSolveCount] = useState(0);
-
-  // OCR/PDF screens navigate here with a pre-filled question (their own
-  // "Transfer to Solver" equivalent) - adopt it once per navigation, the
-  // same one-shot pattern app.py's copied_text uses.
-  React.useEffect(() => {
-    const prefill = route?.params?.prefillQuestion;
-    if (prefill) {
-      setQuestion(prefill);
-      setSteps(null);
-      setError(null);
-    }
-  }, [route?.params?.prefillQuestion]);
 
   function selectPaper(p: "Paper 1" | "Paper 2") {
     setPaper(p);
@@ -63,14 +107,7 @@ export default function AITutorScreen({ route }: any) {
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-      removeClippedSubviews={false}
-    >
-      <Text style={styles.title}>🧮 AI Tutor</Text>
-      <Text style={styles.subtitle}>Grade 12 Mathematics help, worked out one step at a time.</Text>
-
+    <>
       <Text style={styles.label}>Paper</Text>
       <View style={styles.row}>
         {(["Paper 1", "Paper 2"] as const).map((p) => (
@@ -177,7 +214,286 @@ export default function AITutorScreen({ route }: any) {
           ))}
         </View>
       )}
-    </ScrollView>
+    </>
+  );
+}
+
+function PhotoSolver({ locked }: { locked: boolean }) {
+  const { token } = useAuth();
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<SolvedPhotoQuestion[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  async function solvePhoto(uri: string) {
+    if (!token) return;
+    setImageUri(uri);
+    setQuestions(null);
+    setError(null);
+    setExpanded(new Set());
+    setLoading(true);
+    try {
+      const res = await solvePhotoWithAI(token, uri);
+      setQuestions(res.questions);
+      if (res.questions.length > 0) setExpanded(new Set([res.questions[0].number]));
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : "Couldn't read that photo. Please try a clearer picture, better lighting, or less glare."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function takePhoto() {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Camera permission needed", "Enable camera access in your device settings to take a photo.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.9, allowsEditing: false });
+    if (!result.canceled && result.assets?.[0]) {
+      await solvePhoto(result.assets[0].uri);
+    }
+  }
+
+  async function pickFromGallery() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Photo library permission needed", "Enable photo access in your device settings to upload an image.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.9,
+      allowsEditing: false,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      await solvePhoto(result.assets[0].uri);
+    }
+  }
+
+  function retry() {
+    if (imageUri) solvePhoto(imageUri);
+  }
+
+  function toggle(number: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(number)) next.delete(number);
+      else next.add(number);
+      return next;
+    });
+  }
+
+  function reset() {
+    setImageUri(null);
+    setQuestions(null);
+    setError(null);
+  }
+
+  if (locked) {
+    return (
+      <View style={styles.lockedBanner}>
+        <Text style={styles.lockedText}>
+          Photo upload & OCR is a Learner/Premium feature. Upgrade from the Home screen to unlock it.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <View style={styles.row}>
+        <Pressable style={styles.actionButton} onPress={takePhoto}>
+          <Text style={styles.actionButtonText}>📸 Take Photo</Text>
+        </Pressable>
+        <Pressable style={styles.actionButton} onPress={pickFromGallery}>
+          <Text style={styles.actionButtonText}>🖼️ Choose from Gallery</Text>
+        </Pressable>
+      </View>
+
+      {imageUri && <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="contain" />}
+
+      {imageUri && !loading && (
+        <Pressable style={styles.cancelButton} onPress={reset}>
+          <Text style={styles.cancelButtonText}>← Choose a different photo</Text>
+        </Pressable>
+      )}
+
+      {loading && (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={styles.loadingText}>
+            Reading and solving every question in this photo with AI — this may take a moment…
+          </Text>
+        </View>
+      )}
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {questions && questions.length > 0 && (
+        <View style={{ marginTop: 16 }}>
+          {questions.map((q) => {
+            const isOpen = expanded.has(q.number);
+            return (
+              <View key={q.number} style={styles.questionCard}>
+                <Pressable style={styles.questionHeader} onPress={() => toggle(q.number)}>
+                  <Text style={styles.questionHeaderText}>Question {q.number}</Text>
+                  <Text style={styles.chevron}>{isOpen ? "▲" : "▼"}</Text>
+                </Pressable>
+                {isOpen && (
+                  <View style={styles.questionBody}>
+                    {q.steps.map((step, i) => (
+                      <StepView key={i} step={step} />
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+
+          <Pressable style={styles.retryButton} onPress={retry}>
+            <Text style={styles.retryButtonText}>🔄 Not right? Re-read and re-solve this photo</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {questions && questions.length === 0 && (
+        <Text style={styles.error}>Couldn't detect any questions in that photo.</Text>
+      )}
+    </>
+  );
+}
+
+function PdfSolver({ locked }: { locked: boolean }) {
+  const { token } = useAuth();
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<SolvedPdfQuestion[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [lastPicked, setLastPicked] = useState<{ uri: string; name: string } | null>(null);
+
+  async function solvePdf(uri: string, name: string) {
+    if (!token) return;
+    setFileName(name);
+    setLastPicked({ uri, name });
+    setQuestions(null);
+    setError(null);
+    setExpanded(new Set());
+    setLoading(true);
+    try {
+      const res = await solvePdfWithAI(token, uri, name);
+      setQuestions(res.questions);
+      if (res.questions.length > 0) setExpanded(new Set([res.questions[0].number]));
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : "Couldn't read that document. Please try a clearer scan or a different file."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function pickPdf() {
+    const result = await DocumentPicker.getDocumentAsync({ type: "application/pdf" });
+    if (result.canceled || !result.assets?.[0] || !token) return;
+    const asset = result.assets[0];
+    await solvePdf(asset.uri, asset.name);
+  }
+
+  function retry() {
+    if (lastPicked) solvePdf(lastPicked.uri, lastPicked.name);
+  }
+
+  function toggle(number: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(number)) next.delete(number);
+      else next.add(number);
+      return next;
+    });
+  }
+
+  function reset() {
+    setFileName(null);
+    setQuestions(null);
+    setError(null);
+    setLastPicked(null);
+  }
+
+  if (locked) {
+    return (
+      <View style={styles.lockedBanner}>
+        <Text style={styles.lockedText}>
+          PDF upload is a Learner/Premium feature. Upgrade from the Home screen to unlock it.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <Pressable style={styles.actionButton} onPress={pickPdf}>
+        <Text style={styles.actionButtonText}>📄 Choose PDF</Text>
+      </Pressable>
+
+      {fileName && <Text style={styles.fileName}>{fileName}</Text>}
+
+      {fileName && !loading && (
+        <Pressable style={styles.cancelButton} onPress={reset}>
+          <Text style={styles.cancelButtonText}>← Choose a different PDF</Text>
+        </Pressable>
+      )}
+
+      {loading && (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={styles.loadingText}>
+            Reading and solving every question in this document with AI — this may take a minute…
+          </Text>
+        </View>
+      )}
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {questions && questions.length > 0 && (
+        <View style={{ marginTop: 16 }}>
+          {questions.map((q) => {
+            const isOpen = expanded.has(q.number);
+            return (
+              <View key={q.number} style={styles.questionCard}>
+                <Pressable style={styles.questionHeader} onPress={() => toggle(q.number)}>
+                  <Text style={styles.questionHeaderText}>Question {q.number}</Text>
+                  <Text style={styles.chevron}>{isOpen ? "▲" : "▼"}</Text>
+                </Pressable>
+                {isOpen && (
+                  <View style={styles.questionBody}>
+                    {q.steps.map((step, i) => (
+                      <StepView key={i} step={step} />
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+
+          <Pressable style={styles.retryButton} onPress={retry}>
+            <Text style={styles.retryButtonText}>🔄 Not right? Re-read and re-solve this document</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {questions && questions.length === 0 && (
+        <Text style={styles.error}>Couldn't detect individual questions in this document.</Text>
+      )}
+    </>
   );
 }
 
@@ -253,6 +569,18 @@ const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 16 },
+  methodRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
+  methodChip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: "#fff",
+  },
+  methodChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
+  methodChipText: { color: colors.text, fontSize: 13, fontWeight: "600" },
+  methodChipTextActive: { color: "#fff" },
   label: { fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginTop: 14, marginBottom: 6 },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
@@ -338,4 +666,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginVertical: 6,
   },
+  actionButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+  },
+  actionButtonText: { color: "#fff", fontWeight: "700" },
+  preview: { width: "100%", height: 220, marginTop: 16, borderRadius: 12, backgroundColor: "#eee" },
+  fileName: { marginTop: 10, color: colors.textSecondary, fontStyle: "italic" },
+  cancelButton: { marginTop: 10, alignSelf: "flex-start" },
+  cancelButtonText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
+  loadingRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16 },
+  loadingText: { color: colors.textSecondary, flexShrink: 1 },
+  questionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  questionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  questionHeaderText: { fontSize: 15, fontWeight: "700", color: colors.text },
+  chevron: { fontSize: 12, color: colors.textSecondary },
+  questionBody: { paddingHorizontal: 16, paddingBottom: 16 },
+  retryButton: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  retryButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
+  lockedBanner: {
+    backgroundColor: "#fff4e5",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+  },
+  lockedText: { color: "#a15c00" },
 });

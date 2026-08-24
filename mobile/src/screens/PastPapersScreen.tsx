@@ -133,11 +133,11 @@ export default function PastPapersScreen({ navigation }: any) {
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>No papers here yet</Text>
           <Text style={styles.emptyText}>
-            This library is being built out. In the meantime, use "Upload PDF Document" from the Home screen to
-            upload any paper you already have — Malita will extract the text and can solve every question
-            from it with AI right away.
+            This library is being built out. In the meantime, use the AI Tutor's PDF option to
+            upload any paper you already have — Malita reads and solves every question from it
+            with AI right away.
           </Text>
-          <Pressable style={styles.emptyButton} onPress={() => navigation.navigate("PDF")}>
+          <Pressable style={styles.emptyButton} onPress={() => navigation.navigate("AITutor")}>
             <Text style={styles.emptyButtonText}>Upload a PDF instead →</Text>
           </Pressable>
         </View>

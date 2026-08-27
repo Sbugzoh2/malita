@@ -280,10 +280,18 @@ function PhotoSolver({ locked }: { locked: boolean }) {
       setQuestions(res.questions);
       if (res.questions.length > 0) setExpanded(new Set([res.questions[0].number]));
     } catch (e) {
+      // Distinguish a real server response (ApiError) from anything else -
+      // a network failure, a timeout, or an exception reading/uploading
+      // the file never even reaches the server, so showing the same fixed
+      // "couldn't read that photo" wording for both cases (as this used
+      // to) makes a client-side failure look identical to a server error
+      // in Render's logs, when it never even got there. Show the real
+      // underlying message so a report like "no logs came through" is
+      // diagnosable from the screenshot alone.
       setError(
         e instanceof ApiError
           ? e.message
-          : "Couldn't read that photo. Please try a clearer picture, better lighting, or less glare."
+          : `Upload failed before reaching the server: ${e instanceof Error ? e.message : String(e)}`
       );
     } finally {
       setLoading(false);
@@ -433,10 +441,13 @@ function PdfSolver({ locked }: { locked: boolean }) {
       setQuestions(res.questions);
       if (res.questions.length > 0) setExpanded(new Set([res.questions[0].number]));
     } catch (e) {
+      // See the matching comment in PhotoSolver's solvePhoto() - a network/
+      // upload failure that never reaches the server shouldn't be shown
+      // with the same wording as a real server-side failure.
       setError(
         e instanceof ApiError
           ? e.message
-          : "Couldn't read that document. Please try a clearer scan or a different file."
+          : `Upload failed before reaching the server: ${e instanceof Error ? e.message : String(e)}`
       );
     } finally {
       setLoading(false);

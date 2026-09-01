@@ -5,7 +5,6 @@
 // Defaults to localhost for local development against
 // `uvicorn api_server:app --host 0.0.0.0 --port 8002`.
 import Constants from "expo-constants";
-import { Platform } from "react-native";
 
 export const API_BASE_URL: string =
   (Constants.expoConfig?.extra as any)?.apiBaseUrl ?? "http://localhost:8002";
@@ -129,19 +128,19 @@ async function uploadFile<T = { text: string }>(
   token: string,
   file: { uri: string; name: string; type: string }
 ): Promise<T> {
+  // Expo SDK 57 replaced fetch/FormData on EVERY platform (not just web)
+  // with its own spec-compliant "winter" runtime - its request-body
+  // serializer (expo/src/winter/fetch/convertFormData.ts) only accepts a
+  // real Blob/File-like part; the classic React Native {uri,name,type}
+  // shape this used to append directly on native is silently stored by
+  // FormData.append() but then rejected at send time with "Unsupported
+  // FormDataPart implementation", since it's neither a string nor a Blob
+  // nor has a .bytes() method. Fetching the uri into a real Blob first -
+  // already required on web for the same reason - now works uniformly on
+  // every platform, so there's no longer a native/web split here at all.
   const formData = new FormData();
-  if (Platform.OS === "web") {
-    // react-native-web has no native {uri,name,type} FormData shim - the
-    // uri is a blob:/data: URL that has to be fetched into a real Blob
-    // first, or the field ends up stringified as "[object Object]".
-    const blob = await (await fetch(file.uri)).blob();
-    formData.append("file", blob, file.name);
-  } else {
-    // React Native's fetch/FormData accepts this {uri,name,type} shape in
-    // place of a real Blob/File (which RN doesn't have) - this is the
-    // standard RN file-upload pattern, not a mistake.
-    formData.append("file", file as any);
-  }
+  const blob = await (await fetch(file.uri)).blob();
+  formData.append("file", blob, file.name);
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",

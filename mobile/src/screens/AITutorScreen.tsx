@@ -267,13 +267,6 @@ function PhotoSolver({ locked }: { locked: boolean }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Temporary diagnostic - takePhoto/pickFromGallery previously had NO
-  // error handling at all (only solvePhoto did), so if the permission
-  // request or the picker itself threw on Android, it was an unhandled
-  // promise rejection that failed completely silently - no error, no
-  // log, nothing on screen. This makes every stage visible so a
-  // screenshot shows exactly where it stops, instead of nothing at all.
-  const [stage, setStage] = useState<string | null>(null);
 
   async function solvePhoto(uri: string) {
     if (!token) return;
@@ -282,27 +275,22 @@ function PhotoSolver({ locked }: { locked: boolean }) {
     setError(null);
     setExpanded(new Set());
     setLoading(true);
-    setStage("Uploading photo to server...");
     try {
       const res = await solvePhotoWithAI(token, uri);
-      setStage("Upload succeeded, response received.");
       setQuestions(res.questions);
       if (res.questions.length > 0) setExpanded(new Set([res.questions[0].number]));
     } catch (e) {
       // Distinguish a real server response (ApiError) from anything else -
       // a network failure, a timeout, or an exception reading/uploading
       // the file never even reaches the server, so showing the same fixed
-      // "couldn't read that photo" wording for both cases (as this used
-      // to) makes a client-side failure look identical to a server error
-      // in Render's logs, when it never even got there. Show the real
-      // underlying message so a report like "no logs came through" is
-      // diagnosable from the screenshot alone.
-      const message =
+      // "couldn't read that photo" wording for both cases would make a
+      // client-side failure look identical to a server error in Render's
+      // logs, when it never even got there.
+      setError(
         e instanceof ApiError
           ? e.message
-          : `Upload failed before reaching the server: ${e instanceof Error ? e.message : String(e)}`;
-      setStage(`Upload failed: ${message}`);
-      setError(message);
+          : `Upload failed before reaching the server: ${e instanceof Error ? e.message : String(e)}`
+      );
     } finally {
       setLoading(false);
     }
@@ -310,64 +298,40 @@ function PhotoSolver({ locked }: { locked: boolean }) {
 
   async function takePhoto() {
     try {
-      setStage("Requesting camera permission...");
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        setStage(`Camera permission denied (status: ${perm.status}).`);
         Alert.alert("Camera permission needed", "Enable camera access in your device settings to take a photo.");
         return;
       }
-      setStage("Permission granted, opening camera...");
       const result = await ImagePicker.launchCameraAsync({ quality: 0.9, allowsEditing: false });
-      if (result.canceled) {
-        setStage("Camera was cancelled by the user.");
-        return;
+      if (!result.canceled && result.assets?.[0]) {
+        await solvePhoto(result.assets[0].uri);
       }
-      if (!result.assets?.[0]) {
-        setStage("Camera returned no photo asset.");
-        return;
-      }
-      setStage(`Photo captured (uri: ${result.assets[0].uri.slice(0, 60)}...). Starting upload...`);
-      await solvePhoto(result.assets[0].uri);
     } catch (e) {
-      // takePhoto/pickFromGallery had no try/catch at all before this -
-      // an exception here (e.g. from the native picker module) was an
+      // takePhoto/pickFromGallery previously had no try/catch at all - an
+      // exception here (e.g. from the native picker module) was an
       // unhandled promise rejection that silently did nothing.
-      const message = e instanceof Error ? e.message : String(e);
-      setStage(`Camera/permission step threw: ${message}`);
-      setError(`Couldn't open the camera: ${message}`);
+      setError(`Couldn't open the camera: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   async function pickFromGallery() {
     try {
-      setStage("Requesting photo library permission...");
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        setStage(`Photo library permission denied (status: ${perm.status}).`);
         Alert.alert("Photo library permission needed", "Enable photo access in your device settings to upload an image.");
         return;
       }
-      setStage("Permission granted, opening gallery...");
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
         quality: 0.9,
         allowsEditing: false,
       });
-      if (result.canceled) {
-        setStage("Gallery pick was cancelled by the user.");
-        return;
+      if (!result.canceled && result.assets?.[0]) {
+        await solvePhoto(result.assets[0].uri);
       }
-      if (!result.assets?.[0]) {
-        setStage("Gallery returned no photo asset.");
-        return;
-      }
-      setStage(`Photo picked (uri: ${result.assets[0].uri.slice(0, 60)}...). Starting upload...`);
-      await solvePhoto(result.assets[0].uri);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setStage(`Gallery/permission step threw: ${message}`);
-      setError(`Couldn't open the photo library: ${message}`);
+      setError(`Couldn't open the photo library: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -410,12 +374,6 @@ function PhotoSolver({ locked }: { locked: boolean }) {
           <Text style={styles.actionButtonText}>🖼️ Choose from Gallery</Text>
         </Pressable>
       </View>
-
-      {/* Temporary diagnostic line - remove once the Android upload issue
-          is found. Shows exactly which stage (permission / picker /
-          upload) the flow last reached, since failures here were
-          previously silent with nothing on screen at all. */}
-      {stage && <Text style={styles.stageDebug}>🔍 {stage}</Text>}
 
       {imageUri && <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="contain" />}
 
@@ -673,15 +631,6 @@ const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 16 },
-  stageDebug: {
-    fontSize: 12,
-    color: "#7c3aed",
-    backgroundColor: "#f3e8ff",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    marginTop: 10,
-  },
   methodRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
   methodChip: {
     borderWidth: 1,

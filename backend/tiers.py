@@ -20,7 +20,7 @@ TIER_CONFIG = {
     },
     "learner": {
         "label": "Learner",
-        "price_zar": 49.99,
+        "price_zar": 99.99,
         "ai_tutor_daily_limit": None,  # None = unlimited
         "ocr_enabled": True,
         "pdf_enabled": True,
@@ -32,7 +32,7 @@ TIER_CONFIG = {
     },
     "premium": {
         "label": "Premium",
-        "price_zar": 99.99,
+        "price_zar": 129.99,
         "ai_tutor_daily_limit": None,
         "ocr_enabled": True,
         "pdf_enabled": True,

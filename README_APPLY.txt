@@ -1,21 +1,12 @@
-How to apply this update to your local malita clone
-=====================================================
+Overwrite backend/tiers.py with the one in this folder (Learner price_zar
+changed 49.99 -> 99.99, Premium 99.99 -> 129.99 - nothing else changed),
+then:
 
-1. Copy these files into your local repo, overwriting the existing ones:
-   - docs/privacy-policy.html   (new file)
-   - docs/.nojekyll             (new file, fixes the GitHub Pages Jekyll build error)
-   - mobile/src/screens/AITutorScreen.tsx   (overwrite existing file)
+  git add backend/tiers.py
+  git commit -m "Raise subscription prices: Learner to R99.99, Premium to R129.99"
+  git push origin main
 
-2. Delete this file (it's unused/orphaned, nothing references it anymore):
-   - mobile/src/screens/SolvedPaperScreen.tsx
-
-3. From your repo root, commit and push:
-   git add docs/privacy-policy.html docs/.nojekyll mobile/src/screens/AITutorScreen.tsx
-   git rm mobile/src/screens/SolvedPaperScreen.tsx
-   git commit -m "Add privacy policy page, fix Pages Jekyll build, remove orphaned screen"
-   git push origin main
-
-4. Before using the privacy policy URL in Google Play Console, open
-   docs/privacy-policy.html and fill in the two placeholders:
-   - contact email (currently privacy@malita.app)
-   - physical/postal address
+Since the ID number / email uniqueness enforcement you asked about is
+already fully implemented (both fields are checked for duplicates and
+required at registration, on web and mobile alike), there's no other
+file to apply for that part - no code change was needed.

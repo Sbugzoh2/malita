@@ -1,12 +1,16 @@
-Overwrite backend/tiers.py with the one in this folder (Learner price_zar
-changed 49.99 -> 99.99, Premium 99.99 -> 129.99 - nothing else changed),
-then:
+Overwrite these 3 files with the ones in this folder:
+  backend/email_util.py
+  api_server.py
+  app.py
 
-  git add backend/tiers.py
-  git commit -m "Raise subscription prices: Learner to R99.99, Premium to R129.99"
+Then:
+  git add backend/email_util.py api_server.py app.py
+  git commit -m "Send a real clickable reset link instead of relying on auto-linkify"
   git push origin main
 
-Since the ID number / email uniqueness enforcement you asked about is
-already fully implemented (both fields are checked for duplicates and
-required at registration, on web and mobile alike), there's no other
-file to apply for that part - no code change was needed.
+What changed: both the web and mobile password-reset emails now send a
+real HTML button (a genuine <a href> link), not just plain text. The
+mobile email in particular now links straight to the web app's existing
+password-reset page instead of emailing a bare code you had to copy and
+paste into the app - the code is still included underneath the button
+for anyone who'd rather type it in manually.

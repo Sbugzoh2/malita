@@ -201,6 +201,12 @@ if st.session_state.auth_user is None:
                             forgot_email,
                             "Reset your Malita password",
                             f"Click the link below to set a new password (valid for 1 hour):\n\n{reset_url}",
+                            html_body=(
+                                f'<p>Click the button below to set a new password (valid for 1 hour):</p>'
+                                f'<p><a href="{reset_url}" style="display:inline-block;padding:12px 24px;'
+                                f'background:#2a78d6;color:#ffffff;text-decoration:none;border-radius:8px;'
+                                f'font-weight:bold;">Reset my password</a></p>'
+                            ),
                         )
                         if sent:
                             st.success("Check your email for a password reset link (valid for 1 hour).")

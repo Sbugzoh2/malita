@@ -209,13 +209,22 @@ def forgot_password(body: ForgotPasswordRequest):
         # message as the "sent" case below.
         return {"message": "If an account exists for that email, a reset link has been generated.", "reset_token": None}
 
+    reset_url = f"{APP_BASE_URL}/?reset_token={token}"
     sent = send_email(
         body.email,
         "Reset your Malita password",
-        f"Use this code in the Malita app to set a new password (valid for 1 hour):\n\n{token}",
+        f"Tap the link below to set a new password (valid for 1 hour):\n\n{reset_url}\n\n"
+        f"Or enter this code in the Malita app instead: {token}",
+        html_body=(
+            f'<p>Tap the button below to set a new password (valid for 1 hour):</p>'
+            f'<p><a href="{reset_url}" style="display:inline-block;padding:12px 24px;'
+            f'background:#2a78d6;color:#ffffff;text-decoration:none;border-radius:8px;'
+            f'font-weight:bold;">Reset my password</a></p>'
+            f'<p>Or enter this code in the Malita app instead: <b>{token}</b></p>'
+        ),
     )
     if sent:
-        return {"message": "Check your email for a password reset code (valid for 1 hour).", "reset_token": None}
+        return {"message": "Check your email for a password reset link (valid for 1 hour).", "reset_token": None}
 
     # SMTP isn't configured yet - hand the token straight back so the app
     # can still complete the reset (same fallback app.py uses on web).

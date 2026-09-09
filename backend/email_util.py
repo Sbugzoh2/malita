@@ -30,6 +30,7 @@ api_server.py/FastAPI, which is fine — that path just relies on os.environ).
 import logging
 import os
 import smtplib
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import requests
@@ -56,18 +57,21 @@ def is_email_configured() -> bool:
     return bool(_get_setting("SMTP_HOST") and _get_setting("SMTP_USER") and _get_setting("SMTP_PASSWORD"))
 
 
-def _send_via_brevo(to_email: str, subject: str, body: str, api_key: str) -> bool:
+def _send_via_brevo(to_email: str, subject: str, body: str, html_body: str | None, api_key: str) -> bool:
     from_email = _get_setting("BREVO_FROM_EMAIL") or "noreply@malita.app"
+    payload = {
+        "sender": {"email": from_email, "name": "Malita"},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": body,
+    }
+    if html_body:
+        payload["htmlContent"] = html_body
     try:
         resp = requests.post(
             BREVO_SEND_URL,
             headers={"api-key": api_key, "Content-Type": "application/json", "accept": "application/json"},
-            json={
-                "sender": {"email": from_email, "name": "Malita"},
-                "to": [{"email": to_email}],
-                "subject": subject,
-                "textContent": body,
-            },
+            json=payload,
             timeout=10,
         )
         if resp.status_code >= 300:
@@ -79,11 +83,19 @@ def _send_via_brevo(to_email: str, subject: str, body: str, api_key: str) -> boo
         return False
 
 
-def _send_via_smtp(to_email: str, subject: str, body: str, host: str, user: str, password: str) -> bool:
+def _send_via_smtp(to_email: str, subject: str, body: str, html_body: str | None, host: str, user: str, password: str) -> bool:
     port = int(_get_setting("SMTP_PORT") or "587")
     from_addr = _get_setting("SMTP_FROM") or user
 
-    msg = MIMEText(body)
+    if html_body:
+        # multipart/alternative: mail clients that render HTML show the
+        # clickable link; ones that don't (or "view source") fall back to
+        # the plain-text part - both carry the same content either way.
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+    else:
+        msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = from_addr
     msg["To"] = to_email
@@ -99,15 +111,20 @@ def _send_via_smtp(to_email: str, subject: str, body: str, host: str, user: str,
         return False
 
 
-def send_email(to_email: str, subject: str, body: str) -> bool:
+def send_email(to_email: str, subject: str, body: str, html_body: str | None = None) -> bool:
     """Best-effort send — returns True only on confirmed success. Any
     misconfiguration or send error is swallowed (never crashes the caller,
     since the caller always has a UI fallback for the "not sent" case) but
     is logged, so the actual cause is visible in the app's server logs
-    instead of only ever showing the generic "not sent" fallback."""
+    instead of only ever showing the generic "not sent" fallback.
+
+    Pass html_body when the message contains a link - plain text alone
+    isn't reliably auto-linkified by every mail client, so a real <a href>
+    is the only way to guarantee it's clickable rather than something the
+    learner has to select and copy by hand."""
     brevo_key = _get_setting("BREVO_API_KEY")
     if brevo_key:
-        return _send_via_brevo(to_email, subject, body, brevo_key)
+        return _send_via_brevo(to_email, subject, body, html_body, brevo_key)
 
     host = _get_setting("SMTP_HOST")
     user = _get_setting("SMTP_USER")
@@ -117,4 +134,4 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
         logger.warning("send_email: not configured, missing %s (or set BREVO_API_KEY)", ", ".join(missing))
         return False
 
-    return _send_via_smtp(to_email, subject, body, host, user, password)
+    return _send_via_smtp(to_email, subject, body, html_body, host, user, password)

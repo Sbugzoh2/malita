@@ -29,7 +29,13 @@ services:
   - type: web
     name: malita-api
     env: python
-    plan: free
+    # Free web services on Render block outbound SMTP (ports 25/465/587),
+    # which breaks the "Forgot your password?" email send from this
+    # service - upgrading to "starter" (~$7/month) restores 465/587
+    # (port 25 stays blocked on every plan, but nothing here uses it).
+    # This also removes the free tier's 30-60s cold-start sleep, which
+    # matters for a backend real learners hit directly from the mobile app.
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api_server:app --host 0.0.0.0 --port $PORT
     envVars:

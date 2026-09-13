@@ -262,6 +262,32 @@ export type PastPaper = {
   uploaded_at: string | null;
 };
 
+export type LearnerProfileActivity = {
+  source: "ai_tutor" | "practice";
+  paper: string | null;
+  topic: string | null;
+  question: string | null;
+  solved_at: string | null;
+};
+
+export type LearnerProfileBadge = {
+  label: string;
+  next_milestone: number | null;
+  remaining_to_next: number | null;
+};
+
+export type LearnerProfile = {
+  solved: number;
+  marks: number;
+  topic_counts: Record<string, number>;
+  badge: LearnerProfileBadge;
+  recent: LearnerProfileActivity[];
+};
+
+export function fetchLearnerProfile(token: string, subject: string = "Mathematics") {
+  return request<LearnerProfile>(`/learner-profile?subject=${encodeURIComponent(subject)}`, { token });
+}
+
 export function fetchPastPapers(token: string) {
   return request<{ papers: PastPaper[] }>("/past-papers", { token });
 }

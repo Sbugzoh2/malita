@@ -12,6 +12,7 @@ import SubscriptionScreen from "../screens/SubscriptionScreen";
 import PracticeScreen from "../screens/PracticeScreen";
 import PastPapersScreen from "../screens/PastPapersScreen";
 import PastPaperViewerScreen from "../screens/PastPaperViewerScreen";
+import LearnerProfileScreen from "../screens/LearnerProfileScreen";
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
@@ -53,6 +54,7 @@ function AppNavigator() {
       <AppStack.Screen name="PracticeQuestions" component={PracticeScreen} options={{ title: "Practice Questions" }} />
       <AppStack.Screen name="PastPapersLibrary" component={PastPapersScreen} options={{ title: "Past Papers Library" }} />
       <AppStack.Screen name="PastPaperViewer" component={PastPaperViewerScreen} options={{ title: "View Document" }} />
+      <AppStack.Screen name="LearnerProfile" component={LearnerProfileScreen} options={{ title: "Learner Profile" }} />
     </AppStack.Navigator>
   );
 }

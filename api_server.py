@@ -48,7 +48,7 @@ from backend.auth import (
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback
 from backend.usage import can_solve, record_solve, get_today_count
-from backend.records import record_solved_question
+from backend.records import record_solved_question, get_learner_stats, get_recent_solved
 from backend.auth import get_user_tier
 from backend.solver import (
     solve_algebra, solve_sequences, solve_financial_mathematics, solve_calculus,
@@ -57,7 +57,7 @@ from backend.solver import (
     steps_contain_error,
 )
 from backend.payfast import build_checkout_payload, build_checkout_page_html
-from backend.practice import practice_data, check_practice_answer
+from backend.practice import practice_data, check_practice_answer, MATHEMATICS_TOPICS, PHYSICAL_SCIENCES_TOPICS
 from backend.past_papers import list_past_papers, get_past_paper_file
 from backend.llm_tutor import solve_with_llm, solve_full_paper
 from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
@@ -489,6 +489,52 @@ def practice_record(body: PracticeRecordRequest, authorization: str = Header(Non
     user = _auth_user(authorization)
     record_solved_question(user["id"], "practice", paper=body.paper, topic=body.topic, question=body.question)
     return {"ok": True}
+
+
+def _badge_for(solved: int) -> dict:
+    if solved >= 30:
+        label, next_milestone = "🥇 Gold Achiever", None
+    elif solved >= 15:
+        label, next_milestone = "🥈 Silver Achiever", 30
+    elif solved >= 5:
+        label, next_milestone = "🥉 Bronze Achiever", 15
+    else:
+        label, next_milestone = "🌱 Getting Started", 5
+    return {
+        "label": label,
+        "next_milestone": next_milestone,
+        "remaining_to_next": (next_milestone - solved) if next_milestone else None,
+    }
+
+
+@app.get("/learner-profile")
+def learner_profile(subject: str = "Mathematics", authorization: str = Header(None)):
+    """Progress/history for the Learner Profile screen - same
+    backend.records aggregates app.py's Learner Profile reads from, just
+    as JSON. Subject filters to that subject's topics exactly like the
+    web version's Subject radio does (Mathematics and Physical Sciences
+    topic names never collide, so this needs no schema/DB change)."""
+    user = _auth_user(authorization)
+    topics = PHYSICAL_SCIENCES_TOPICS if subject == "Physical Sciences" else MATHEMATICS_TOPICS
+
+    stats = get_learner_stats(user["id"], topics=topics)
+    recent = get_recent_solved(user["id"], limit=100, topics=topics)
+    return {
+        "solved": stats["solved"],
+        "marks": stats["Marks"],
+        "topic_counts": stats.get("topic_counts", {}),
+        "badge": _badge_for(stats["solved"]),
+        "recent": [
+            {
+                "source": r["source"],
+                "paper": r["paper"],
+                "topic": r["topic"],
+                "question": r["question"],
+                "solved_at": r["solved_at"].isoformat() if r["solved_at"] else None,
+            }
+            for r in recent
+        ],
+    }
 
 
 @app.get("/past-papers")

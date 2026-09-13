@@ -7,6 +7,22 @@ native app) so both apps offer the exact same question bank.
 
 import re
 
+# Subject classification by plain topic-name membership rather than a DB
+# column - Mathematics and Physical Sciences topic names never collide, so
+# this is a reliable split (e.g. for the Learner Profile's Subject filter)
+# without needing a schema migration. Shared by app.py and api_server.py.
+MATHEMATICS_TOPICS = {
+    "Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs",
+    "Analytical Geometry", "Trigonometry", "Statistics", "Statistics & Probability",
+    "Probability", "Euclidean Geometry",
+}
+PHYSICAL_SCIENCES_TOPICS = {
+    "Momentum", "Vertical Projectile Motion", "Work, Energy & Power", "Doppler Effect",
+    "Electrostatics", "Electric Circuits", "Electrodynamics",
+    "Stoichiometry", "Rate and Extent of Reaction", "Chemical Equilibrium",
+    "Acids and Bases", "Electrochemistry", "Organic Chemistry",
+}
+
 
 def _extract_numbers(s):
     """Pull every number (incl. negatives/decimals) out of a string,

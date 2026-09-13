@@ -27,6 +27,13 @@ const TILES: Tile[] = [
     desc: "Browse curated past exam papers by year and subject. Premium.",
     color: "#4a3aa7",
   },
+  {
+    key: "LearnerProfile",
+    icon: "🎯",
+    title: "Learner Profile",
+    desc: "Track your progress, badges, and solved-question history.",
+    color: "#c0392b",
+  },
 ];
 
 export default function HomeScreen({ navigation }: any) {

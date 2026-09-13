@@ -41,7 +41,7 @@ from backend.solver import (
     solve_statistics, solve_probability, solve_euclidean_geometry_topic,
     steps_contain_error,
 )
-from backend.practice import practice_data, check_practice_answer
+from backend.practice import practice_data, check_practice_answer, MATHEMATICS_TOPICS, PHYSICAL_SCIENCES_TOPICS
 from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
 from backend.llm_tutor import solve_with_llm, solve_full_paper
 from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
@@ -323,18 +323,6 @@ _DEFAULT_TOPIC_COLOR = "#2a78d6"
 # a DB migration - topic/paper names never collide between the two
 # subjects (Mathematics uses "Paper 1"/"Paper 2", Physical Sciences uses
 # "Physics"/"Chemistry"), so a name-based set membership check is reliable.
-MATHEMATICS_TOPICS = {
-    "Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs",
-    "Analytical Geometry", "Trigonometry", "Statistics", "Statistics & Probability",
-    "Probability", "Euclidean Geometry",
-}
-PHYSICAL_SCIENCES_TOPICS = {
-    "Momentum", "Vertical Projectile Motion", "Work, Energy & Power", "Doppler Effect",
-    "Electrostatics", "Electric Circuits", "Electrodynamics",
-    "Stoichiometry", "Rate and Extent of Reaction", "Chemical Equilibrium",
-    "Acids and Bases", "Electrochemistry", "Organic Chemistry",
-}
-
 def topic_badge(topic):
     """Render a small coloured pill naming the current topic — used next
     to topic pickers so each subject reads with a consistent identity."""

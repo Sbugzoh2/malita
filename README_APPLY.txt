@@ -1,16 +1,31 @@
-Overwrite these 3 files with the ones in this folder:
-  backend/email_util.py
-  api_server.py
+Overwrite these files in your repo with the ones in this folder:
   app.py
+  api_server.py
+  backend/practice.py
+  mobile/src/api/client.ts
+  mobile/src/screens/HomeScreen.tsx
+  mobile/src/navigation/RootNavigator.tsx
+
+Add this NEW file:
+  mobile/src/screens/LearnerProfileScreen.tsx
 
 Then:
-  git add backend/email_util.py api_server.py app.py
-  git commit -m "Send a real clickable reset link instead of relying on auto-linkify"
+  git add app.py api_server.py backend/practice.py mobile/src/api/client.ts \
+          mobile/src/screens/HomeScreen.tsx mobile/src/navigation/RootNavigator.tsx \
+          mobile/src/screens/LearnerProfileScreen.tsx
+  git commit -m "Add Learner Profile to the mobile app"
   git push origin main
 
-What changed: both the web and mobile password-reset emails now send a
-real HTML button (a genuine <a href> link), not just plain text. The
-mobile email in particular now links straight to the web app's existing
-password-reset page instead of emailing a bare code you had to copy and
-paste into the app - the code is still included underneath the button
-for anyone who'd rather type it in manually.
+Rebuild the mobile app (EAS build) afterward to pick this up - it's a
+new screen/navigation route, not something that updates via a simple
+reload.
+
+What this actually is: Learner Profile / Activity History only ever
+existed on the web (Streamlit) app - the mobile app never had a
+Learner Profile screen or a backend endpoint for it at all, so there
+was nothing "removed." This adds it to mobile for the first time:
+- New "Learner Profile" tile on the Home screen
+- New screen: Subject picker, Questions Solved/Marks Earned stats,
+  badge + progress bar, a per-topic breakdown, and Recent Activity -
+  reading from the same solved_questions data the web version uses
+- New GET /learner-profile API endpoint backing it

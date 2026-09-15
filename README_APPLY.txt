@@ -1,53 +1,23 @@
-Overwrite these files with the ones in this folder:
-  app.py
-  api_server.py
-  backend/db.py
-  backend/collab.py
-  mobile/src/api/client.ts
-  mobile/src/screens/CollabScreen.tsx
-  mobile/src/screens/CollabQuestionDetailScreen.tsx
+IMPORTANT - do this part first, right now, regardless of this file:
+Run this once in your Supabase SQL Editor to fix your LIVE database
+immediately (this is what's actually crashing Collaborate right now):
 
-Add this NEW file:
-  mobile/src/latex/MixedMathText.tsx
+  ALTER TABLE collab_answers ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES collab_answers(id);
 
-Then:
-  git add app.py api_server.py backend/db.py backend/collab.py \
-          mobile/src/api/client.ts mobile/src/latex/MixedMathText.tsx \
-          mobile/src/screens/CollabScreen.tsx mobile/src/screens/CollabQuestionDetailScreen.tsx
-  git commit -m "Add math rendering and threaded @mention replies to Collaborate"
+That alone fixes the live crash. Everything below is the code fix so
+this class of mistake (a column added to an existing table) can't
+silently break production again on a future update.
+
+Overwrite backend/db.py with the one in this folder, then:
+  git add backend/db.py
+  git commit -m "Self-heal missing columns on app startup instead of just create_all()"
   git push origin main
 
-No DB migration script needed - the new collab_answers.parent_id
-column is added automatically by SQLAlchemy's create_all() the next
-time init_db() runs, same as the original tables.
-
-Rebuild the mobile app via EAS afterward - MixedMathText is a new file
-these screens now import.
-
-What this adds, on top of the Collaborate board from before:
-
-1. Math rendering - on web, this needed almost no code: Streamlit
-   already renders inline $...$ as a real equation (KaTeX) inside
-   st.write/st.markdown. Both compose boxes (question and answer) now
-   just have a caption teaching learners the $...$ convention. Mobile
-   has no native equivalent, so this adds MixedMathText.tsx, which
-   splits text on $...$ and renders the math parts through the
-   existing LatexView component inline with the surrounding prose.
-
-2. Threaded replies + @mentions - tapping/clicking "Reply" on any
-   answer targets that answer specifically (capped at one level deep -
-   replying to a reply automatically redirects onto the original
-   top-level answer instead of growing a third level) and prefills the
-   compose box with "@AnswererName " so it's clear who's being
-   addressed, especially useful once an answer has multiple replies.
-   Replies render indented with a "↳" marker under their parent
-   answer, on both web and mobile.
-
-Verified end-to-end before sending: a full question -> answer -> reply
--> reply-to-a-reply chain against a live server (confirmed the
-reply-to-reply correctly collapses onto the top-level answer), and the
-actual web UI in a real browser (math rendering, indentation, and the
-"Replying to X" banner surviving an unrelated page rerun without going
-blank - a real bug caught and fixed during that pass, along with a
-second bug where the tip text's own literal "$...$" was being
-misinterpreted as math by Streamlit).
+What changed: init_db() (already called on startup by both app.py and
+api_server.py) now also checks for a few known columns and adds them
+via ALTER TABLE if a table already exists but is missing one -
+Base.metadata.create_all() only creates brand-new tables, it never
+alters ones already in the live database, which is exactly how the
+parent_id column silently never made it into your production
+database. Verified against a simulated copy of your actual
+pre-migration table.

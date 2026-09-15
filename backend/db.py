@@ -262,8 +262,32 @@ class WebhookEvent(Base):
     processed = Column(Boolean, default=False)
 
 
+def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
+    """Add one column to an already-existing table if it's missing.
+
+    Base.metadata.create_all() only creates tables that don't exist yet -
+    it never alters a table that's already there, so a column added to a
+    model after the table has been created in a live database (as
+    happened with collab_answers.parent_id) is silently never applied,
+    and every query touching that column then fails at runtime instead
+    of at deploy time. This is a deliberately minimal self-healing check
+    (not a full migration framework, which this app's scale doesn't need)
+    for exactly that mistake - called once at startup, safe to call every
+    time since it's a no-op once the column exists."""
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    if table_name not in inspector.get_table_names():
+        return  # create_all() will create the whole table, column included
+    existing = {c["name"] for c in inspector.get_columns(table_name)}
+    if column_name in existing:
+        return
+    with engine.begin() as conn:
+        conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_type}")
+
+
 def init_db():
     Base.metadata.create_all(engine)
+    _ensure_column("collab_answers", "parent_id", "INTEGER")
 
 
 @contextmanager

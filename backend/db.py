@@ -227,6 +227,11 @@ class CollabAnswer(Base):
     question_id = Column(Integer, ForeignKey("collab_questions.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     body = Column(String, nullable=False)
+    # NULL = a top-level answer to the question. Set = a reply to that
+    # specific top-level answer's "sub-thread" - deliberately capped at
+    # one level deep (see create_answer's parent-of-a-reply check), so a
+    # reply's parent is always a top-level answer, never another reply.
+    parent_id = Column(Integer, ForeignKey("collab_answers.id"), nullable=True, index=True)
     is_hidden = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
 

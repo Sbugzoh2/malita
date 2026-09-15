@@ -312,6 +312,7 @@ export type CollabAnswer = {
   body: string;
   answerer_name: string;
   created_at: string | null;
+  parent_id: number | null;
 };
 
 export type CollabQuestionDetail = {
@@ -341,10 +342,10 @@ export function fetchCollabQuestion(token: string, questionId: number) {
   return request<CollabQuestionDetail>(`/collab/questions/${questionId}`, { token });
 }
 
-export function createCollabAnswer(token: string, questionId: number, body: string) {
+export function createCollabAnswer(token: string, questionId: number, body: string, parentId: number | null = null) {
   return request<{ id: number }>(`/collab/questions/${questionId}/answers`, {
     method: "POST",
-    body: { body },
+    body: { body, parent_id: parentId },
     token,
   });
 }

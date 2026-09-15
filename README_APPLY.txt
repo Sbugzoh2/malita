@@ -1,45 +1,53 @@
-Overwrite these files in your repo with the ones in this folder:
+Overwrite these files with the ones in this folder:
   app.py
   api_server.py
   backend/db.py
-  backend/tiers.py
-  mobile/src/api/client.ts
-  mobile/src/screens/HomeScreen.tsx
-  mobile/src/navigation/RootNavigator.tsx
-
-Add these NEW files:
   backend/collab.py
+  mobile/src/api/client.ts
   mobile/src/screens/CollabScreen.tsx
   mobile/src/screens/CollabQuestionDetailScreen.tsx
 
+Add this NEW file:
+  mobile/src/latex/MixedMathText.tsx
+
 Then:
-  git add app.py api_server.py backend/db.py backend/collab.py backend/tiers.py \
-          mobile/src/api/client.ts mobile/src/screens/HomeScreen.tsx \
-          mobile/src/navigation/RootNavigator.tsx mobile/src/screens/CollabScreen.tsx \
-          mobile/src/screens/CollabQuestionDetailScreen.tsx
-  git commit -m "Add Collaborate: a Learner/Premium Q&A board"
+  git add app.py api_server.py backend/db.py backend/collab.py \
+          mobile/src/api/client.ts mobile/src/latex/MixedMathText.tsx \
+          mobile/src/screens/CollabScreen.tsx mobile/src/screens/CollabQuestionDetailScreen.tsx
+  git commit -m "Add math rendering and threaded @mention replies to Collaborate"
   git push origin main
 
-No manual DB migration needed - the new tables (collab_questions,
-collab_answers, collab_reports) are created automatically the next
-time init_db() runs (both app.py and api_server.py already call it on
-startup).
+No DB migration script needed - the new collab_answers.parent_id
+column is added automatically by SQLAlchemy's create_all() the next
+time init_db() runs, same as the original tables.
 
-Rebuild the mobile app via EAS afterward - this adds new screens and
-navigation routes.
+Rebuild the mobile app via EAS afterward - MixedMathText is a new file
+these screens now import.
 
-What this is (per your 3 decisions): an async Q&A board (not live
-chat), restricted to Learner/Premium tiers, with reports going into a
-manual admin review queue (no automated moderation). Learners post a
-question tagged by subject/topic, others answer, and anyone can report
-a question or answer - admins see a moderation queue (in the web app's
-Collaborate page, and via GET /collab/reports on the API) where they
-can hide the content or dismiss the report.
+What this adds, on top of the Collaborate board from before:
 
-Tested end-to-end locally before sending: tier gating (free tier is
-correctly blocked), posting a question, answering it, reporting an
-answer, and an admin resolving that report by hiding the content -
-confirmed the answer then disappears from the question. Also walked
-through the actual web UI live (Playwright): posting a question,
-viewing it, answering it, and seeing both report buttons render
-correctly.
+1. Math rendering - on web, this needed almost no code: Streamlit
+   already renders inline $...$ as a real equation (KaTeX) inside
+   st.write/st.markdown. Both compose boxes (question and answer) now
+   just have a caption teaching learners the $...$ convention. Mobile
+   has no native equivalent, so this adds MixedMathText.tsx, which
+   splits text on $...$ and renders the math parts through the
+   existing LatexView component inline with the surrounding prose.
+
+2. Threaded replies + @mentions - tapping/clicking "Reply" on any
+   answer targets that answer specifically (capped at one level deep -
+   replying to a reply automatically redirects onto the original
+   top-level answer instead of growing a third level) and prefills the
+   compose box with "@AnswererName " so it's clear who's being
+   addressed, especially useful once an answer has multiple replies.
+   Replies render indented with a "↳" marker under their parent
+   answer, on both web and mobile.
+
+Verified end-to-end before sending: a full question -> answer -> reply
+-> reply-to-a-reply chain against a live server (confirmed the
+reply-to-reply correctly collapses onto the top-level answer), and the
+actual web UI in a real browser (math rendering, indentation, and the
+"Replying to X" banner surviving an unrelated page rerun without going
+blank - a real bug caught and fixed during that pass, along with a
+second bug where the tip text's own literal "$...$" was being
+misinterpreted as math by Streamlit).

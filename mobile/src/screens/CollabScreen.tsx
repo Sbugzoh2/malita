@@ -16,6 +16,7 @@ import {
   createCollabQuestion,
   CollabQuestionSummary,
 } from "../api/client";
+import MixedMathText from "../latex/MixedMathText";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Unknown date";
@@ -108,6 +109,7 @@ export default function CollabScreen({ navigation }: any) {
             placeholder="Write out your question..."
             multiline
           />
+          <Text style={styles.mathTip}>Tip: put math between two dollar signs to render it as a real equation, e.g. $x^2-5x+6=0$.</Text>
           <Pressable
             style={[styles.actionButton, posting && styles.buttonDisabled]}
             onPress={handlePost}
@@ -134,7 +136,9 @@ export default function CollabScreen({ navigation }: any) {
               {q.asker_name} · {q.topic || "No topic"} · {formatDate(q.created_at)} · {q.answer_count} answer
               {q.answer_count !== 1 ? "s" : ""}
             </Text>
-            <Text style={styles.cardBody} numberOfLines={2}>{q.body}</Text>
+            <View style={styles.cardBodyWrap}>
+              <MixedMathText text={q.body.length > 200 ? q.body.slice(0, 200) + "…" : q.body} fontSize={13} />
+            </View>
           </Pressable>
         ))
       )}
@@ -194,4 +198,6 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 4 },
   cardMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
   cardBody: { fontSize: 13, color: colors.text },
+  cardBodyWrap: { marginTop: 2 },
+  mathTip: { fontSize: 11, color: colors.textSecondary, fontStyle: "italic", marginTop: 6 },
 });

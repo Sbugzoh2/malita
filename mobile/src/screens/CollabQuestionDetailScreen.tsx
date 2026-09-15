@@ -17,7 +17,9 @@ import {
   createCollabAnswer,
   reportCollabContent,
   CollabQuestionDetail,
+  CollabAnswer,
 } from "../api/client";
+import MixedMathText from "../latex/MixedMathText";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Unknown date";
@@ -88,6 +90,35 @@ function ReportControl({
   );
 }
 
+type ReplyTarget = { id: number; name: string } | null;
+
+function AnswerCard({
+  answer,
+  isReply,
+  token,
+  onReply,
+}: {
+  answer: CollabAnswer;
+  isReply: boolean;
+  token: string | null;
+  onReply: (target: ReplyTarget) => void;
+}) {
+  return (
+    <View style={[styles.answerCard, isReply && styles.replyCard]}>
+      <Text style={styles.answerMeta}>
+        {isReply ? "↳ " : ""}{answer.answerer_name} · {formatDate(answer.created_at)}
+      </Text>
+      <MixedMathText text={answer.body} fontSize={14} />
+      <View style={styles.answerActions}>
+        <Pressable onPress={() => onReply({ id: answer.id, name: answer.answerer_name })}>
+          <Text style={styles.replyLink}>↩️ Reply</Text>
+        </Pressable>
+      </View>
+      <ReportControl targetType="answer" targetId={answer.id} token={token} />
+    </View>
+  );
+}
+
 export default function CollabQuestionDetailScreen({ navigation, route }: any) {
   const { token } = useAuth();
   const questionId: number = route.params.questionId;
@@ -95,6 +126,7 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
   const [error, setError] = useState<string | null>(null);
   const [answerBody, setAnswerBody] = useState("");
   const [posting, setPosting] = useState(false);
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget>(null);
 
   function load() {
     if (!token) return;
@@ -108,6 +140,11 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
 
   useEffect(load, [token, questionId]);
 
+  function handleReply(target: ReplyTarget) {
+    setReplyTarget(target);
+    setAnswerBody(target ? `@${target.name} ` : "");
+  }
+
   async function handlePostAnswer() {
     if (!token) return;
     if (!answerBody.trim()) {
@@ -117,8 +154,12 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
     setPosting(true);
     setError(null);
     try {
-      await createCollabAnswer(token, questionId, answerBody.trim());
+      // A reply to a reply still targets the original top-level answer
+      // (backend.collab enforces this too, as a safety net) - @mentioning
+      // the actual person is how it stays clear who's being addressed.
+      await createCollabAnswer(token, questionId, answerBody.trim(), replyTarget?.id ?? null);
       setAnswerBody("");
+      setReplyTarget(null);
       load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not post your answer. Please try again.");
@@ -135,6 +176,14 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
     );
   }
 
+  const topLevel = question.answers.filter((a) => !a.parent_id);
+  const repliesByParent: Record<number, CollabAnswer[]> = {};
+  for (const a of question.answers) {
+    if (a.parent_id) {
+      (repliesByParent[a.parent_id] ??= []).push(a);
+    }
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Pressable style={styles.backLink} onPress={() => navigation.goBack()}>
@@ -147,23 +196,34 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
       <Text style={styles.meta}>
         Asked by {question.asker_name} · {question.topic || "No topic"} · {formatDate(question.created_at)}
       </Text>
-      <Text style={styles.body}>{question.body}</Text>
-      <ReportControl targetType="question" targetId={question.id} token={token} />
+      <MixedMathText text={question.body} fontSize={14} />
+      <View style={{ marginTop: 8 }}>
+        <ReportControl targetType="question" targetId={question.id} token={token} />
+      </View>
 
       <View style={styles.divider} />
 
       <Text style={styles.sectionTitle}>
         {question.answers.length} answer{question.answers.length !== 1 ? "s" : ""}
       </Text>
-      {question.answers.map((a) => (
-        <View key={a.id} style={styles.answerCard}>
-          <Text style={styles.answerMeta}>{a.answerer_name} · {formatDate(a.created_at)}</Text>
-          <Text style={styles.body}>{a.body}</Text>
-          <ReportControl targetType="answer" targetId={a.id} token={token} />
+      {topLevel.map((a) => (
+        <View key={a.id}>
+          <AnswerCard answer={a} isReply={false} token={token} onReply={handleReply} />
+          {(repliesByParent[a.id] ?? []).map((reply) => (
+            <AnswerCard key={reply.id} answer={reply} isReply token={token} onReply={handleReply} />
+          ))}
         </View>
       ))}
 
       <View style={styles.answerBox}>
+        {replyTarget ? (
+          <View style={styles.replyBanner}>
+            <Text style={styles.replyBannerText}>↩️ Replying to {replyTarget.name}</Text>
+            <Pressable onPress={() => handleReply(null)}>
+              <Text style={styles.replyBannerCancel}>Cancel</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <Text style={styles.label}>Your answer</Text>
         <TextInput
           style={[styles.input, styles.textArea]}
@@ -172,6 +232,7 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
           placeholder="Write your answer..."
           multiline
         />
+        <Text style={styles.mathTip}>Tip: put math between two dollar signs to render it as a real equation, e.g. $x^2-5x+6=0$.</Text>
         <Pressable
           style={[styles.actionButton, posting && styles.buttonDisabled]}
           onPress={handlePostAnswer}
@@ -218,8 +279,23 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 18 },
   sectionTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 10 },
   answerCard: { backgroundColor: colors.surface, borderRadius: 14, padding: 14, marginBottom: 10 },
+  replyCard: { marginLeft: 24, backgroundColor: "#f3f6fb" },
   answerMeta: { fontSize: 12, fontWeight: "700", color: colors.primaryDark, marginBottom: 6 },
+  answerActions: { marginTop: 8, marginBottom: 4 },
+  replyLink: { fontSize: 12, color: colors.primary, fontWeight: "700" },
   answerBox: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, marginTop: 10 },
+  replyBanner: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#eaf2fc",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  replyBannerText: { fontSize: 13, color: colors.primaryDark, fontWeight: "600" },
+  replyBannerCancel: { fontSize: 13, color: colors.error, fontWeight: "700" },
   label: { fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginBottom: 6 },
   input: {
     borderWidth: 1,
@@ -231,6 +307,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   textArea: { minHeight: 90, textAlignVertical: "top" },
+  mathTip: { fontSize: 11, color: colors.textSecondary, fontStyle: "italic", marginTop: 6 },
   actionButton: {
     backgroundColor: colors.primary,
     borderRadius: 999,

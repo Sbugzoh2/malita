@@ -1243,8 +1243,18 @@ elif mode == "🤝 Collaborate":
                 st.error("That question no longer exists.")
                 st.session_state.collab_selected_question_id = None
             else:
+                if "collab_reply_target_id" not in st.session_state:
+                    st.session_state.collab_reply_target_id = None
+                if "collab_reply_target_name" not in st.session_state:
+                    st.session_state.collab_reply_target_name = None
+                if "collab_reply_prefill" not in st.session_state:
+                    st.session_state.collab_reply_prefill = None
+
                 st.subheader(question["title"])
                 st.caption(f"Asked by {question['asker_name']} · {question['topic'] or 'No topic'} · {question['created_at'].strftime('%d %b %Y')}")
+                # Streamlit renders $...$ as a real equation (KaTeX) inside
+                # st.write/st.markdown - no separate LaTeX handling needed
+                # here, just tell learners the convention when they compose.
                 st.write(question["body"])
                 with st.expander("🚩 Report this question"):
                     with st.form(f"report_q_{question['id']}"):
@@ -1255,9 +1265,32 @@ elif mode == "🤝 Collaborate":
 
                 st.divider()
                 st.markdown(f"#### {len(question['answers'])} answer{'s' if len(question['answers']) != 1 else ''}")
+
+                # Replies are capped at one level deep (see
+                # backend.collab.create_answer) - group by parent_id so
+                # each top-level answer's replies render right below it.
+                top_level = [a for a in question["answers"] if not a["parent_id"]]
+                replies_by_parent: dict = {}
                 for a in question["answers"]:
-                    st.markdown(f"**{a['answerer_name']}** · {a['created_at'].strftime('%d %b %Y')}")
+                    if a["parent_id"]:
+                        replies_by_parent.setdefault(a["parent_id"], []).append(a)
+
+                def _render_answer(a, is_reply=False):
+                    indent = " " * 4 if is_reply else ""
+                    prefix = "↳ " if is_reply else ""
+                    st.markdown(f"{indent}{prefix}**{a['answerer_name']}** · {a['created_at'].strftime('%d %b %Y')}")
                     st.write(a["body"])
+                    rcol1, rcol2 = st.columns([1, 4])
+                    with rcol1:
+                        if st.button("↩️ Reply", key=f"reply_{a['id']}"):
+                            # A reply to a reply still targets the original
+                            # top-level answer (backend.collab enforces this
+                            # too) - @mentioning the actual person below is
+                            # how it stays clear who's being addressed.
+                            st.session_state.collab_reply_target_id = a["parent_id"] or a["id"]
+                            st.session_state.collab_reply_target_name = a["answerer_name"]
+                            st.session_state.collab_reply_prefill = f"@{a['answerer_name']} "
+                            st.rerun()
                     with st.expander("🚩 Report this answer", expanded=False):
                         with st.form(f"report_a_{a['id']}"):
                             reason = st.text_input("Why are you reporting this? (optional)", key=f"reason_a_{a['id']}")
@@ -1266,11 +1299,41 @@ elif mode == "🤝 Collaborate":
                                 st.success("Thanks — an admin will review this.")
                     st.divider()
 
-                with st.form(f"answer_form_{question['id']}", clear_on_submit=True):
-                    answer_body = st.text_area("Your answer")
+                for a in top_level:
+                    _render_answer(a)
+                    for reply in replies_by_parent.get(a["id"], []):
+                        _render_answer(reply, is_reply=True)
+
+                if st.session_state.collab_reply_target_id:
+                    rcol1, rcol2 = st.columns([4, 1])
+                    rcol1.info(f"↩️ Replying to {st.session_state.collab_reply_target_name}")
+                    if rcol2.button("Cancel reply"):
+                        st.session_state.collab_reply_target_id = None
+                        st.session_state.collab_reply_target_name = None
+                        st.rerun()
+
+                ANSWER_KEY = f"collab_answer_body_{question['id']}"
+                if st.session_state.collab_reply_prefill is not None:
+                    st.session_state[ANSWER_KEY] = st.session_state.collab_reply_prefill
+                    st.session_state.collab_reply_prefill = None
+
+                with st.form(f"answer_form_{question['id']}"):
+                    answer_body = st.text_area("Your answer", key=ANSWER_KEY)
+                    st.caption("Tip: put math between two dollar signs to render it as a real equation, e.g. $x^2-5x+6=0$.")
                     if st.form_submit_button("Post answer"):
                         try:
-                            collab_create_answer(question["id"], auth_user["id"], answer_body)
+                            collab_create_answer(
+                                question["id"], auth_user["id"], answer_body,
+                                parent_id=st.session_state.collab_reply_target_id,
+                            )
+                            # Can't clear a widget's own session_state key
+                            # after it's already been instantiated this run
+                            # - queue it through the same one-shot prefill
+                            # mechanism, applied before the widget renders
+                            # on the rerun that's about to happen.
+                            st.session_state.collab_reply_prefill = ""
+                            st.session_state.collab_reply_target_id = None
+                            st.session_state.collab_reply_target_name = None
                             st.success("Answer posted!")
                             st.rerun()
                         except ValueError as e:
@@ -1287,6 +1350,7 @@ elif mode == "🤝 Collaborate":
                     q_topic = st.selectbox("Topic (optional)", ["No specific topic"] + topic_options)
                     q_title = st.text_input("Title")
                     q_body = st.text_area("Your question")
+                    st.caption("Tip: put math between two dollar signs to render it as a real equation, e.g. $x^2-5x+6=0$.")
                     if st.form_submit_button("Post question"):
                         try:
                             collab_create_question(

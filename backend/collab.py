@@ -81,7 +81,10 @@ def get_question(question_id: int) -> dict | None:
             .all()
         )
         answers = [
-            {"id": a.id, "body": a.body, "answerer_name": name, "created_at": a.created_at}
+            {
+                "id": a.id, "body": a.body, "answerer_name": name,
+                "created_at": a.created_at, "parent_id": a.parent_id,
+            }
             for a, name in answer_rows
         ]
         return {
@@ -92,7 +95,7 @@ def get_question(question_id: int) -> dict | None:
         }
 
 
-def create_answer(question_id: int, user_id: int, body: str) -> int:
+def create_answer(question_id: int, user_id: int, body: str, parent_id: int | None = None) -> int:
     body = (body or "").strip()
     if not body:
         raise ValueError("Please write out your answer.")
@@ -104,7 +107,22 @@ def create_answer(question_id: int, user_id: int, body: str) -> int:
         if not exists:
             raise ValueError("That question no longer exists.")
 
-        a = CollabAnswer(question_id=question_id, user_id=user_id, body=body)
+        if parent_id is not None:
+            parent = db.query(CollabAnswer).filter(
+                CollabAnswer.id == parent_id, CollabAnswer.question_id == question_id,
+                CollabAnswer.is_hidden.is_(False),
+            ).first()
+            if not parent:
+                raise ValueError("That answer no longer exists.")
+            if parent.parent_id is not None:
+                # Replies are capped at one level deep - redirect a
+                # reply-to-a-reply onto the original top-level answer so
+                # the thread never grows a third level; @mentioning the
+                # actual person (see the reply-prefill UI) is how the
+                # learner still makes clear who they're responding to.
+                parent_id = parent.parent_id
+
+        a = CollabAnswer(question_id=question_id, user_id=user_id, body=body, parent_id=parent_id)
         db.add(a)
         db.flush()
         return a.id

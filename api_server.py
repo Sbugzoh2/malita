@@ -158,6 +158,7 @@ class CollabQuestionRequest(BaseModel):
 
 class CollabAnswerRequest(BaseModel):
     body: str
+    parent_id: int | None = None
 
 
 class CollabReportRequest(BaseModel):
@@ -621,6 +622,7 @@ def collab_question_detail(question_id: int, authorization: str = Header(None)):
             {
                 "id": a["id"], "body": a["body"], "answerer_name": a["answerer_name"],
                 "created_at": a["created_at"].isoformat() if a["created_at"] else None,
+                "parent_id": a["parent_id"],
             }
             for a in question["answers"]
         ],
@@ -631,7 +633,7 @@ def collab_question_detail(question_id: int, authorization: str = Header(None)):
 def collab_answer_create(question_id: int, body: CollabAnswerRequest, authorization: str = Header(None)):
     user = _require_collab_access(authorization)
     try:
-        answer_id = collab_create_answer(question_id, user["id"], body.body)
+        answer_id = collab_create_answer(question_id, user["id"], body.body, body.parent_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"id": answer_id}

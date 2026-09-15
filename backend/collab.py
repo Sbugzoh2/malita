@@ -294,7 +294,8 @@ def _notify_reporter_of_outcome(reporter_id: int, target_type: str, action: str,
     try:
         with get_session() as db:
             reporter = db.query(User).filter(User.id == reporter_id).first()
-        if not reporter:
+            reporter_email = reporter.email if reporter else None
+        if not reporter_email:
             return
         outcome = _ACTION_OUTCOME.get(action, action)
         body = (
@@ -304,6 +305,6 @@ def _notify_reporter_of_outcome(reporter_id: int, target_type: str, action: str,
         note = (note or "").strip()
         if note:
             body += f"\n\nNote from the admin: {note}"
-        send_email(reporter.email, "Update on your Collaboration Forum report", body)
+        send_email(reporter_email, "Update on your Collaboration Forum report", body)
     except Exception:
         logger.exception("Failed to notify reporter %s of a report outcome", reporter_id)

@@ -1,92 +1,40 @@
-Malita — Collaboration Forum moderation controls
-=================================================
+Malita — fix: reporter-outcome email was silently failing
+===========================================================
 
-Why this tarball exists: this Claude Code session still doesn't have GitHub
-push access to Sbugzoh2/malita (the org hasn't installed the Claude GitHub
-App yet), so the commit is already made locally but can't be pushed from
-here. Apply it from your own machine with your own git identity instead.
+Bug: when an admin ticked "Let the reporter know the outcome" (on Hide,
+Delete, or Dismiss), nothing was actually emailed - even though the
+admin-alert email (on a new report being filed) worked fine.
 
-What changed (already committed locally as one commit, message below):
+Root cause: in backend/collab.py's _notify_reporter_of_outcome(), the
+User row was fetched inside a `with get_session() as db:` block, but
+`reporter.email` was read AFTER that block had already closed and
+committed. SQLAlchemy expires an object's attributes on commit, so
+reading `.email` afterward raised DetachedInstanceError - which the
+surrounding try/except silently swallowed (logged, not raised), so the
+checkbox looked like it worked but no email ever went out.
 
-1. backend/collab.py
-   - report_content() now emails every admin user when a new report is
-     filed (best-effort — logs and swallows failures, same pattern as the
-     rest of the app's email sending; never blocks the report itself).
-   - resolve_report(report_id, action, notify_reporter=False, note="")
-     replaces the old resolve_report(report_id, hide_content: bool):
-       action = "hide"   -> same as before, just sets is_hidden
-       action = "delete" -> permanently deletes the content. Deleting a
-                            question also deletes its answers; deleting a
-                            top-level answer also deletes its direct
-                            replies (replies are capped at one level deep,
-                            so there's never a third level to worry about).
-       action = "dismiss" -> no content change, just marks the report
-                            resolved (same as before).
-     notify_reporter=True emails the original reporter the outcome, with
-     an optional admin note appended.
+Fix: read `reporter.email` while the session is still open (assign it to
+a plain local variable before the `with` block exits), the same way
+_notify_admins_of_report already did it correctly.
 
-2. api_server.py
-   - CollabResolveRequest is now {action: str, notify_reporter: bool = False,
-     note: str = ""} instead of {hide: bool}.
-   - POST /collab/reports/{id}/resolve passes all three through.
-
-3. app.py
-   - The admin moderation queue (inside "🤝 Collaboration Forum") now shows
-     three buttons per report — Hide content / Delete content / Dismiss
-     report — plus a "Let the reporter know the outcome" checkbox and an
-     optional note text field.
-
-4. mobile/src/api/client.ts
-   - Added CollabReport type, fetchCollabReports(), resolveCollabReport().
-
-5. mobile/src/screens/CollabScreen.tsx
-   - Added a new admin-only "Moderation queue" section (mirrors the web
-     one exactly — same three actions, same notify checkbox/note field).
-     Only renders when me.is_admin is true. No new screen/route was
-     needed — it lives right at the top of the existing Collab screen.
-
-Tested before packaging (see the two test runs below for full detail):
-  - A full backend/API test (register 3 users incl. one admin, create a
-    question + top-level answer + a reply, report it, list/resolve via
-    every action, confirm cascade delete removes the question AND its
-    answer AND its reply, confirm hidden content is excluded from
-    listings but not deleted, confirm a bogus action is rejected with
-    400, confirm a non-admin gets 403 from the reports endpoints).
-  - A live Streamlit + Playwright pass through the actual admin UI:
-    expanded the moderation queue, ticked "notify reporter", typed a
-    note, clicked Delete content, and confirmed the report and its
-    question both disappeared from the queue/listing.
-  - Confirmed (via server logs) that both the admin-notify and the
-    reporter-notify code paths actually execute end-to-end (they log
-    "not configured" only because this sandbox has no SMTP/Brevo
-    credentials set — in production, with those already configured for
-    password-reset emails, these will send real emails the same way).
-
-No database migration is needed — no new columns were added this time
-(CollabReport already had everything needed; is_hidden already existed on
-CollabQuestion/CollabAnswer for the "hide" path, and "delete" just removes
-rows outright).
+Verified live: reproduced the exact DetachedInstanceError in a local
+server's logs before the fix, then confirmed after the fix that the
+reporter-outcome email path completes cleanly with no exception (it logs
+"send_email: not configured" only because this sandbox has no
+SMTP/Brevo credentials - in your deployed environment, with those
+already configured, this will now actually send).
 
 How to apply
 ------------
-1. Copy these files into your local clone, overwriting the existing ones:
-     api_server.py
-     app.py
-     backend/collab.py
-     mobile/src/api/client.ts
-     mobile/src/screens/CollabScreen.tsx
+1. Copy backend/collab.py into your local clone, overwriting the existing
+   file (this is the same file from the previous "moderation controls"
+   tarball, with just this one fix added on top - if you already applied
+   that tarball, this file already includes those changes too, so
+   there's nothing else to reconcile).
 
 2. From your repo root:
-     git add api_server.py app.py backend/collab.py \
-             mobile/src/api/client.ts mobile/src/screens/CollabScreen.tsx
-     git commit -m "Add report-review moderation controls: admin email alerts, delete option, reporter outcome notice"
+     git add backend/collab.py
+     git commit -m "Fix reporter-outcome email silently failing with DetachedInstanceError"
      git push -u origin claude/math-tutor-app-script-7ac98e
 
-   (Use your own commit message if you'd rather — the one above matches
-   what was committed in this session, minus its Co-Authored-By/session
-   trailer, which you can drop or keep as you prefer.)
-
-3. Nothing else to run — no new env vars, no new migrations. Your existing
-   email setup (whatever gets password-reset emails delivered today) is
-   reused automatically for both the admin-alert and reporter-notice
-   emails.
+3. Nothing else to run - no new env vars, no migration.

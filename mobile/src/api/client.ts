@@ -377,3 +377,30 @@ export function editCollabAnswer(token: string, answerId: number, body: string) 
   });
 }
 
+export type CollabReport = {
+  id: number;
+  target_type: "question" | "answer";
+  target_id: number;
+  reason: string;
+  created_at: string | null;
+  preview: string;
+  already_hidden: boolean;
+  reporter_name: string;
+};
+
+export function fetchCollabReports(token: string) {
+  return request<{ reports: CollabReport[] }>("/collab/reports", { token });
+}
+
+export function resolveCollabReport(
+  token: string,
+  reportId: number,
+  params: { action: "hide" | "delete" | "dismiss"; notify_reporter?: boolean; note?: string }
+) {
+  return request<{ ok: boolean }>(`/collab/reports/${reportId}/resolve`, {
+    method: "POST",
+    body: params,
+    token,
+  });
+}
+

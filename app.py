@@ -1230,12 +1230,25 @@ elif mode == "🤝 Collaboration Forum":
                     st.text(rep["preview"])
                     if rep["already_hidden"]:
                         st.caption("Already hidden by an earlier report.")
-                    rcol1, rcol2 = st.columns(2)
+
+                    notify_reporter = st.checkbox(
+                        "Let the reporter know the outcome", key=f"notify_{rep['id']}"
+                    )
+                    note = ""
+                    if notify_reporter:
+                        note = st.text_input(
+                            "Optional note to include", key=f"note_{rep['id']}"
+                        )
+
+                    rcol1, rcol2, rcol3 = st.columns(3)
                     if rcol1.button("Hide content", key=f"hide_{rep['id']}"):
-                        collab_resolve_report(rep["id"], hide_content=True)
+                        collab_resolve_report(rep["id"], "hide", notify_reporter, note)
                         st.rerun()
-                    if rcol2.button("Dismiss report", key=f"dismiss_{rep['id']}"):
-                        collab_resolve_report(rep["id"], hide_content=False)
+                    if rcol2.button("Delete content", key=f"delete_{rep['id']}"):
+                        collab_resolve_report(rep["id"], "delete", notify_reporter, note)
+                        st.rerun()
+                    if rcol3.button("Dismiss report", key=f"dismiss_{rep['id']}"):
+                        collab_resolve_report(rep["id"], "dismiss", notify_reporter, note)
                         st.rerun()
                     st.divider()
 

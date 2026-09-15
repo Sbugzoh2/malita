@@ -15,6 +15,9 @@ import {
   fetchCollabQuestions,
   createCollabQuestion,
   CollabQuestionSummary,
+  fetchCollabReports,
+  resolveCollabReport,
+  CollabReport,
 } from "../api/client";
 import MixedMathText from "../latex/MixedMathText";
 
@@ -25,8 +28,120 @@ function formatDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function ModerationQueue({ token }: { token: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [reports, setReports] = useState<CollabReport[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [notify, setNotify] = useState<Record<number, boolean>>({});
+  const [notes, setNotes] = useState<Record<number, string>>({});
+
+  function load() {
+    setReports(null);
+    setError(null);
+    fetchCollabReports(token)
+      .then((res) => setReports(res.reports))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load reports."));
+  }
+
+  useEffect(() => {
+    if (expanded) load();
+  }, [expanded]);
+
+  async function act(reportId: number, action: "hide" | "delete" | "dismiss") {
+    setBusyId(reportId);
+    setError(null);
+    try {
+      await resolveCollabReport(token, reportId, {
+        action,
+        notify_reporter: !!notify[reportId],
+        note: notes[reportId] || "",
+      });
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not update that report.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <View style={styles.modBox}>
+      <Pressable style={styles.modToggle} onPress={() => setExpanded(!expanded)}>
+        <Text style={styles.modToggleText}>
+          {expanded ? "▾" : "▸"} 🛠️ Moderation queue (admin){reports ? ` — ${reports.length} open` : ""}
+        </Text>
+      </Pressable>
+
+      {expanded && (
+        <View>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {!reports ? (
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 12 }} />
+          ) : reports.length === 0 ? (
+            <Text style={styles.emptyNote}>No open reports.</Text>
+          ) : (
+            reports.map((rep) => (
+              <View key={rep.id} style={styles.modCard}>
+                <Text style={styles.modCardTitle}>
+                  {rep.target_type[0].toUpperCase() + rep.target_type.slice(1)} #{rep.target_id} — reported by {rep.reporter_name}
+                </Text>
+                {rep.reason ? <Text style={styles.modCardMeta}>Reason given: {rep.reason}</Text> : null}
+                <Text style={styles.modCardPreview}>{rep.preview}</Text>
+                {rep.already_hidden ? (
+                  <Text style={styles.modCardMeta}>Already hidden by an earlier report.</Text>
+                ) : null}
+
+                <Pressable
+                  style={styles.checkboxRow}
+                  onPress={() => setNotify({ ...notify, [rep.id]: !notify[rep.id] })}
+                >
+                  <Text style={styles.checkboxBox}>{notify[rep.id] ? "☑" : "☐"}</Text>
+                  <Text style={styles.checkboxLabel}>Let the reporter know the outcome</Text>
+                </Pressable>
+                {notify[rep.id] && (
+                  <TextInput
+                    style={styles.input}
+                    value={notes[rep.id] || ""}
+                    onChangeText={(t) => setNotes({ ...notes, [rep.id]: t })}
+                    placeholder="Optional note to include"
+                  />
+                )}
+
+                <View style={styles.modActionsRow}>
+                  <Pressable
+                    style={[styles.modActionButton, busyId === rep.id && styles.buttonDisabled]}
+                    onPress={() => act(rep.id, "hide")}
+                    disabled={busyId === rep.id}
+                  >
+                    <Text style={styles.modActionButtonText}>Hide</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modActionButton, styles.modActionButtonDanger, busyId === rep.id && styles.buttonDisabled]}
+                    onPress={() => act(rep.id, "delete")}
+                    disabled={busyId === rep.id}
+                  >
+                    <Text style={styles.modActionButtonText}>Delete</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modActionButton, styles.modActionButtonSecondary, busyId === rep.id && styles.buttonDisabled]}
+                    onPress={() => act(rep.id, "dismiss")}
+                    disabled={busyId === rep.id}
+                  >
+                    <Text style={styles.modActionButtonTextSecondary}>Dismiss</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function CollabScreen({ navigation }: any) {
-  const { token } = useAuth();
+  const { token, me } = useAuth();
   const [subject, setSubject] = useState<Subject>("Mathematics");
   const [questions, setQuestions] = useState<CollabQuestionSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +192,8 @@ export default function CollabScreen({ navigation }: any) {
       </Pressable>
       <Text style={styles.title}>🤝 Collaboration Forum</Text>
       <Text style={styles.subtitle}>Ask a question, help another learner, or browse what others are stuck on.</Text>
+
+      {me?.is_admin && token ? <ModerationQueue token={token} /> : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -200,4 +317,26 @@ const styles = StyleSheet.create({
   cardBody: { fontSize: 13, color: colors.text },
   cardBodyWrap: { marginTop: 2 },
   mathTip: { fontSize: 11, color: colors.textSecondary, fontStyle: "italic", marginTop: 6 },
+  modBox: { backgroundColor: colors.surface, borderRadius: 16, padding: 14, marginBottom: 16 },
+  modToggle: {},
+  modToggleText: { fontSize: 14, fontWeight: "700", color: colors.primaryDark },
+  modCard: { borderTopWidth: 1, borderTopColor: colors.border, marginTop: 12, paddingTop: 12 },
+  modCardTitle: { fontSize: 13, fontWeight: "700", color: colors.text, marginBottom: 4 },
+  modCardMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
+  modCardPreview: { fontSize: 13, color: colors.text, marginBottom: 8 },
+  checkboxRow: { flexDirection: "row", alignItems: "center", marginTop: 4, marginBottom: 6 },
+  checkboxBox: { fontSize: 16, marginRight: 8, color: colors.primaryDark },
+  checkboxLabel: { fontSize: 12, color: colors.textSecondary },
+  modActionsRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  modActionButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 9,
+    alignItems: "center",
+  },
+  modActionButtonDanger: { backgroundColor: colors.error },
+  modActionButtonSecondary: { backgroundColor: "#fff", borderWidth: 1, borderColor: colors.border },
+  modActionButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  modActionButtonTextSecondary: { color: colors.text, fontWeight: "700", fontSize: 13 },
 });

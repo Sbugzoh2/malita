@@ -9,8 +9,21 @@ reply, and (if something's wrong) report it for an admin to review.
 """
 
 import datetime as dt
+import logging
+import os
 
 from .db import get_session, CollabQuestion, CollabAnswer, CollabReport, User
+from .email_util import send_email
+
+logger = logging.getLogger("malita.collab")
+
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
+
+_ACTION_OUTCOME = {
+    "hide": "hidden from other learners",
+    "delete": "permanently deleted",
+    "dismiss": "reviewed - no action was taken",
+}
 
 
 def create_question(user_id: int, subject: str, topic: str, title: str, body: str) -> int:
@@ -168,11 +181,37 @@ def report_content(target_type: str, target_id: int, reporter_id: int, reason: s
     if target_type not in ("question", "answer"):
         raise ValueError("Unknown content type to report.")
 
+    reason = (reason or "").strip()[:500]
     with get_session() as db:
         db.add(CollabReport(
             target_type=target_type, target_id=target_id,
-            reporter_id=reporter_id, reason=(reason or "").strip()[:500],
+            reporter_id=reporter_id, reason=reason,
         ))
+        reporter = db.query(User).filter(User.id == reporter_id).first()
+        reporter_name = reporter.name if reporter else "A learner"
+
+    _notify_admins_of_report(target_type, target_id, reporter_name, reason)
+
+
+def _notify_admins_of_report(target_type: str, target_id: int, reporter_name: str, reason: str) -> None:
+    """Best-effort email to every admin - a report must still be recorded
+    even if this fails or email isn't configured, so any error here is
+    logged and swallowed rather than raised."""
+    try:
+        with get_session() as db:
+            admin_emails = [u.email for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admin_emails:
+            return
+        subject = f"Malita: new report on a {target_type}"
+        body = (
+            f"{reporter_name} reported a {target_type} (#{target_id}) on the Collaboration Forum.\n\n"
+            f"Reason given: {reason or '(no reason given)'}\n\n"
+            f"Review it in the app's Moderation queue: {APP_BASE_URL}"
+        )
+        for email in admin_emails:
+            send_email(email, subject, body)
+    except Exception:
+        logger.exception("Failed to notify admins of a new Collaboration Forum report")
 
 
 def list_open_reports() -> list[dict]:
@@ -208,21 +247,63 @@ def list_open_reports() -> list[dict]:
         return result
 
 
-def resolve_report(report_id: int, hide_content: bool) -> None:
-    """Admin action: optionally hide the reported content, then mark this
-    report resolved either way (dismissing a report never un-hides
-    content another still-open report flagged)."""
+def resolve_report(report_id: int, action: str, notify_reporter: bool = False, note: str = "") -> None:
+    """Admin action: "hide" the reported content, "delete" it outright, or
+    "dismiss" the report with no action - then mark the report resolved
+    either way (dismissing a report never un-hides/restores content
+    another still-open report flagged).
+
+    Deleting a question also deletes its answers; deleting a top-level
+    answer also deletes its direct replies (replies-to-replies don't
+    exist - see create_answer's one-level cap).
+
+    If notify_reporter is set, best-effort emails the reporter the
+    outcome plus the optional admin note - never raises on its own, since
+    the moderation action itself must still succeed either way."""
+    if action not in ("hide", "delete", "dismiss"):
+        raise ValueError("Unknown moderation action.")
+
     with get_session() as db:
         report = db.query(CollabReport).filter(CollabReport.id == report_id).first()
         if not report:
             raise ValueError("That report no longer exists.")
+        target_type, target_id, reporter_id = report.target_type, report.target_id, report.reporter_id
 
-        if hide_content:
-            if report.target_type == "question":
-                target = db.query(CollabQuestion).filter(CollabQuestion.id == report.target_id).first()
+        if action == "hide":
+            if target_type == "question":
+                target = db.query(CollabQuestion).filter(CollabQuestion.id == target_id).first()
             else:
-                target = db.query(CollabAnswer).filter(CollabAnswer.id == report.target_id).first()
+                target = db.query(CollabAnswer).filter(CollabAnswer.id == target_id).first()
             if target:
                 target.is_hidden = True
+        elif action == "delete":
+            if target_type == "question":
+                db.query(CollabAnswer).filter(CollabAnswer.question_id == target_id).delete()
+                db.query(CollabQuestion).filter(CollabQuestion.id == target_id).delete()
+            else:
+                db.query(CollabAnswer).filter(CollabAnswer.parent_id == target_id).delete()
+                db.query(CollabAnswer).filter(CollabAnswer.id == target_id).delete()
 
         report.resolved = True
+
+    if notify_reporter:
+        _notify_reporter_of_outcome(reporter_id, target_type, action, note)
+
+
+def _notify_reporter_of_outcome(reporter_id: int, target_type: str, action: str, note: str) -> None:
+    try:
+        with get_session() as db:
+            reporter = db.query(User).filter(User.id == reporter_id).first()
+        if not reporter:
+            return
+        outcome = _ACTION_OUTCOME.get(action, action)
+        body = (
+            f"Thanks for reporting a {target_type} on the Malita Collaboration Forum. "
+            f"After review, it was {outcome}."
+        )
+        note = (note or "").strip()
+        if note:
+            body += f"\n\nNote from the admin: {note}"
+        send_email(reporter.email, "Update on your Collaboration Forum report", body)
+    except Exception:
+        logger.exception("Failed to notify reporter %s of a report outcome", reporter_id)

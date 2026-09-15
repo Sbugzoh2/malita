@@ -169,7 +169,9 @@ class CollabReportRequest(BaseModel):
 
 
 class CollabResolveRequest(BaseModel):
-    hide: bool
+    action: str  # "hide" | "delete" | "dismiss"
+    notify_reporter: bool = False
+    note: str = ""
 
 
 class CollabQuestionEditRequest(BaseModel):
@@ -697,13 +699,14 @@ def collab_reports_list(authorization: str = Header(None)):
 
 @app.post("/collab/reports/{report_id}/resolve")
 def collab_report_resolve(report_id: int, body: CollabResolveRequest, authorization: str = Header(None)):
-    """Admin-only: hide the reported content (or just dismiss the report)
-    and mark it resolved either way."""
+    """Admin-only: hide or delete the reported content (or just dismiss
+    the report), mark it resolved either way, and optionally email the
+    reporter the outcome."""
     user = _auth_user(authorization)
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
     try:
-        collab_resolve_report(report_id, body.hide)
+        collab_resolve_report(report_id, body.action, body.notify_reporter, body.note)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}

@@ -84,6 +84,7 @@ def get_question(question_id: int) -> dict | None:
             {
                 "id": a.id, "body": a.body, "answerer_name": name,
                 "created_at": a.created_at, "parent_id": a.parent_id,
+                "user_id": a.user_id, "is_edited": bool(a.is_edited),
             }
             for a, name in answer_rows
         ]
@@ -91,8 +92,43 @@ def get_question(question_id: int) -> dict | None:
             "id": q.id, "subject": q.subject, "topic": q.topic,
             "title": q.title, "body": q.body,
             "asker_name": asker_name, "created_at": q.created_at,
+            "user_id": q.user_id, "is_edited": bool(q.is_edited),
             "answers": answers,
         }
+
+
+def update_question(question_id: int, user_id: int, title: str, body: str) -> None:
+    title = (title or "").strip()
+    body = (body or "").strip()
+    if not title:
+        raise ValueError("Please add a title for your question.")
+    if not body:
+        raise ValueError("Please write out your question.")
+
+    with get_session() as db:
+        q = db.query(CollabQuestion).filter(CollabQuestion.id == question_id).first()
+        if not q:
+            raise ValueError("That question no longer exists.")
+        if q.user_id != user_id:
+            raise ValueError("You can only edit your own question.")
+        q.title = title[:200]
+        q.body = body
+        q.is_edited = True
+
+
+def update_answer(answer_id: int, user_id: int, body: str) -> None:
+    body = (body or "").strip()
+    if not body:
+        raise ValueError("Please write out your answer.")
+
+    with get_session() as db:
+        a = db.query(CollabAnswer).filter(CollabAnswer.id == answer_id).first()
+        if not a:
+            raise ValueError("That answer no longer exists.")
+        if a.user_id != user_id:
+            raise ValueError("You can only edit your own answer.")
+        a.body = body
+        a.is_edited = True
 
 
 def create_answer(question_id: int, user_id: int, body: str, parent_id: int | None = None) -> int:

@@ -16,6 +16,8 @@ import {
   fetchCollabQuestion,
   createCollabAnswer,
   reportCollabContent,
+  editCollabQuestion,
+  editCollabAnswer,
   CollabQuestionDetail,
   CollabAnswer,
 } from "../api/client";
@@ -90,23 +92,83 @@ function ReportControl({
   );
 }
 
+// A small inline "edit" widget for content the current user owns - only
+// ever rendered for the author, checked by the caller.
+function EditControl({
+  initialBody,
+  token,
+  onSave,
+}: {
+  initialBody: string;
+  token: string | null;
+  onSave: (newBody: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [body, setBody] = useState(initialBody);
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (!token || !body.trim()) return;
+    setSaving(true);
+    try {
+      await onSave(body.trim());
+      setOpen(false);
+    } catch (e) {
+      Alert.alert("Error", e instanceof ApiError ? e.message : "Could not save your changes.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <View>
+      <Pressable onPress={() => { setBody(initialBody); setOpen(!open); }}>
+        <Text style={styles.editLink}>✏️ Edit</Text>
+      </Pressable>
+      {open && (
+        <View style={styles.editBox}>
+          <TextInput
+            style={[styles.reportInput, styles.editTextArea]}
+            value={body}
+            onChangeText={setBody}
+            multiline
+          />
+          <Pressable
+            style={[styles.editSubmitButton, saving && styles.buttonDisabled]}
+            onPress={submit}
+            disabled={saving}
+          >
+            {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.editSubmitText}>Save changes</Text>}
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
 type ReplyTarget = { id: number; name: string } | null;
 
 function AnswerCard({
   answer,
   isReply,
   token,
+  currentUserId,
   onReply,
+  onSaved,
 }: {
   answer: CollabAnswer;
   isReply: boolean;
   token: string | null;
+  currentUserId: number | undefined;
   onReply: (target: ReplyTarget) => void;
+  onSaved: () => void;
 }) {
+  const isOwner = currentUserId != null && currentUserId === answer.user_id;
   return (
     <View style={[styles.answerCard, isReply && styles.replyCard]}>
       <Text style={styles.answerMeta}>
         {isReply ? "↳ " : ""}{answer.answerer_name} · {formatDate(answer.created_at)}
+        {answer.is_edited ? " · (edited)" : ""}
       </Text>
       <MixedMathText text={answer.body} fontSize={14} />
       <View style={styles.answerActions}>
@@ -114,13 +176,24 @@ function AnswerCard({
           <Text style={styles.replyLink}>↩️ Reply</Text>
         </Pressable>
       </View>
+      {isOwner && (
+        <EditControl
+          initialBody={answer.body}
+          token={token}
+          onSave={async (newBody) => {
+            if (!token) return;
+            await editCollabAnswer(token, answer.id, newBody);
+            onSaved();
+          }}
+        />
+      )}
       <ReportControl targetType="answer" targetId={answer.id} token={token} />
     </View>
   );
 }
 
 export default function CollabQuestionDetailScreen({ navigation, route }: any) {
-  const { token } = useAuth();
+  const { token, me } = useAuth();
   const questionId: number = route.params.questionId;
   const [question, setQuestion] = useState<CollabQuestionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -142,7 +215,7 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
 
   function handleReply(target: ReplyTarget) {
     setReplyTarget(target);
-    setAnswerBody(target ? `@${target.name} ` : "");
+    setAnswerBody(target ? `${target.name} ` : "");
   }
 
   async function handlePostAnswer() {
@@ -155,8 +228,8 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
     setError(null);
     try {
       // A reply to a reply still targets the original top-level answer
-      // (backend.collab enforces this too, as a safety net) - @mentioning
-      // the actual person is how it stays clear who's being addressed.
+      // (backend.collab enforces this too, as a safety net) - tagging
+      // the actual person's name is how it stays clear who's addressed.
       await createCollabAnswer(token, questionId, answerBody.trim(), replyTarget?.id ?? null);
       setAnswerBody("");
       setReplyTarget(null);
@@ -176,6 +249,8 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
     );
   }
 
+  const currentUserId = me?.user.id;
+  const isQuestionOwner = currentUserId != null && currentUserId === question.user_id;
   const topLevel = question.answers.filter((a) => !a.parent_id);
   const repliesByParent: Record<number, CollabAnswer[]> = {};
   for (const a of question.answers) {
@@ -195,9 +270,21 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
       <Text style={styles.title}>{question.title}</Text>
       <Text style={styles.meta}>
         Asked by {question.asker_name} · {question.topic || "No topic"} · {formatDate(question.created_at)}
+        {question.is_edited ? " · (edited)" : ""}
       </Text>
       <MixedMathText text={question.body} fontSize={14} />
       <View style={{ marginTop: 8 }}>
+        {isQuestionOwner && (
+          <EditControl
+            initialBody={question.body}
+            token={token}
+            onSave={async (newBody) => {
+              if (!token) return;
+              await editCollabQuestion(token, question.id, question.title, newBody);
+              load();
+            }}
+          />
+        )}
         <ReportControl targetType="question" targetId={question.id} token={token} />
       </View>
 
@@ -208,9 +295,15 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
       </Text>
       {topLevel.map((a) => (
         <View key={a.id}>
-          <AnswerCard answer={a} isReply={false} token={token} onReply={handleReply} />
+          <AnswerCard
+            answer={a} isReply={false} token={token} currentUserId={currentUserId}
+            onReply={handleReply} onSaved={load}
+          />
           {(repliesByParent[a.id] ?? []).map((reply) => (
-            <AnswerCard key={reply.id} answer={reply} isReply token={token} onReply={handleReply} />
+            <AnswerCard
+              key={reply.id} answer={reply} isReply token={token} currentUserId={currentUserId}
+              onReply={handleReply} onSaved={load}
+            />
           ))}
         </View>
       ))}
@@ -257,6 +350,18 @@ const styles = StyleSheet.create({
   reportLink: { fontSize: 12, color: colors.error, marginBottom: 4 },
   reportDoneText: { fontSize: 12, color: colors.textSecondary, fontStyle: "italic" },
   reportBox: { marginTop: 6, marginBottom: 6 },
+  editLink: { fontSize: 12, color: colors.primary, fontWeight: "700", marginBottom: 4 },
+  editBox: { marginTop: 6, marginBottom: 6 },
+  editTextArea: { minHeight: 70, textAlignVertical: "top" },
+  editSubmitButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 8,
+    alignItems: "center",
+    alignSelf: "flex-start",
+    paddingHorizontal: 16,
+  },
+  editSubmitText: { color: "#fff", fontWeight: "700", fontSize: 12 },
   reportInput: {
     borderWidth: 1,
     borderColor: colors.border,

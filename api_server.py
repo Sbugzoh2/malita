@@ -51,7 +51,8 @@ from backend.collab import (
     create_question as collab_create_question, list_questions as collab_list_questions,
     get_question as collab_get_question, create_answer as collab_create_answer,
     report_content as collab_report_content, list_open_reports as collab_list_open_reports,
-    resolve_report as collab_resolve_report,
+    resolve_report as collab_resolve_report, update_question as collab_update_question,
+    update_answer as collab_update_answer,
 )
 from backend.usage import can_solve, record_solve, get_today_count
 from backend.records import record_solved_question, get_learner_stats, get_recent_solved
@@ -169,6 +170,15 @@ class CollabReportRequest(BaseModel):
 
 class CollabResolveRequest(BaseModel):
     hide: bool
+
+
+class CollabQuestionEditRequest(BaseModel):
+    title: str
+    body: str
+
+
+class CollabAnswerEditRequest(BaseModel):
+    body: str
 
 
 def _auth_user(authorization: str | None):
@@ -616,13 +626,14 @@ def collab_question_detail(question_id: int, authorization: str = Header(None)):
     return {
         "id": question["id"], "subject": question["subject"], "topic": question["topic"],
         "title": question["title"], "body": question["body"],
-        "asker_name": question["asker_name"],
+        "asker_name": question["asker_name"], "user_id": question["user_id"],
+        "is_edited": question["is_edited"],
         "created_at": question["created_at"].isoformat() if question["created_at"] else None,
         "answers": [
             {
                 "id": a["id"], "body": a["body"], "answerer_name": a["answerer_name"],
                 "created_at": a["created_at"].isoformat() if a["created_at"] else None,
-                "parent_id": a["parent_id"],
+                "parent_id": a["parent_id"], "user_id": a["user_id"], "is_edited": a["is_edited"],
             }
             for a in question["answers"]
         ],
@@ -637,6 +648,26 @@ def collab_answer_create(question_id: int, body: CollabAnswerRequest, authorizat
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"id": answer_id}
+
+
+@app.post("/collab/questions/{question_id}/edit")
+def collab_question_edit(question_id: int, body: CollabQuestionEditRequest, authorization: str = Header(None)):
+    user = _require_collab_access(authorization)
+    try:
+        collab_update_question(question_id, user["id"], body.title, body.body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/collab/answers/{answer_id}/edit")
+def collab_answer_edit(answer_id: int, body: CollabAnswerEditRequest, authorization: str = Header(None)):
+    user = _require_collab_access(authorization)
+    try:
+        collab_update_answer(answer_id, user["id"], body.body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
 
 
 @app.post("/collab/report")

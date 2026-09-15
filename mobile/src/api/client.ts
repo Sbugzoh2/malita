@@ -313,6 +313,8 @@ export type CollabAnswer = {
   answerer_name: string;
   created_at: string | null;
   parent_id: number | null;
+  user_id: number;
+  is_edited: boolean;
 };
 
 export type CollabQuestionDetail = {
@@ -323,6 +325,8 @@ export type CollabQuestionDetail = {
   body: string;
   asker_name: string;
   created_at: string | null;
+  user_id: number;
+  is_edited: boolean;
   answers: CollabAnswer[];
 };
 
@@ -355,5 +359,21 @@ export function reportCollabContent(
   params: { target_type: "question" | "answer"; target_id: number; reason?: string }
 ) {
   return request<{ ok: boolean }>("/collab/report", { method: "POST", body: params, token });
+}
+
+export function editCollabQuestion(token: string, questionId: number, title: string, body: string) {
+  return request<{ ok: boolean }>(`/collab/questions/${questionId}/edit`, {
+    method: "POST",
+    body: { title, body },
+    token,
+  });
+}
+
+export function editCollabAnswer(token: string, answerId: number, body: string) {
+  return request<{ ok: boolean }>(`/collab/answers/${answerId}/edit`, {
+    method: "POST",
+    body: { body },
+    token,
+  });
 }
 

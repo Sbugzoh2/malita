@@ -216,6 +216,7 @@ class CollabQuestion(Base):
     # from every learner-facing query but kept in the DB (not deleted) so
     # the report queue still has something to review.
     is_hidden = Column(Boolean, default=False)
+    is_edited = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
 
 
@@ -233,6 +234,7 @@ class CollabAnswer(Base):
     # reply's parent is always a top-level answer, never another reply.
     parent_id = Column(Integer, ForeignKey("collab_answers.id"), nullable=True, index=True)
     is_hidden = Column(Boolean, default=False)
+    is_edited = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
 
 
@@ -288,6 +290,8 @@ def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
 def init_db():
     Base.metadata.create_all(engine)
     _ensure_column("collab_answers", "parent_id", "INTEGER")
+    _ensure_column("collab_questions", "is_edited", "BOOLEAN DEFAULT FALSE")
+    _ensure_column("collab_answers", "is_edited", "BOOLEAN DEFAULT FALSE")
 
 
 @contextmanager

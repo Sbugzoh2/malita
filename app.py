@@ -35,7 +35,8 @@ from backend.collab import (
     create_question as collab_create_question, list_questions as collab_list_questions,
     get_question as collab_get_question, create_answer as collab_create_answer,
     report_content as collab_report_content, list_open_reports as collab_list_open_reports,
-    resolve_report as collab_resolve_report,
+    resolve_report as collab_resolve_report, update_question as collab_update_question,
+    update_answer as collab_update_answer,
 )
 from backend.usage import can_solve, record_solve, get_today_count, reset_today_usage
 from backend.records import record_solved_question, get_recent_solved, get_learner_stats
@@ -641,7 +642,7 @@ _NAV_OPTIONS = [
     "🧮 AI Tutor",
     "📝 Practice Questions",
     "🗄️ Past Papers Library",
-    "🤝 Collaborate",
+    "🤝 Collaboration Forum",
     "🎯 Learner Profile",
     "📏 Formula Sheet",
 ]
@@ -1200,12 +1201,12 @@ elif mode == "🗄️ Past Papers Library":
 # =====================================================
 # COLLABORATE
 # =====================================================
-elif mode == "🤝 Collaborate":
-    st.title("🤝 Collaborate")
+elif mode == "🤝 Collaboration Forum":
+    st.title("🤝 Collaboration Forum")
     st.caption("Ask a question, help another learner, or browse what others are stuck on.")
 
     if not can_use_collab(effective_tier):
-        st.warning("🤝 Collaborate is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
+        st.warning("🤝 Collaboration Forum is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
     else:
         if "collab_selected_question_id" not in st.session_state:
             st.session_state.collab_selected_question_id = None
@@ -1251,12 +1252,28 @@ elif mode == "🤝 Collaborate":
                     st.session_state.collab_reply_prefill = None
 
                 st.subheader(question["title"])
-                st.caption(f"Asked by {question['asker_name']} · {question['topic'] or 'No topic'} · {question['created_at'].strftime('%d %b %Y')}")
+                edited_suffix = " · (edited)" if question["is_edited"] else ""
+                st.caption(f"Asked by {question['asker_name']} · {question['topic'] or 'No topic'} · {question['created_at'].strftime('%d %b %Y')}{edited_suffix}")
                 # Streamlit renders $...$ as a real equation (KaTeX) inside
                 # st.write/st.markdown - no separate LaTeX handling needed
                 # here, just tell learners the convention when they compose.
                 st.write(question["body"])
-                with st.expander("🚩 Report this question"):
+
+                qcol1, qcol2 = st.columns(2)
+                if question["user_id"] == auth_user["id"]:
+                    with qcol1.expander("✏️ Edit this question"):
+                        with st.form(f"edit_q_{question['id']}"):
+                            edit_title = st.text_input("Title", value=question["title"])
+                            edit_body = st.text_area("Your question", value=question["body"])
+                            st.caption("Tip: put math between two dollar signs to render it as a real equation, e.g. $x^2-5x+6=0$.")
+                            if st.form_submit_button("Save changes"):
+                                try:
+                                    collab_update_question(question["id"], auth_user["id"], edit_title, edit_body)
+                                    st.success("Question updated!")
+                                    st.rerun()
+                                except ValueError as e:
+                                    st.error(str(e))
+                with qcol2.expander("🚩 Report this question"):
                     with st.form(f"report_q_{question['id']}"):
                         reason = st.text_input("Why are you reporting this? (optional)")
                         if st.form_submit_button("Submit report"):
@@ -1278,19 +1295,31 @@ elif mode == "🤝 Collaborate":
                 def _render_answer(a, is_reply=False):
                     indent = " " * 4 if is_reply else ""
                     prefix = "↳ " if is_reply else ""
-                    st.markdown(f"{indent}{prefix}**{a['answerer_name']}** · {a['created_at'].strftime('%d %b %Y')}")
+                    edited_suffix = " · (edited)" if a["is_edited"] else ""
+                    st.markdown(f"{indent}{prefix}**{a['answerer_name']}** · {a['created_at'].strftime('%d %b %Y')}{edited_suffix}")
                     st.write(a["body"])
-                    rcol1, rcol2 = st.columns([1, 4])
-                    with rcol1:
+                    acol1, acol2, acol3 = st.columns([1, 1, 3])
+                    with acol1:
                         if st.button("↩️ Reply", key=f"reply_{a['id']}"):
                             # A reply to a reply still targets the original
                             # top-level answer (backend.collab enforces this
-                            # too) - @mentioning the actual person below is
-                            # how it stays clear who's being addressed.
+                            # too) - tagging the actual person's name below
+                            # is how it stays clear who's being addressed.
                             st.session_state.collab_reply_target_id = a["parent_id"] or a["id"]
                             st.session_state.collab_reply_target_name = a["answerer_name"]
-                            st.session_state.collab_reply_prefill = f"@{a['answerer_name']} "
+                            st.session_state.collab_reply_prefill = f"{a['answerer_name']} "
                             st.rerun()
+                    if a["user_id"] == auth_user["id"]:
+                        with acol2.expander("✏️ Edit"):
+                            with st.form(f"edit_a_{a['id']}"):
+                                edit_body = st.text_area("Your answer", value=a["body"], key=f"edit_a_body_{a['id']}")
+                                if st.form_submit_button("Save changes"):
+                                    try:
+                                        collab_update_answer(a["id"], auth_user["id"], edit_body)
+                                        st.success("Answer updated!")
+                                        st.rerun()
+                                    except ValueError as e:
+                                        st.error(str(e))
                     with st.expander("🚩 Report this answer", expanded=False):
                         with st.form(f"report_a_{a['id']}"):
                             reason = st.text_input("Why are you reporting this? (optional)", key=f"reason_a_{a['id']}")

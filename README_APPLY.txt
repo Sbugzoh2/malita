@@ -1,23 +1,36 @@
-IMPORTANT - do this part first, right now, regardless of this file:
-Run this once in your Supabase SQL Editor to fix your LIVE database
-immediately (this is what's actually crashing Collaborate right now):
+Overwrite these files with the ones in this folder:
+  app.py
+  api_server.py
+  backend/db.py
+  backend/collab.py
+  mobile/src/api/client.ts
+  mobile/src/screens/CollabQuestionDetailScreen.tsx
 
-  ALTER TABLE collab_answers ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES collab_answers(id);
-
-That alone fixes the live crash. Everything below is the code fix so
-this class of mistake (a column added to an existing table) can't
-silently break production again on a future update.
-
-Overwrite backend/db.py with the one in this folder, then:
-  git add backend/db.py
-  git commit -m "Self-heal missing columns on app startup instead of just create_all()"
+Then:
+  git add app.py api_server.py backend/db.py backend/collab.py \
+          mobile/src/api/client.ts mobile/src/screens/CollabQuestionDetailScreen.tsx
+  git commit -m "Drop the @ from mentions; let authors edit their own posts"
   git push origin main
 
-What changed: init_db() (already called on startup by both app.py and
-api_server.py) now also checks for a few known columns and adds them
-via ALTER TABLE if a table already exists but is missing one -
-Base.metadata.create_all() only creates brand-new tables, it never
-alters ones already in the live database, which is exactly how the
-parent_id column silently never made it into your production
-database. Verified against a simulated copy of your actual
-pre-migration table.
+No manual SQL needed this time - the new is_edited column is
+registered in the same self-healing _ensure_column check that already
+runs on startup (the one added after the parent_id incident), so it
+gets added automatically the next time the app starts. Still worth
+double-checking your Supabase logs after this deploy to confirm it
+picked up cleanly, given what happened last time.
+
+Rebuild the mobile app via EAS afterward.
+
+What changed:
+1. The reply-tagging prefix no longer includes "@" - just the plain
+   name now.
+2. Question and answer authors can edit their own post after posting
+   (checked server-side - a non-owner gets rejected). Edited content
+   shows a plain "(edited)" marker. Web's edit form covers title+body;
+   mobile's covers body only.
+
+Verified end-to-end: a live server test confirming edit endpoints
+reject a non-owner and accept the real owner, the migration path
+against a simulated copy of the actual current production schema, and
+the real web UI (edit form pre-fills correctly, "(edited)" appears
+after saving, Edit only shows for content you actually own).

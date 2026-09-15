@@ -30,7 +30,13 @@ from backend.auth import (
     create_password_reset, reset_password, cancel_subscription, create_api_token,
 )
 from backend.email_util import send_email
-from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, daily_limit
+from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, daily_limit
+from backend.collab import (
+    create_question as collab_create_question, list_questions as collab_list_questions,
+    get_question as collab_get_question, create_answer as collab_create_answer,
+    report_content as collab_report_content, list_open_reports as collab_list_open_reports,
+    resolve_report as collab_resolve_report,
+)
 from backend.usage import can_solve, record_solve, get_today_count, reset_today_usage
 from backend.records import record_solved_question, get_recent_solved, get_learner_stats
 from backend.payfast import build_checkout_payload, build_checkout_redirect_snippet
@@ -635,6 +641,7 @@ _NAV_OPTIONS = [
     "🧮 AI Tutor",
     "📝 Practice Questions",
     "🗄️ Past Papers Library",
+    "🤝 Collaborate",
     "🎯 Learner Profile",
     "📏 Formula Sheet",
 ]
@@ -1191,6 +1198,124 @@ elif mode == "🗄️ Past Papers Library":
                             _render_paper_row(p)
 
 # =====================================================
+# COLLABORATE
+# =====================================================
+elif mode == "🤝 Collaborate":
+    st.title("🤝 Collaborate")
+    st.caption("Ask a question, help another learner, or browse what others are stuck on.")
+
+    if not can_use_collab(effective_tier):
+        st.warning("🤝 Collaborate is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
+    else:
+        if "collab_selected_question_id" not in st.session_state:
+            st.session_state.collab_selected_question_id = None
+
+        # ---- Admin moderation queue ----
+        if is_admin_user:
+            open_reports = collab_list_open_reports()
+            with st.expander(f"🛠️ Moderation queue (admin) — {len(open_reports)} open"):
+                if not open_reports:
+                    st.caption("No open reports.")
+                for rep in open_reports:
+                    st.markdown(f"**{rep['target_type'].title()} #{rep['target_id']}** — reported by {rep['reporter_name']}")
+                    if rep["reason"]:
+                        st.caption(f"Reason given: {rep['reason']}")
+                    st.text(rep["preview"])
+                    if rep["already_hidden"]:
+                        st.caption("Already hidden by an earlier report.")
+                    rcol1, rcol2 = st.columns(2)
+                    if rcol1.button("Hide content", key=f"hide_{rep['id']}"):
+                        collab_resolve_report(rep["id"], hide_content=True)
+                        st.rerun()
+                    if rcol2.button("Dismiss report", key=f"dismiss_{rep['id']}"):
+                        collab_resolve_report(rep["id"], hide_content=False)
+                        st.rerun()
+                    st.divider()
+
+        # ---- Detail view: one question + its answers ----
+        if st.session_state.collab_selected_question_id:
+            if st.button("← Back to questions"):
+                st.session_state.collab_selected_question_id = None
+                st.rerun()
+
+            question = collab_get_question(st.session_state.collab_selected_question_id)
+            if not question:
+                st.error("That question no longer exists.")
+                st.session_state.collab_selected_question_id = None
+            else:
+                st.subheader(question["title"])
+                st.caption(f"Asked by {question['asker_name']} · {question['topic'] or 'No topic'} · {question['created_at'].strftime('%d %b %Y')}")
+                st.write(question["body"])
+                with st.expander("🚩 Report this question"):
+                    with st.form(f"report_q_{question['id']}"):
+                        reason = st.text_input("Why are you reporting this? (optional)")
+                        if st.form_submit_button("Submit report"):
+                            collab_report_content("question", question["id"], auth_user["id"], reason)
+                            st.success("Thanks — an admin will review this.")
+
+                st.divider()
+                st.markdown(f"#### {len(question['answers'])} answer{'s' if len(question['answers']) != 1 else ''}")
+                for a in question["answers"]:
+                    st.markdown(f"**{a['answerer_name']}** · {a['created_at'].strftime('%d %b %Y')}")
+                    st.write(a["body"])
+                    with st.expander("🚩 Report this answer", expanded=False):
+                        with st.form(f"report_a_{a['id']}"):
+                            reason = st.text_input("Why are you reporting this? (optional)", key=f"reason_a_{a['id']}")
+                            if st.form_submit_button("Submit report"):
+                                collab_report_content("answer", a["id"], auth_user["id"], reason)
+                                st.success("Thanks — an admin will review this.")
+                    st.divider()
+
+                with st.form(f"answer_form_{question['id']}", clear_on_submit=True):
+                    answer_body = st.text_area("Your answer")
+                    if st.form_submit_button("Post answer"):
+                        try:
+                            collab_create_answer(question["id"], auth_user["id"], answer_body)
+                            st.success("Answer posted!")
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
+
+        # ---- List view: browse + ask ----
+        else:
+            collab_subject = st.radio("Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="collab_subject")
+            subject_name = "Mathematics" if collab_subject == "🧮 Mathematics" else "Physical Sciences"
+            topic_options = sorted(MATHEMATICS_TOPICS if subject_name == "Mathematics" else PHYSICAL_SCIENCES_TOPICS)
+
+            with st.expander("➕ Ask a question"):
+                with st.form("ask_question_form", clear_on_submit=True):
+                    q_topic = st.selectbox("Topic (optional)", ["No specific topic"] + topic_options)
+                    q_title = st.text_input("Title")
+                    q_body = st.text_area("Your question")
+                    if st.form_submit_button("Post question"):
+                        try:
+                            collab_create_question(
+                                auth_user["id"], subject_name,
+                                "" if q_topic == "No specific topic" else q_topic,
+                                q_title, q_body,
+                            )
+                            st.success("Question posted!")
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
+
+            questions = collab_list_questions(subject_name)
+            if not questions:
+                st.info(f"No {subject_name} questions yet — be the first to ask!")
+            for q in questions:
+                with st.container(border=True):
+                    st.markdown(f"**{q['title']}**")
+                    st.caption(
+                        f"{q['asker_name']} · {q['topic'] or 'No topic'} · "
+                        f"{q['created_at'].strftime('%d %b %Y')} · "
+                        f"{q['answer_count']} answer{'s' if q['answer_count'] != 1 else ''}"
+                    )
+                    st.write(q["body"][:200] + ("…" if len(q["body"]) > 200 else ""))
+                    if st.button("View / Answer →", key=f"view_q_{q['id']}"):
+                        st.session_state.collab_selected_question_id = q["id"]
+                        st.rerun()
+
+# =====================================================
 # PROFILE
 # =====================================================
 elif mode=="🎯 Learner Profile":
@@ -1479,6 +1604,12 @@ else:
         <rect x="22" y="44" width="56" height="8" rx="2"/>
         <rect x="22" y="58" width="34" height="8" rx="2"/>
         </svg>"""
+    _SVG_COLLAB = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <rect x="12" y="18" width="50" height="34" rx="8"/>
+        <path d="M20 52 L20 64 L32 52 Z"/>
+        <rect x="38" y="46" width="50" height="34" rx="8" fill-opacity="0.6"/>
+        <path d="M80 80 L80 68 L68 80 Z" fill-opacity="0.6"/>
+        </svg>"""
 
     HOME_TILES = [
         {"mode": "🧮 AI Tutor", "icon": "🧮", "title": "AI Tutor",
@@ -1490,6 +1621,9 @@ else:
         {"mode": "🗄️ Past Papers Library", "icon": "🗄️", "title": "Past Papers Library",
          "desc": "Browse and download real NSC past exam papers.",
          "css_class": "tile-c7", "illustration": _SVG_LIBRARY},
+        {"mode": "🤝 Collaborate", "icon": "🤝", "title": "Collaborate",
+         "desc": "Ask a question or help another learner. Learner/Premium.",
+         "css_class": "tile-c3", "illustration": _SVG_COLLAB},
         {"mode": "🎯 Learner Profile", "icon": "🎯", "title": "Learner Profile",
          "desc": "Track your progress, badges, and solved-question history.",
          "css_class": "tile-c5", "illustration": _SVG_PROGRESS},

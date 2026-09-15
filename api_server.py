@@ -46,7 +46,13 @@ from backend.auth import (
     create_password_reset, reset_password, cancel_subscription,
 )
 from backend.email_util import send_email
-from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback
+from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab
+from backend.collab import (
+    create_question as collab_create_question, list_questions as collab_list_questions,
+    get_question as collab_get_question, create_answer as collab_create_answer,
+    report_content as collab_report_content, list_open_reports as collab_list_open_reports,
+    resolve_report as collab_resolve_report,
+)
 from backend.usage import can_solve, record_solve, get_today_count
 from backend.records import record_solved_question, get_learner_stats, get_recent_solved
 from backend.auth import get_user_tier
@@ -141,6 +147,27 @@ class PracticeRecordRequest(BaseModel):
     paper: str
     topic: str
     question: str
+
+
+class CollabQuestionRequest(BaseModel):
+    subject: str
+    topic: str = ""
+    title: str
+    body: str
+
+
+class CollabAnswerRequest(BaseModel):
+    body: str
+
+
+class CollabReportRequest(BaseModel):
+    target_type: str
+    target_id: int
+    reason: str = ""
+
+
+class CollabResolveRequest(BaseModel):
+    hide: bool
 
 
 def _auth_user(authorization: str | None):
@@ -535,6 +562,118 @@ def learner_profile(subject: str = "Mathematics", authorization: str = Header(No
             for r in recent
         ],
     }
+
+
+def _require_collab_access(authorization: str | None) -> dict:
+    """Collaborate is Learner/Premium only (see can_use_collab) - shared
+    by every endpoint below so the gate can't drift between them."""
+    user = _auth_user(authorization)
+    is_admin = is_user_admin(user["id"])
+    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    if not can_use_collab(effective_tier):
+        raise HTTPException(
+            status_code=403,
+            detail="Collaborate is a Learner/Premium feature. Upgrade to unlock it.",
+        )
+    return user
+
+
+@app.get("/collab/questions")
+def collab_questions_list(subject: str = "Mathematics", topic: str = "", authorization: str = Header(None)):
+    _require_collab_access(authorization)
+    questions = collab_list_questions(subject, topic=topic or None)
+    return {
+        "questions": [
+            {
+                "id": q["id"], "subject": q["subject"], "topic": q["topic"],
+                "title": q["title"], "body": q["body"],
+                "asker_name": q["asker_name"],
+                "created_at": q["created_at"].isoformat() if q["created_at"] else None,
+                "answer_count": q["answer_count"],
+            }
+            for q in questions
+        ]
+    }
+
+
+@app.post("/collab/questions")
+def collab_questions_create(body: CollabQuestionRequest, authorization: str = Header(None)):
+    user = _require_collab_access(authorization)
+    try:
+        question_id = collab_create_question(user["id"], body.subject, body.topic, body.title, body.body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": question_id}
+
+
+@app.get("/collab/questions/{question_id}")
+def collab_question_detail(question_id: int, authorization: str = Header(None)):
+    _require_collab_access(authorization)
+    question = collab_get_question(question_id)
+    if not question:
+        raise HTTPException(status_code=404, detail="That question doesn't exist (or was removed).")
+    return {
+        "id": question["id"], "subject": question["subject"], "topic": question["topic"],
+        "title": question["title"], "body": question["body"],
+        "asker_name": question["asker_name"],
+        "created_at": question["created_at"].isoformat() if question["created_at"] else None,
+        "answers": [
+            {
+                "id": a["id"], "body": a["body"], "answerer_name": a["answerer_name"],
+                "created_at": a["created_at"].isoformat() if a["created_at"] else None,
+            }
+            for a in question["answers"]
+        ],
+    }
+
+
+@app.post("/collab/questions/{question_id}/answers")
+def collab_answer_create(question_id: int, body: CollabAnswerRequest, authorization: str = Header(None)):
+    user = _require_collab_access(authorization)
+    try:
+        answer_id = collab_create_answer(question_id, user["id"], body.body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": answer_id}
+
+
+@app.post("/collab/report")
+def collab_report(body: CollabReportRequest, authorization: str = Header(None)):
+    user = _require_collab_access(authorization)
+    try:
+        collab_report_content(body.target_type, body.target_id, user["id"], body.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.get("/collab/reports")
+def collab_reports_list(authorization: str = Header(None)):
+    """Admin-only moderation queue."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    reports = collab_list_open_reports()
+    return {
+        "reports": [
+            {**r, "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+            for r in reports
+        ]
+    }
+
+
+@app.post("/collab/reports/{report_id}/resolve")
+def collab_report_resolve(report_id: int, body: CollabResolveRequest, authorization: str = Header(None)):
+    """Admin-only: hide the reported content (or just dismiss the report)
+    and mark it resolved either way."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        collab_resolve_report(report_id, body.hide)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
 
 
 @app.get("/past-papers")

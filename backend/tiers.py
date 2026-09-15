@@ -17,6 +17,7 @@ TIER_CONFIG = {
         # keeping it off Free means that cost is only ever incurred for
         # paying learners, not an open-ended liability on the free tier.
         "llm_fallback_enabled": False,
+        "collab_enabled": False,
     },
     "learner": {
         "label": "Learner",
@@ -29,6 +30,7 @@ TIER_CONFIG = {
         # except price, which is its own bug (nothing to "upgrade" to).
         "past_papers_enabled": False,
         "llm_fallback_enabled": True,
+        "collab_enabled": True,
     },
     "premium": {
         "label": "Premium",
@@ -38,6 +40,7 @@ TIER_CONFIG = {
         "pdf_enabled": True,
         "past_papers_enabled": True,
         "llm_fallback_enabled": True,
+        "collab_enabled": True,
     },
 }
 
@@ -62,6 +65,10 @@ def can_use_past_papers(tier: str) -> bool:
 
 def can_use_llm_fallback(tier: str) -> bool:
     return tier_config(tier)["llm_fallback_enabled"]
+
+
+def can_use_collab(tier: str) -> bool:
+    return tier_config(tier)["collab_enabled"]
 
 
 def daily_limit(tier: str):

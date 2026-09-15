@@ -1,31 +1,45 @@
 Overwrite these files in your repo with the ones in this folder:
   app.py
   api_server.py
-  backend/practice.py
+  backend/db.py
+  backend/tiers.py
   mobile/src/api/client.ts
   mobile/src/screens/HomeScreen.tsx
   mobile/src/navigation/RootNavigator.tsx
 
-Add this NEW file:
-  mobile/src/screens/LearnerProfileScreen.tsx
+Add these NEW files:
+  backend/collab.py
+  mobile/src/screens/CollabScreen.tsx
+  mobile/src/screens/CollabQuestionDetailScreen.tsx
 
 Then:
-  git add app.py api_server.py backend/practice.py mobile/src/api/client.ts \
-          mobile/src/screens/HomeScreen.tsx mobile/src/navigation/RootNavigator.tsx \
-          mobile/src/screens/LearnerProfileScreen.tsx
-  git commit -m "Add Learner Profile to the mobile app"
+  git add app.py api_server.py backend/db.py backend/collab.py backend/tiers.py \
+          mobile/src/api/client.ts mobile/src/screens/HomeScreen.tsx \
+          mobile/src/navigation/RootNavigator.tsx mobile/src/screens/CollabScreen.tsx \
+          mobile/src/screens/CollabQuestionDetailScreen.tsx
+  git commit -m "Add Collaborate: a Learner/Premium Q&A board"
   git push origin main
 
-Rebuild the mobile app (EAS build) afterward to pick this up - it's a
-new screen/navigation route, not something that updates via a simple
-reload.
+No manual DB migration needed - the new tables (collab_questions,
+collab_answers, collab_reports) are created automatically the next
+time init_db() runs (both app.py and api_server.py already call it on
+startup).
 
-What this actually is: Learner Profile / Activity History only ever
-existed on the web (Streamlit) app - the mobile app never had a
-Learner Profile screen or a backend endpoint for it at all, so there
-was nothing "removed." This adds it to mobile for the first time:
-- New "Learner Profile" tile on the Home screen
-- New screen: Subject picker, Questions Solved/Marks Earned stats,
-  badge + progress bar, a per-topic breakdown, and Recent Activity -
-  reading from the same solved_questions data the web version uses
-- New GET /learner-profile API endpoint backing it
+Rebuild the mobile app via EAS afterward - this adds new screens and
+navigation routes.
+
+What this is (per your 3 decisions): an async Q&A board (not live
+chat), restricted to Learner/Premium tiers, with reports going into a
+manual admin review queue (no automated moderation). Learners post a
+question tagged by subject/topic, others answer, and anyone can report
+a question or answer - admins see a moderation queue (in the web app's
+Collaborate page, and via GET /collab/reports on the API) where they
+can hide the content or dismiss the report.
+
+Tested end-to-end locally before sending: tier gating (free tier is
+correctly blocked), posting a question, answering it, reporting an
+answer, and an admin resolving that report by hiding the content -
+confirmed the answer then disappears from the question. Also walked
+through the actual web UI live (Playwright): posting a question,
+viewing it, answering it, and seeing both report buttons render
+correctly.

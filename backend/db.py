@@ -199,6 +199,53 @@ class PastPaper(Base):
     uploaded_at = Column(DateTime, default=dt.datetime.utcnow)
 
 
+class CollabQuestion(Base):
+    """A learner-posted question on the Collaborate board - Learner/Premium
+    only (see can_use_collab). Kept separate from SolvedQuestion, which is
+    just a private per-user progress log, not something other learners
+    ever see."""
+    __tablename__ = "collab_questions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    subject = Column(String(60), nullable=False)  # "Mathematics" | "Physical Sciences"
+    topic = Column(String(60), nullable=True)
+    title = Column(String(200), nullable=False)
+    body = Column(String, nullable=False)
+    # Set by an admin after reviewing a report - hidden posts are excluded
+    # from every learner-facing query but kept in the DB (not deleted) so
+    # the report queue still has something to review.
+    is_hidden = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+
+
+class CollabAnswer(Base):
+    """One reply to a CollabQuestion."""
+    __tablename__ = "collab_answers"
+
+    id = Column(Integer, primary_key=True)
+    question_id = Column(Integer, ForeignKey("collab_questions.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    body = Column(String, nullable=False)
+    is_hidden = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+
+
+class CollabReport(Base):
+    """A learner's report against one question or answer, queued for
+    manual admin review (see backend/collab.py) - nothing is auto-hidden,
+    an admin always makes the call."""
+    __tablename__ = "collab_reports"
+
+    id = Column(Integer, primary_key=True)
+    target_type = Column(String(20), nullable=False)  # "question" | "answer"
+    target_id = Column(Integer, nullable=False)
+    reporter_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reason = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    resolved = Column(Boolean, default=False)
+
+
 class WebhookEvent(Base):
     """Raw log of every PayFast ITN we receive — invaluable for support/disputes."""
     __tablename__ = "webhook_events"

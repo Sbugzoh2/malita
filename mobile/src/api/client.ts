@@ -296,3 +296,63 @@ export function pastPaperDownloadUrl(token: string, paperId: number) {
   return `${API_BASE_URL}/past-papers/${paperId}/download?token=${encodeURIComponent(token)}`;
 }
 
+export type CollabQuestionSummary = {
+  id: number;
+  subject: string;
+  topic: string | null;
+  title: string;
+  body: string;
+  asker_name: string;
+  created_at: string | null;
+  answer_count: number;
+};
+
+export type CollabAnswer = {
+  id: number;
+  body: string;
+  answerer_name: string;
+  created_at: string | null;
+};
+
+export type CollabQuestionDetail = {
+  id: number;
+  subject: string;
+  topic: string | null;
+  title: string;
+  body: string;
+  asker_name: string;
+  created_at: string | null;
+  answers: CollabAnswer[];
+};
+
+export function fetchCollabQuestions(token: string, subject: string = "Mathematics", topic: string = "") {
+  const params = `?subject=${encodeURIComponent(subject)}${topic ? `&topic=${encodeURIComponent(topic)}` : ""}`;
+  return request<{ questions: CollabQuestionSummary[] }>(`/collab/questions${params}`, { token });
+}
+
+export function createCollabQuestion(
+  token: string,
+  params: { subject: string; topic?: string; title: string; body: string }
+) {
+  return request<{ id: number }>("/collab/questions", { method: "POST", body: params, token });
+}
+
+export function fetchCollabQuestion(token: string, questionId: number) {
+  return request<CollabQuestionDetail>(`/collab/questions/${questionId}`, { token });
+}
+
+export function createCollabAnswer(token: string, questionId: number, body: string) {
+  return request<{ id: number }>(`/collab/questions/${questionId}/answers`, {
+    method: "POST",
+    body: { body },
+    token,
+  });
+}
+
+export function reportCollabContent(
+  token: string,
+  params: { target_type: "question" | "answer"; target_id: number; reason?: string }
+) {
+  return request<{ ok: boolean }>("/collab/report", { method: "POST", body: params, token });
+}
+

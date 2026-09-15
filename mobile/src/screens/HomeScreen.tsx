@@ -28,6 +28,13 @@ const TILES: Tile[] = [
     color: "#4a3aa7",
   },
   {
+    key: "Collab",
+    icon: "🤝",
+    title: "Collaborate",
+    desc: "Ask a question or help another learner. Learner/Premium.",
+    color: "#1baf7a",
+  },
+  {
     key: "LearnerProfile",
     icon: "🎯",
     title: "Learner Profile",

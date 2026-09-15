@@ -85,7 +85,7 @@ except FileNotFoundError:
 # =====================================================
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-st.set_page_config("Matric Study Master", layout="wide", page_icon="🎓")
+st.set_page_config("Matric Study Master", layout="wide", page_icon="assets/favicon.png")
 
 # =====================================================
 # PWA SUPPORT (installable on Android/iOS home screens)

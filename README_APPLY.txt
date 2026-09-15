@@ -1,40 +1,50 @@
-Malita — fix: reporter-outcome email was silently failing
-===========================================================
+Malita — use the branded logo as the app's actual favicon
+============================================================
 
-Bug: when an admin ticked "Let the reporter know the outcome" (on Hide,
-Delete, or Dismiss), nothing was actually emailed - even though the
-admin-alert email (on a new report being filed) worked fine.
+You sent the Play Store feature graphic (MALITA title + the graduation
+cap badge) and asked for that to become the app's logo/icon. Good news:
+it mostly already is - mobile/assets/icon.png (the graduation cap on
+blue) is already the mobile app icon, the Android adaptive icon, the PWA
+home-screen icons, and the logo shown in the web app's own header. The
+feature graphic's icon badge is literally a resized, rounded-corner copy
+of that same file (see the make_feature_graphic.py script from earlier
+in this session) - so nothing needed to change there.
 
-Root cause: in backend/collab.py's _notify_reporter_of_outcome(), the
-User row was fetched inside a `with get_session() as db:` block, but
-`reporter.email` was read AFTER that block had already closed and
-committed. SQLAlchemy expires an object's attributes on commit, so
-reading `.email` afterward raised DetachedInstanceError - which the
-surrounding try/except silently swallowed (logged, not raised), so the
-checkbox looked like it worked but no email ever went out.
+The one real gap: the browser TAB favicon (what shows in the tab/bookmark
+bar, distinct from the in-page header logo) was still a plain 🎓 emoji,
+not this branded image. Fixed that, and added a matching favicon to the
+GitHub Pages privacy policy page too, which had no favicon at all.
 
-Fix: read `reporter.email` while the session is still open (assign it to
-a plain local variable before the `with` block exits), the same way
-_notify_admins_of_report already did it correctly.
+What changed
+------------
+1. app.py
+   - st.set_page_config(..., page_icon="🎓") -> page_icon="assets/favicon.png"
+     (assets/favicon.png already existed - a 48x48 copy of the same
+     graduation-cap icon - it just wasn't wired up as the tab favicon.)
 
-Verified live: reproduced the exact DetachedInstanceError in a local
-server's logs before the fix, then confirmed after the fix that the
-reporter-outcome email path completes cleanly with no exception (it logs
-"send_email: not configured" only because this sandbox has no
-SMTP/Brevo credentials - in your deployed environment, with those
-already configured, this will now actually send).
+2. docs/privacy-policy.html
+   - Added <link rel="icon" type="image/png" href="favicon.png" /> in <head>.
+
+3. docs/favicon.png (new file)
+   - Copy of assets/favicon.png, placed alongside the privacy policy page
+     so the relative href resolves on GitHub Pages.
+
+Verified live: ran the Streamlit app and used Playwright to confirm the
+page actually serves <link rel="icon" href=".../favicon.png"> and that
+URL returns a real 1KB PNG (not a 404) - the browser tab now shows the
+graduation-cap icon instead of a generic Streamlit icon.
 
 How to apply
 ------------
-1. Copy backend/collab.py into your local clone, overwriting the existing
-   file (this is the same file from the previous "moderation controls"
-   tarball, with just this one fix added on top - if you already applied
-   that tarball, this file already includes those changes too, so
-   there's nothing else to reconcile).
+1. Copy these files into your local clone, overwriting where they exist:
+     app.py
+     docs/privacy-policy.html
+     docs/favicon.png   (new file)
 
 2. From your repo root:
-     git add backend/collab.py
-     git commit -m "Fix reporter-outcome email silently failing with DetachedInstanceError"
+     git add app.py docs/privacy-policy.html docs/favicon.png
+     git commit -m "Use the branded graduation-cap icon as the app's favicon everywhere"
      git push -u origin claude/math-tutor-app-script-7ac98e
 
-3. Nothing else to run - no new env vars, no migration.
+3. Nothing else to run - no new env vars, no migration, no mobile rebuild
+   needed (the mobile app icon was already this logo).

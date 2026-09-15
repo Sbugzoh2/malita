@@ -30,7 +30,7 @@ const TILES: Tile[] = [
   {
     key: "Collab",
     icon: "🤝",
-    title: "Collaborate",
+    title: "Collaboration Forum",
     desc: "Ask a question or help another learner. Learner/Premium.",
     color: "#1baf7a",
   },

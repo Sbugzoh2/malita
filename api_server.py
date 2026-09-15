@@ -576,7 +576,7 @@ def learner_profile(subject: str = "Mathematics", authorization: str = Header(No
 
 
 def _require_collab_access(authorization: str | None) -> dict:
-    """Collaborate is Learner/Premium only (see can_use_collab) - shared
+    """Collaboration Forum is Learner/Premium only (see can_use_collab) - shared
     by every endpoint below so the gate can't drift between them."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
@@ -584,7 +584,7 @@ def _require_collab_access(authorization: str | None) -> dict:
     if not can_use_collab(effective_tier):
         raise HTTPException(
             status_code=403,
-            detail="Collaborate is a Learner/Premium feature. Upgrade to unlock it.",
+            detail="Collaboration Forum is a Learner/Premium feature. Upgrade to unlock it.",
         )
     return user
 

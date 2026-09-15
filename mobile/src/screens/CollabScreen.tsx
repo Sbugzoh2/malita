@@ -75,7 +75,7 @@ export default function CollabScreen({ navigation }: any) {
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
       </Pressable>
-      <Text style={styles.title}>🤝 Collaborate</Text>
+      <Text style={styles.title}>🤝 Collaboration Forum</Text>
       <Text style={styles.subtitle}>Ask a question, help another learner, or browse what others are stuck on.</Text>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}

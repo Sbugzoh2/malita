@@ -655,6 +655,12 @@ if "nav_mode" not in st.session_state:
     # time this widget renders for a session, before nav_mode exists at all.
     # That first-render default is what makes Home the landing page.
     _radio_kwargs["index"] = _NAV_OPTIONS.index("🏠 Home")
+elif st.session_state["nav_mode"] not in _NAV_OPTIONS:
+    # Self-heal a stale value (e.g. left over from before a tab was
+    # renamed, or from a Home-tile click that no longer matches after an
+    # edit like this one) instead of crashing the radio widget outright -
+    # this exact mismatch has broken the app before.
+    st.session_state["nav_mode"] = _NAV_OPTIONS[0]
 
 mode = st.sidebar.radio(
     "Choose Mode",
@@ -1714,7 +1720,7 @@ else:
         {"mode": "🗄️ Past Papers Library", "icon": "🗄️", "title": "Past Papers Library",
          "desc": "Browse and download real NSC past exam papers.",
          "css_class": "tile-c7", "illustration": _SVG_LIBRARY},
-        {"mode": "🤝 Collaborate", "icon": "🤝", "title": "Collaborate",
+        {"mode": "🤝 Collaboration Forum", "icon": "🤝", "title": "Collaboration Forum",
          "desc": "Ask a question or help another learner. Learner/Premium.",
          "css_class": "tile-c3", "illustration": _SVG_COLLAB},
         {"mode": "🎯 Learner Profile", "icon": "🎯", "title": "Learner Profile",

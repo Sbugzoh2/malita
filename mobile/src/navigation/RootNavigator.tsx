@@ -57,7 +57,7 @@ function AppNavigator() {
       <AppStack.Screen name="PastPapersLibrary" component={PastPapersScreen} options={{ title: "Past Papers Library" }} />
       <AppStack.Screen name="PastPaperViewer" component={PastPaperViewerScreen} options={{ title: "View Document" }} />
       <AppStack.Screen name="LearnerProfile" component={LearnerProfileScreen} options={{ title: "Learner Profile" }} />
-      <AppStack.Screen name="Collab" component={CollabScreen} options={{ title: "Collaborate" }} />
+      <AppStack.Screen name="Collab" component={CollabScreen} options={{ title: "Collaboration Forum" }} />
       <AppStack.Screen name="CollabQuestionDetail" component={CollabQuestionDetailScreen} options={{ title: "Question" }} />
     </AppStack.Navigator>
   );

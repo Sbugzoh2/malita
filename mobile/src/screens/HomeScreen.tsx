@@ -14,6 +14,13 @@ const TILES: Tile[] = [
     color: "#2a78d6",
   },
   {
+    key: "AITeacher",
+    icon: "🧑‍🏫",
+    title: "AI Teacher",
+    desc: "A narrated, live-style lesson on any topic you choose. Super Premium.",
+    color: "#eda100",
+  },
+  {
     key: "PracticeQuestions",
     icon: "📝",
     title: "Practice Questions",

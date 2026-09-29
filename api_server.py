@@ -46,7 +46,7 @@ from backend.auth import (
     create_password_reset, reset_password, cancel_subscription,
 )
 from backend.email_util import send_email
-from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab
+from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher
 from backend.collab import (
     create_question as collab_create_question, list_questions as collab_list_questions,
     get_question as collab_get_question, create_answer as collab_create_answer,
@@ -67,6 +67,7 @@ from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.practice import practice_data, check_practice_answer, MATHEMATICS_TOPICS, PHYSICAL_SCIENCES_TOPICS
 from backend.past_papers import list_past_papers, get_past_paper_file
 from backend.llm_tutor import solve_with_llm, solve_full_paper
+from backend.ai_teacher import generate_lesson
 from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
 
 # Same env vars app.py reads - the mobile checkout link has to round-trip
@@ -183,6 +184,11 @@ class CollabAnswerEditRequest(BaseModel):
     body: str
 
 
+class AITeacherLessonRequest(BaseModel):
+    subject: str
+    topic: str
+
+
 def _auth_user(authorization: str | None):
     """FastAPI dependency-style helper: parse 'Bearer <token>' and resolve
     it to a user dict, or raise 401. Not using FastAPI's OAuth2 machinery
@@ -287,7 +293,7 @@ def do_reset_password(body: ResetPasswordRequest):
 def me(authorization: str = Header(None)):
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
     limit = daily_limit(effective_tier)
     used_today = get_today_count(user["id"]) if limit is not None else 0
     return {
@@ -304,7 +310,7 @@ def me(authorization: str = Header(None)):
 def solve(body: SolveRequest, authorization: str = Header(None)):
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
 
     allowed, limit_message = can_solve(user["id"], effective_tier)
     if not allowed:
@@ -374,7 +380,7 @@ async def ocr_solve(file: UploadFile = File(...), authorization: str = Header(No
     mode exactly (same backend.llm_ocr function)."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
     if not can_use_ocr(effective_tier):
         raise HTTPException(
             status_code=403,
@@ -412,7 +418,7 @@ async def pdf_solve(file: UploadFile = File(...), authorization: str = Header(No
     Document mode exactly (same backend.llm_ocr/llm_tutor functions)."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
     if not can_use_pdf(effective_tier):
         raise HTTPException(
             status_code=403,
@@ -582,7 +588,7 @@ def _require_collab_access(authorization: str | None) -> dict:
     by every endpoint below so the gate can't drift between them."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
     if not can_use_collab(effective_tier):
         raise HTTPException(
             status_code=403,
@@ -712,6 +718,27 @@ def collab_report_resolve(report_id: int, body: CollabResolveRequest, authorizat
     return {"ok": True}
 
 
+@app.post("/ai-teacher/lesson")
+def ai_teacher_lesson(body: AITeacherLessonRequest, authorization: str = Header(None)):
+    """Super Premium only - generates a full narrated lesson (see
+    backend/ai_teacher.py) rather than answering one specific question."""
+    user = _auth_user(authorization)
+    is_admin = is_user_admin(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
+    if not can_use_ai_teacher(effective_tier):
+        raise HTTPException(
+            status_code=403,
+            detail="The AI Teacher is a Super Premium feature. Upgrade to unlock it.",
+        )
+    try:
+        steps = generate_lesson(body.subject, body.topic)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=502, detail="Couldn't generate a lesson right now - please try again.")
+    return {"steps": steps}
+
+
 @app.get("/past-papers")
 def past_papers_list(authorization: str = Header(None)):
     """Real curated Past Papers Library, tier-gated to Premium (and
@@ -719,7 +746,7 @@ def past_papers_list(authorization: str = Header(None)):
     stored in the same Postgres database as everything else."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
     if not can_use_past_papers(effective_tier):
         raise HTTPException(
             status_code=403,
@@ -741,7 +768,7 @@ def past_papers_download(paper_id: int, authorization: str = Header(None), token
         authorization = f"Bearer {token}"
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
-    effective_tier = "premium" if is_admin else get_user_tier(user["id"])
+    effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
     if not can_use_past_papers(effective_tier):
         raise HTTPException(
             status_code=403,

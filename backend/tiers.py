@@ -18,6 +18,7 @@ TIER_CONFIG = {
         # paying learners, not an open-ended liability on the free tier.
         "llm_fallback_enabled": False,
         "collab_enabled": False,
+        "ai_teacher_enabled": False,
     },
     "learner": {
         "label": "Learner",
@@ -31,6 +32,7 @@ TIER_CONFIG = {
         "past_papers_enabled": False,
         "llm_fallback_enabled": True,
         "collab_enabled": True,
+        "ai_teacher_enabled": False,
     },
     "premium": {
         "label": "Premium",
@@ -41,10 +43,30 @@ TIER_CONFIG = {
         "past_papers_enabled": True,
         "llm_fallback_enabled": True,
         "collab_enabled": True,
+        "ai_teacher_enabled": False,
+    },
+    "super_premium": {
+        "label": "Super Premium",
+        # Placeholder price - adjust to whatever you want to charge; the
+        # checkout/upgrade UI (app.py's sidebar, api_server.py's
+        # /billing/checkout-page, the mobile Subscription screen) all
+        # read this value automatically, nothing else to change.
+        "price_zar": 199.99,
+        "ai_tutor_daily_limit": None,
+        "ocr_enabled": True,
+        "pdf_enabled": True,
+        "past_papers_enabled": True,
+        "llm_fallback_enabled": True,
+        "collab_enabled": True,
+        # The AI Teacher: narrated, free-topic CAPS lessons - see
+        # backend/ai_teacher.py. Everything else Super Premium gets is
+        # identical to Premium (it's a strict superset), so only this one
+        # flag differs between the two tier configs above.
+        "ai_teacher_enabled": True,
     },
 }
 
-TIER_ORDER = ["free", "learner", "premium"]
+TIER_ORDER = ["free", "learner", "premium", "super_premium"]
 
 
 def tier_config(tier: str) -> dict:
@@ -69,6 +91,10 @@ def can_use_llm_fallback(tier: str) -> bool:
 
 def can_use_collab(tier: str) -> bool:
     return tier_config(tier)["collab_enabled"]
+
+
+def can_use_ai_teacher(tier: str) -> bool:
+    return tier_config(tier)["ai_teacher_enabled"]
 
 
 def daily_limit(tier: str):

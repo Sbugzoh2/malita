@@ -404,3 +404,13 @@ export function resolveCollabReport(
   });
 }
 
+export type LessonStep = SolveStep & { narration?: string };
+
+export function fetchAITeacherLesson(token: string, subject: string, topic: string) {
+  return request<{ steps: LessonStep[] }>("/ai-teacher/lesson", {
+    method: "POST",
+    body: { subject, topic },
+    token,
+  });
+}
+

@@ -8,6 +8,7 @@ import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import HomeScreen from "../screens/HomeScreen";
 import AITutorScreen from "../screens/AITutorScreen";
+import AITeacherScreen from "../screens/AITeacherScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
 import PracticeScreen from "../screens/PracticeScreen";
 import PastPapersScreen from "../screens/PastPapersScreen";
@@ -52,6 +53,7 @@ function AppNavigator() {
         component={AITutorScreen}
         options={{ title: "AI Tutor", headerRight: LogoutHeaderButton }}
       />
+      <AppStack.Screen name="AITeacher" component={AITeacherScreen} options={{ title: "AI Teacher" }} />
       <AppStack.Screen name="Subscription" component={SubscriptionScreen} options={{ title: "Subscription" }} />
       <AppStack.Screen name="PracticeQuestions" component={PracticeScreen} options={{ title: "Practice Questions" }} />
       <AppStack.Screen name="PastPapersLibrary" component={PastPapersScreen} options={{ title: "Past Papers Library" }} />

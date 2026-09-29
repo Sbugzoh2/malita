@@ -21,7 +21,7 @@ matplotlib.use("Agg")  # headless rendering - no display server in an API/server
 import matplotlib.pyplot as plt
 from sympy.solvers.inequalities import solve_univariate_inequality
 
-from .math_utils import safe_parse, detect_variables, _fmt_num
+from .math_utils import safe_parse, detect_variables, _fmt_num, robust_axis_limits
 
 
 class _StopSolving(BaseException):
@@ -1463,6 +1463,15 @@ def solve_functions_graphs(question: str) -> list:
             horiz_vals = np.linspace(domain_center - half_span, domain_center + half_span, 4000)
             fig, ax = plt.subplots(figsize=(7, 5))
 
+            # Widened relative to the actual sample spacing (not a fixed
+            # 0.05) - half_span can be large enough that 4000 points no
+            # longer land within a fixed window of an asymptote at all,
+            # letting the steep near-asymptote values through untouched
+            # and blowing out the y-axis autoscale (see robust_axis_limits).
+            sample_spacing = float(horiz_vals[1] - horiz_vals[0])
+            asymptote_exclusion = max(0.05, 3 * sample_spacing)
+            plotted_vals = []
+
             if not branches:
                 st.warning("No real solutions exist for this relation, so it cannot be graphed.")
             else:
@@ -1476,11 +1485,13 @@ def solve_functions_graphs(question: str) -> list:
                         vert_vals = f(horiz_vals)
                         vert_vals = np.where(np.isfinite(vert_vals), vert_vals, np.nan)
                         ax.plot(horiz_vals, vert_vals, linewidth=2)
+                        plotted_vals.append(vert_vals)
                 elif is_trig:
                     f = sp.lambdify(plot_horiz, branches[0], "numpy")
                     vert_vals = f(horiz_vals)
                     vert_vals = np.where(np.abs(vert_vals) > 50, np.nan, vert_vals)
                     ax.plot(horiz_vals, vert_vals, linewidth=2)
+                    plotted_vals.append(vert_vals)
                 else:
                     plot_expr = branches[0]
                     f = sp.lambdify(plot_horiz, plot_expr, "numpy")
@@ -1491,7 +1502,7 @@ def solve_functions_graphs(question: str) -> list:
                     if den != 1:
                         vertical_asymptotes = [float(v) for v in sp.solve(den, plot_horiz) if v.is_real]
                     for va in vertical_asymptotes:
-                        vert_vals[np.abs(horiz_vals - va) < 0.05] = np.nan
+                        vert_vals[np.abs(horiz_vals - va) < asymptote_exclusion] = np.nan
                         ax.axvline(va, linestyle="--", color="red", linewidth=2)
 
                     lim_pos = sp.limit(plot_expr, plot_horiz, sp.oo)
@@ -1503,6 +1514,11 @@ def solve_functions_graphs(question: str) -> list:
 
                     vert_vals = np.where(np.isfinite(vert_vals), vert_vals, np.nan)
                     ax.plot(horiz_vals, vert_vals, linewidth=2)
+                    plotted_vals.append(vert_vals)
+
+                if plotted_vals:
+                    y_lo, y_hi = robust_axis_limits(np.concatenate(plotted_vals))
+                    ax.set_ylim(y_lo, y_hi)
 
             ax.axhline(0, color="black", linewidth=0.8)
             ax.axvline(0, color="black", linewidth=0.8)

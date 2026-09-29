@@ -28,7 +28,7 @@ import numpy as np
 import sympy as sp
 
 from .llm_client import get_client
-from .math_utils import safe_parse
+from .math_utils import safe_parse, robust_axis_limits
 
 LLM_MODEL = "claude-haiku-4-5"
 # Explanation and mathematics are now separate steps (see SYSTEM_PROMPT),
@@ -69,13 +69,20 @@ Keep explanation and mathematics visually separate, like a worked solution writt
 Use "type": "success" for exactly one final step stating the final answer, wrapped in single-dollar delimiters, e.g. {"type": "success", "content": "$x = 5$"}.
 Keep it concise: 4-8 steps is typical (note + equation pairs, plus the final success step).
 
-If, and only if, the question explicitly asks you to sketch, draw, or plot a graph/function, include ONE extra step shaped like {"type": "plot", "content": "x**2 - 4"} at the point where the sketch belongs. "content" must be ONLY a plottable expression in terms of x, using Python/SymPy syntax (** for powers, sin/cos/tan/exp/log/sqrt/pi as needed) - Malita renders the actual image itself from this expression, so never describe the graph in words instead of (or in addition to) giving this step; never use "type": "plot" for anything that isn't a real function to graph.
+If, and only if, the question explicitly asks you to sketch, draw, or plot a graph/function, include ONE extra step shaped like {"type": "plot", "content": "x**2 - 4"} at the point where the sketch belongs. "content" must be ONLY plottable expression(s) in terms of x, using Python/SymPy syntax (** for powers, sin/cos/tan/exp/log/sqrt/pi as needed) - Malita renders the actual image itself from this, so never describe the graph in words instead of (or in addition to) giving this step; never use "type": "plot" for anything that isn't a real function to graph.
+
+- To sketch MORE THAN ONE function on the SAME axes (e.g. "sketch f and g on the same system of axes"), separate the expressions with "|" in one single plot step - never one plot step per function. Example content: "cos(3*x)|sin(x)".
+- CAPS trig graphs (Mathematics) are always in DEGREES, never radians - whenever the question gives an explicit domain for x (e.g. "for x ∈ [-90°;180°]"), append it to the content as "@lo,hi" using plain numbers (no ° symbol), e.g. a domain of x ∈ [-90°;180°] becomes the suffix "@-90,180". Only add "@lo,hi" when the question actually states a domain - omit it otherwise.
+- Putting it together, "sketch f(x)=cos3x and g(x)=sinx for x∈[-90°;180°]" becomes exactly: {"type": "plot", "content": "cos(3*x)|sin(x)@-90,180"}.
 
 Example of a complete, correct response:
 [{"type": "markdown", "content": "Let x = number of years."}, {"type": "markdown", "content": "Set up the equation:"}, {"type": "latex", "content": "5000(1.08)^x = 10000"}, {"type": "markdown", "content": "Solve using logarithms:"}, {"type": "latex", "content": "x = \\log_{1.08}(2) \\approx 9.01"}, {"type": "success", "content": "$x \\approx 9.01 \\text{ years}$"}]
 
 Example including a sketch:
-[{"type": "markdown", "content": "Complete the square:"}, {"type": "latex", "content": "y = 4 - x^2, \\quad \\text{turning point } (0, 4)"}, {"type": "plot", "content": "4 - x**2"}, {"type": "markdown", "content": "x-intercepts (set y = 0):"}, {"type": "latex", "content": "4 - x^2 = 0 \\implies x = \\pm 2"}, {"type": "success", "content": "$x = -2$ and $x = 2$"}]"""
+[{"type": "markdown", "content": "Complete the square:"}, {"type": "latex", "content": "y = 4 - x^2, \\quad \\text{turning point } (0, 4)"}, {"type": "plot", "content": "4 - x**2"}, {"type": "markdown", "content": "x-intercepts (set y = 0):"}, {"type": "latex", "content": "4 - x^2 = 0 \\implies x = \\pm 2"}, {"type": "success", "content": "$x = -2$ and $x = 2$"}]
+
+Example including a two-function degree-domain sketch:
+[{"type": "markdown", "content": "Sketch both graphs:"}, {"type": "plot", "content": "cos(3*x)|sin(x)@-90,180"}, {"type": "markdown", "content": "Intersections from part (a):"}, {"type": "success", "content": "$x = -67.5\\degree, -45\\degree, 22.5\\degree, 112.5\\degree, 180\\degree$"}]"""
 
 
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
@@ -91,37 +98,82 @@ def _strip_json_fence(text: str) -> str:
     return match.group(1).strip() if match else text
 
 
-def _render_plot_step(expr_str: str) -> dict:
-    """Actually sketches a single-variable expression via SymPy + matplotlib
-    and returns it as the same base64 PNG data-URI "image" step shape
-    backend/solver.py's StepRecorder.pyplot() produces. The LLM can only
-    describe what to plot, never generate real image bytes itself - this is
-    what lets the AI fallback genuinely draw the graph a question asks for,
-    instead of only explaining what the learner would need to sketch by
-    hand. Never eval()s the model's text: parsing goes through the same
-    sandboxed safe_parse() every user-typed expression in this app uses."""
-    cleaned = expr_str.strip().replace("^", "**")
-    cleaned = re.sub(r"^[yf]\s*(\(\s*x\s*\))?\s*=\s*", "", cleaned, flags=re.IGNORECASE)
+_PLOT_COLORS = ["#2563eb", "#dc2626", "#059669"]
+
+
+def _render_plot_step(content: str) -> dict:
+    """Actually sketches one or more single-variable expressions via SymPy
+    + matplotlib and returns it as the same base64 PNG data-URI "image"
+    step shape backend/solver.py's StepRecorder.pyplot() produces. The LLM
+    can only describe what to plot, never generate real image bytes
+    itself - this is what lets the AI fallback genuinely draw the graph a
+    question asks for, instead of only explaining what the learner would
+    need to sketch by hand. Never eval()s the model's text: parsing goes
+    through the same sandboxed safe_parse() every user-typed expression in
+    this app uses.
+
+    "content" holds one expression, or several separated by "|" to sketch
+    on the same axes (see SYSTEM_PROMPT), with an optional "@lo,hi" domain
+    suffix. CAPS trig graphs are always in degrees, so a given domain is
+    always treated as degrees - the x-axis is drawn in degrees and each
+    expression is evaluated at np.radians(xs) accordingly."""
+    content = content.strip()
+    domain = None
+    if "@" in content:
+        content, _, domain_str = content.rpartition("@")
+        try:
+            lo, hi = (float(v) for v in domain_str.split(","))
+            domain = (lo, hi)
+        except ValueError:
+            domain = None
+
+    raw_exprs = [e.strip() for e in content.split("|") if e.strip()]
+    if not raw_exprs:
+        raise ValueError("No expression to plot.")
 
     x = sp.symbols("x")
-    expr = safe_parse(cleaned, {"x": x})
-    is_trig = any(f in cleaned.lower() for f in ("sin", "cos", "tan", "sec", "csc"))
-    x_min, x_max = (-2 * np.pi, 2 * np.pi) if is_trig else (-10, 10)
+    cleaned_list = []
+    fns = []
+    for raw in raw_exprs:
+        cleaned = raw.replace("^", "**")
+        cleaned = re.sub(r"^[yf]\s*(\(\s*x\s*\))?\s*=\s*", "", cleaned, flags=re.IGNORECASE)
+        expr = safe_parse(cleaned, {"x": x})
+        cleaned_list.append(cleaned)
+        fns.append(sp.lambdify(x, expr, "numpy"))
 
-    f = sp.lambdify(x, expr, "numpy")
+    is_trig = any(f in c.lower() for c in cleaned_list for f in ("sin", "cos", "tan", "sec", "csc"))
+    degree_mode = domain is not None
+    if domain is not None:
+        x_min, x_max = domain
+    elif is_trig:
+        x_min, x_max = -2 * np.pi, 2 * np.pi
+    else:
+        x_min, x_max = -10, 10
+
     xs = np.linspace(x_min, x_max, 1000)
-    with np.errstate(all="ignore"):
-        ys = np.asarray(f(xs), dtype=float)
-    ys = np.where(np.isfinite(ys) & (np.abs(ys) < 1e4), ys, np.nan)
+    eval_xs = np.radians(xs) if degree_mode else xs
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(xs, ys, linewidth=2, color="#2563eb")
+    all_ys = []
+    for cleaned, f, color in zip(cleaned_list, fns, _PLOT_COLORS * (len(fns) // len(_PLOT_COLORS) + 1)):
+        with np.errstate(all="ignore"):
+            ys = np.asarray(f(eval_xs), dtype=float)
+        ys = np.where(np.isfinite(ys) & (np.abs(ys) < 1e4), ys, np.nan)
+        all_ys.append(ys)
+        ax.plot(xs, ys, linewidth=2, color=color, label=f"y = {cleaned}")
+
+    y_lo, y_hi = robust_axis_limits(np.concatenate(all_ys), fallback=(-1.5, 1.5) if is_trig else (-10, 10))
+    ax.set_ylim(y_lo, y_hi)
     ax.axhline(0, color="black", linewidth=0.8)
     ax.axvline(0, color="black", linewidth=0.8)
     ax.grid(True, linestyle="--", alpha=0.5)
-    ax.set_xlabel("x")
+    ax.set_xlabel("x (degrees)" if degree_mode else "x")
     ax.set_ylabel("y")
-    ax.set_title(f"y = {cleaned}")
+    if len(cleaned_list) > 1:
+        ax.legend()
+        ax.set_title("Sketch of the given functions")
+    else:
+        ax.set_title(f"y = {cleaned_list[0]}")
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)

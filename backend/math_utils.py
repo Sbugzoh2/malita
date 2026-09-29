@@ -42,6 +42,32 @@ exec("from sympy import *", _SAFE_GLOBAL_DICT)
 _SAFE_GLOBAL_DICT["__builtins__"] = {}
 
 
+def robust_axis_limits(values, pad_frac=0.12, fallback=(-10.0, 10.0)):
+    """Sensible y-axis limits for a plotted curve, trimming the extreme
+    2nd/98th percentile tails before padding - a curve sampled near a
+    vertical asymptote (or any removable-looking singularity the NaN
+    exclusion window didn't quite catch) can spike to values far outside
+    the graph's actual "interesting" range, and matplotlib's default
+    autoscale would stretch the whole axis to fit that one spike (e.g. a
+    graph that should read roughly [-6, 6] ending up scaled to 100+).
+    Percentile trimming keeps the visible window centred on the bulk of
+    the curve - exactly what a textbook sketch shows - and any point
+    outside it simply runs off the top/bottom of frame, same as a real
+    asymptote would. Returns `fallback` unchanged if there's no finite
+    data to measure at all."""
+    import numpy as np
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return fallback
+    lo, hi = np.percentile(finite, [2, 98])
+    if lo == hi:
+        lo, hi = lo - 1.0, hi + 1.0
+    span = hi - lo
+    pad = span * pad_frac
+    return lo - pad, hi + pad
+
+
 def _fmt_num(v):
     """Display a number as an integer when it is one (e.g. 4 not 4.0),
     otherwise as a short decimal — used throughout the AI Tutor to keep

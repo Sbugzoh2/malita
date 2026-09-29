@@ -31,7 +31,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 Base = declarative_base()
 
-TIERS = ("free", "learner", "premium")
+TIERS = ("free", "learner", "premium", "super_premium")
 
 SA_PROVINCES = (
     "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",

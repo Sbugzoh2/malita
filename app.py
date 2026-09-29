@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+import json
 import re
 import sympy as sp
 import streamlit as st
@@ -30,7 +31,7 @@ from backend.auth import (
     create_password_reset, reset_password, cancel_subscription, create_api_token,
 )
 from backend.email_util import send_email
-from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, daily_limit
+from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher, daily_limit
 from backend.collab import (
     create_question as collab_create_question, list_questions as collab_list_questions,
     get_question as collab_get_question, create_answer as collab_create_answer,
@@ -51,6 +52,7 @@ from backend.solver import (
 from backend.practice import practice_data, check_practice_answer, MATHEMATICS_TOPICS, PHYSICAL_SCIENCES_TOPICS
 from backend.past_papers import list_past_papers, get_past_paper_file, add_past_paper, delete_past_paper
 from backend.llm_tutor import solve_with_llm, solve_full_paper
+from backend.ai_teacher import generate_lesson
 from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -558,7 +560,7 @@ tier_info = TIER_CONFIG[current_tier]
 # fresh every run (not cached in session_state) so a grant/revoke via
 # `python -m backend.set_admin` takes effect on the next page load.
 is_admin_user = is_user_admin(auth_user["id"])
-effective_tier = "premium" if is_admin_user else current_tier
+effective_tier = TIER_ORDER[-1] if is_admin_user else current_tier
 
 st.sidebar.markdown(f"👋 **{auth_user['name']}**")
 st.sidebar.markdown(f"Plan: **{tier_info['label']}**" + (" · 👑 Admin" if is_admin_user else ""))
@@ -640,6 +642,7 @@ if st.session_state.get("pending_nav"):
 _NAV_OPTIONS = [
     "🏠 Home",
     "🧮 AI Tutor",
+    "🧑‍🏫 AI Teacher",
     "📝 Practice Questions",
     "🗄️ Past Papers Library",
     "🤝 Collaboration Forum",
@@ -1084,6 +1087,85 @@ elif mode == "🧮 AI Tutor":
                         st.rerun()
                 elif solved == []:
                     st.warning("Couldn't detect individual questions in this document.")
+
+# =====================================================
+# AI TEACHER (Super Premium)
+# =====================================================
+elif mode == "🧑‍🏫 AI Teacher":
+    st.title("🧑‍🏫 AI Teacher")
+    st.caption("A narrated, live-style lesson on any Mathematics or Physical Sciences topic you choose.")
+
+    if not can_use_ai_teacher(effective_tier):
+        st.warning("🧑‍🏫 AI Teacher is a Super Premium feature. Upgrade from the sidebar to unlock it.")
+    else:
+        teacher_subject = st.radio(
+            "Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="ai_teacher_subject"
+        )
+        topic_input = st.text_input(
+            "What would you like a lesson on?",
+            key="ai_teacher_topic_input",
+            placeholder="e.g. factorising trinomials, projectile motion, chemical equilibrium...",
+        )
+
+        if st.button("▶️ Start Lesson", key="ai_teacher_start"):
+            clean_subject = "Mathematics" if teacher_subject == "🧮 Mathematics" else "Physical Sciences"
+            if not topic_input.strip():
+                st.error("Please tell me what you'd like a lesson on.")
+            else:
+                with st.spinner("Preparing your lesson…"):
+                    try:
+                        st.session_state.ai_teacher_lesson = generate_lesson(clean_subject, topic_input.strip())
+                        st.session_state.ai_teacher_lesson_topic = topic_input.strip()
+                    except Exception:
+                        st.session_state.ai_teacher_lesson = None
+                        st.error("Couldn't generate a lesson right now — please try again.")
+
+        lesson = st.session_state.get("ai_teacher_lesson")
+        if lesson:
+            st.markdown(f"#### 📖 {st.session_state.get('ai_teacher_lesson_topic', '')}")
+
+            # Voice narration runs entirely client-side via the browser's
+            # own SpeechSynthesis API - no TTS service/API cost, no network
+            # dependency, and it keeps talking even if the rest of the page
+            # reruns (it belongs to the parent tab, not this component's own
+            # iframe - see the PWA setup component above for why
+            # window.parent is used the same way here).
+            narrations = [s.get("narration", "") for s in lesson if s.get("narration")]
+            components.html(
+                f"""
+                <div style="display:flex; gap:10px; margin-bottom: 4px;">
+                  <button id="mlt-play" style="background:#2a78d6;color:#fff;border:none;border-radius:999px;
+                    padding:10px 20px;font-weight:700;font-size:14px;cursor:pointer;">▶️ Read Aloud</button>
+                  <button id="mlt-stop" style="background:#fff;color:#1a1a1a;border:1px solid #d0d0d0;border-radius:999px;
+                    padding:10px 20px;font-weight:700;font-size:14px;cursor:pointer;">⏹ Stop</button>
+                </div>
+                <script>
+                (function() {{
+                    var narrations = {json.dumps(narrations)};
+                    var synth = window.parent.speechSynthesis;
+                    document.getElementById('mlt-play').onclick = function() {{
+                        synth.cancel();
+                        narrations.forEach(function(text) {{
+                            var u = new window.parent.SpeechSynthesisUtterance(text);
+                            u.rate = 0.95;
+                            synth.speak(u);
+                        }});
+                    }};
+                    document.getElementById('mlt-stop').onclick = function() {{
+                        synth.cancel();
+                    }};
+                }})();
+                </script>
+                """,
+                height=56,
+            )
+
+            render_steps(lesson)
+
+            if st.button("🔄 Start a new lesson", key="ai_teacher_reset"):
+                st.session_state.ai_teacher_lesson = None
+                st.session_state.ai_teacher_lesson_topic = None
+                st.rerun()
 
 # =====================================================
 # PAST PAPERS LIBRARY
@@ -1716,6 +1798,13 @@ else:
         <rect x="22" y="44" width="56" height="8" rx="2"/>
         <rect x="22" y="58" width="34" height="8" rx="2"/>
         </svg>"""
+    _SVG_TEACHER = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
+        <circle cx="28" cy="26" r="12"/>
+        <path d="M12 74 C12 54 19 46 28 46 C37 46 44 54 44 74 Z"/>
+        <circle cx="68" cy="50" r="5"/>
+        <path d="M68 37 A14 14 0 0 1 68 63" stroke="white" stroke-width="4" fill="none" stroke-linecap="round" stroke-opacity="0.75"/>
+        <path d="M68 25 A26 26 0 0 1 68 75" stroke="white" stroke-width="4" fill="none" stroke-linecap="round" stroke-opacity="0.4"/>
+        </svg>"""
     _SVG_COLLAB = """<svg class="tile-illustration" width="120" height="120" viewBox="0 0 100 100" fill="white">
         <rect x="12" y="18" width="50" height="34" rx="8"/>
         <path d="M20 52 L20 64 L32 52 Z"/>
@@ -1727,6 +1816,9 @@ else:
         {"mode": "🧮 AI Tutor", "icon": "🧮", "title": "AI Tutor",
          "desc": "Type a question, snap or upload a photo, or upload a PDF — all solved step by step.",
          "css_class": "tile-c1", "illustration": _SVG_TUTOR},
+        {"mode": "🧑‍🏫 AI Teacher", "icon": "🧑‍🏫", "title": "AI Teacher",
+         "desc": "A narrated live-style lesson on any topic you choose. Super Premium.",
+         "css_class": "tile-c4", "illustration": _SVG_TEACHER},
         {"mode": "📝 Practice Questions", "icon": "📝", "title": "Practice Questions",
          "desc": "Work through curated questions with hints and full solutions.",
          "css_class": "tile-c2", "illustration": _SVG_PENCIL_NOTES},

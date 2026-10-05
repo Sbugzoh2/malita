@@ -188,22 +188,34 @@ def create_password_reset(email: str):
 def cancel_subscription(user_id: int) -> dict:
     """Cancel a user's paid subscription. Always downgrades access in our
     own system immediately (status -> 'cancelled', which get_user_tier()
-    already treats as free), and best-effort tells PayFast to stop the
-    recurring billing too. Returns a dict the UI uses to tell the learner
-    exactly what happened:
+    already treats as free). What happens next depends on which checkout
+    the subscription was bought through:
+      - payfast: best-effort tells PayFast to stop the recurring billing.
+      - play_billing: Google doesn't let a developer cancel a Play-billed
+        subscription via the API on the user's behalf - Play's own policy
+        requires the learner to manage/cancel it from the Play Store app
+        (Subscriptions screen) instead, so we only downgrade our own
+        records here and tell the UI to point them there.
+    Returns a dict the UI uses to tell the learner exactly what happened:
       had_subscription: was there anything to cancel at all
+      provider: "payfast" | "play_billing" | None
       payfast_notified: did PayFast confirm the recurring billing stopped
+        (None when the provider is play_billing - not applicable)
     If payfast_notified is False, the learner should be told to also check
     directly with PayFast — we never want someone to believe they've
     stopped paying when the recurring charge might still be active."""
     with get_session() as db:
         sub = db.query(Subscription).filter(Subscription.user_id == user_id).first()
         if not sub or sub.tier == "free" or sub.status != "active":
-            return {"had_subscription": False, "payfast_notified": False}
+            return {"had_subscription": False, "provider": None, "payfast_notified": False}
+
+        if sub.payment_provider == "play_billing":
+            sub.status = "cancelled"
+            return {"had_subscription": True, "provider": "play_billing", "payfast_notified": None}
 
         payfast_notified = cancel_payfast_subscription(sub.payfast_token)
         sub.status = "cancelled"
-        return {"had_subscription": True, "payfast_notified": payfast_notified}
+        return {"had_subscription": True, "provider": "payfast", "payfast_notified": payfast_notified}
 
 
 def create_api_token(user_id: int) -> str:

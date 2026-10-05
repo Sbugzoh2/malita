@@ -65,6 +65,7 @@ export type MeResponse = {
   tier_label: string;
   daily_limit: number | null;
   used_today: number;
+  payment_provider: "payfast" | "play_billing" | null;
 };
 
 export type SolveStep = { type: string; content: string };
@@ -207,7 +208,41 @@ export function checkoutPageUrl(token: string, tier: string) {
 }
 
 export function cancelSubscription(token: string) {
-  return request<{ payfast_notified: boolean }>("/billing/cancel", { method: "POST", token });
+  return request<{ had_subscription: boolean; provider: "payfast" | "play_billing" | null; payfast_notified: boolean | null }>(
+    "/billing/cancel",
+    { method: "POST", token }
+  );
+}
+
+// Tier -> Play Console subscription product id, so the purchase code below
+// never hardcodes a product id (backend/tiers.py is the single source).
+export function fetchGooglePlayProducts(token: string) {
+  return request<{ products: Record<string, string> }>("/billing/google/products", { token });
+}
+
+// Sent right after a Play Billing purchase completes - verified server-side
+// against Google's own API before the tier is actually granted (see
+// api_server.py's /billing/google/verify).
+export function verifyGooglePlayPurchase(token: string, productId: string, purchaseToken: string) {
+  return request<{ ok: boolean; tier: string }>("/billing/google/verify", {
+    method: "POST",
+    body: { product_id: productId, purchase_token: purchaseToken },
+    token,
+  });
+}
+
+// Best-effort log of a Google User Choice Billing selection (the learner
+// picked the alternative - PayFast - in Google's own choice screen).
+// Google requires this reported to their API within 24 hours once the app
+// is actually approved/enrolled for the program; until then this just
+// records it so nothing is lost. See api_server.py's
+// /billing/google/choice and backend/db.py's GooglePlayChoiceEvent.
+export function logGooglePlayChoice(token: string, externalTransactionToken: string, productIds: string[]) {
+  return request<{ ok: boolean }>("/billing/google/choice", {
+    method: "POST",
+    body: { external_transaction_token: externalTransactionToken, product_ids: productIds },
+    token,
+  });
 }
 
 export type PracticeSolutionStep = { explain: string; latex: string };

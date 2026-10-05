@@ -16,3 +16,4 @@ requests==2.32.3
 python-dotenv==1.0.1
 python-multipart==0.0.12
 anthropic==0.125.0
+google-auth==2.35.0

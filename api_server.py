@@ -39,14 +39,15 @@ from PIL import Image
 
 LEGAL_DIR = Path(__file__).resolve().parent / "static" / "legal"
 
-from backend.db import init_db, SA_PROVINCES
+from backend.db import init_db, SA_PROVINCES, get_session, Subscription, GooglePlayChoiceEvent
 from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
 )
 from backend.email_util import send_email
-from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher
+from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher, GOOGLE_PLAY_PRODUCT_IDS, GOOGLE_PLAY_TIER_BY_PRODUCT_ID
+from backend.google_play import verify_subscription_purchase, acknowledge_purchase, GooglePlayVerificationError
 from backend.collab import (
     create_question as collab_create_question, list_questions as collab_list_questions,
     get_question as collab_get_question, create_answer as collab_create_answer,
@@ -189,6 +190,16 @@ class AITeacherLessonRequest(BaseModel):
     topic: str
 
 
+class GoogleVerifyRequest(BaseModel):
+    product_id: str
+    purchase_token: str
+
+
+class GoogleChoiceRequest(BaseModel):
+    external_transaction_token: str
+    product_ids: list[str]
+
+
 def _auth_user(authorization: str | None):
     """FastAPI dependency-style helper: parse 'Bearer <token>' and resolve
     it to a user dict, or raise 401. Not using FastAPI's OAuth2 machinery
@@ -296,6 +307,9 @@ def me(authorization: str = Header(None)):
     effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
     limit = daily_limit(effective_tier)
     used_today = get_today_count(user["id"]) if limit is not None else 0
+    with get_session() as db:
+        sub = db.query(Subscription).filter(Subscription.user_id == user["id"]).first()
+        payment_provider = sub.payment_provider if sub else None
     return {
         "user": user,
         "is_admin": is_admin,
@@ -303,6 +317,7 @@ def me(authorization: str = Header(None)):
         "tier_label": TIER_CONFIG[effective_tier]["label"],
         "daily_limit": limit,
         "used_today": used_today,
+        "payment_provider": payment_provider,
     }
 
 
@@ -486,6 +501,68 @@ def billing_cancel(authorization: str = Header(None)):
     user = _auth_user(authorization)
     result = cancel_subscription(user["id"])
     return result
+
+
+@app.get("/billing/google/products")
+def billing_google_products(authorization: str = Header(None)):
+    """Tier -> Play Console product id map, so the mobile app's purchase
+    code never hardcodes a product id - same reasoning as /billing/tiers
+    keeping prices in one place (backend/tiers.py)."""
+    _auth_user(authorization)
+    return {"products": GOOGLE_PLAY_PRODUCT_IDS}
+
+
+@app.post("/billing/google/verify")
+def billing_google_verify(payload: GoogleVerifyRequest, authorization: str = Header(None)):
+    """Called by the mobile app immediately after a Google Play Billing
+    purchase completes. Never trusts the client's own claim of what it
+    bought - verifies the purchase token against Google's own servers
+    first, same reasoning as webhook_server.py double-checking every
+    PayFast ITN with PayFast directly rather than trusting the POST body."""
+    user = _auth_user(authorization)
+    tier = GOOGLE_PLAY_TIER_BY_PRODUCT_ID.get(payload.product_id)
+    if tier is None:
+        raise HTTPException(status_code=400, detail="Unknown product id.")
+
+    try:
+        result = verify_subscription_purchase(payload.product_id, payload.purchase_token)
+    except GooglePlayVerificationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not result["active"]:
+        raise HTTPException(status_code=400, detail="This purchase isn't an active subscription.")
+
+    acknowledge_purchase(payload.product_id, payload.purchase_token)
+
+    with get_session() as db:
+        sub = db.query(Subscription).filter(Subscription.user_id == user["id"]).first()
+        if not sub:
+            raise HTTPException(status_code=404, detail="No subscription record found.")
+        sub.tier = tier
+        sub.status = "active"
+        sub.payment_provider = "play_billing"
+        sub.google_purchase_token = payload.purchase_token
+        sub.google_product_id = payload.product_id
+        sub.current_period_end = result["expiry"]
+
+    return {"ok": True, "tier": tier}
+
+
+@app.post("/billing/google/choice")
+def billing_google_choice(payload: GoogleChoiceRequest, authorization: str = Header(None)):
+    """Logs a User Choice Billing selection (the learner picked PayFast in
+    Google's own choice screen) - see GooglePlayChoiceEvent for why this
+    only logs rather than reporting to Google's API yet. The mobile app
+    sends the learner into the normal PayFast checkout right after calling
+    this; this endpoint never blocks that."""
+    user = _auth_user(authorization)
+    with get_session() as db:
+        db.add(GooglePlayChoiceEvent(
+            user_id=user["id"],
+            external_transaction_token=payload.external_transaction_token,
+            product_ids=",".join(payload.product_ids),
+        ))
+    return {"ok": True}
 
 
 @app.get("/practice/topics")

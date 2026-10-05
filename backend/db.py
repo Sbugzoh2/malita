@@ -85,8 +85,15 @@ class Subscription(Base):
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
     tier = Column(String(20), default="free", nullable=False)  # free | learner | premium
     status = Column(String(20), default="active", nullable=False)  # active | cancelled | past_due
+    # Which checkout the CURRENT tier was bought through - decides whether
+    # cancellation goes through PayFast's API or has to be done in the Play
+    # Store app (Google doesn't let us cancel a Play-billed subscription on
+    # the user's behalf). See backend/google_play.py for the Play Billing side.
+    payment_provider = Column(String(20), default="payfast", nullable=False)  # payfast | play_billing
     payfast_token = Column(String(255), nullable=True)  # recurring billing token from PayFast
     m_payment_id = Column(String(64), nullable=True)  # our own reference sent to PayFast
+    google_purchase_token = Column(String(500), nullable=True)  # Play Billing purchase token
+    google_product_id = Column(String(100), nullable=True)  # Play Console subscription product id
     current_period_end = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
@@ -253,6 +260,29 @@ class CollabReport(Base):
     resolved = Column(Boolean, default=False)
 
 
+class GooglePlayChoiceEvent(Base):
+    """Logs every time a learner picks the alternative-billing option
+    (PayFast) in Google's own User Choice Billing screen on Android.
+
+    Google requires the externalTransactionToken be reported to their Play
+    Developer API (externaltransactions.createexternaltransaction) within
+    24 hours of the user's choice - this table just records the token so
+    nothing is lost; reported_to_google flips true once that follow-up API
+    call is wired up and actually made. That call is NOT implemented yet
+    (see backend/google_play.py) since this code path can't even fire
+    until Google approves Malita's User Choice Billing enrollment - safer
+    to log now and finish the reporting call once it's possible to test
+    against a real, approved enrollment than to guess at the request shape."""
+    __tablename__ = "google_play_choice_events"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    received_at = Column(DateTime, default=dt.datetime.utcnow)
+    external_transaction_token = Column(String(500), nullable=True)
+    product_ids = Column(String(500), nullable=True)
+    reported_to_google = Column(Boolean, default=False)
+
+
 class WebhookEvent(Base):
     """Raw log of every PayFast ITN we receive — invaluable for support/disputes."""
     __tablename__ = "webhook_events"
@@ -292,6 +322,9 @@ def init_db():
     _ensure_column("collab_answers", "parent_id", "INTEGER")
     _ensure_column("collab_questions", "is_edited", "BOOLEAN DEFAULT FALSE")
     _ensure_column("collab_answers", "is_edited", "BOOLEAN DEFAULT FALSE")
+    _ensure_column("subscriptions", "payment_provider", "VARCHAR(20) DEFAULT 'payfast'")
+    _ensure_column("subscriptions", "google_purchase_token", "VARCHAR(500)")
+    _ensure_column("subscriptions", "google_product_id", "VARCHAR(100)")
 
 
 @contextmanager

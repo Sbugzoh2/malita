@@ -37,7 +37,9 @@
           "photosPermission": "Malita needs access to your photos so you can upload a picture of a Mathematics or Physical Sciences question.",
           "cameraPermission": "Malita needs access to your camera so you can take a photo of a Mathematics or Physical Sciences question."
         }
-      ]
+      ],
+      "expo-iap",
+      "expo-build-properties"
     ]
   }
 }

@@ -589,7 +589,15 @@ with st.sidebar.expander("💳 Upgrade / Manage Plan"):
                 with col_yes:
                     if st.button("Yes, cancel", key=f"cancel_yes_{tier_key}"):
                         result = cancel_subscription(auth_user["id"])
-                        if result["payfast_notified"]:
+                        if result["provider"] == "play_billing":
+                            st.warning(
+                                "This subscription was bought through Google Play, so Google "
+                                "requires you to cancel it from the Play Store app "
+                                "(Subscriptions), not from here. Your Malita account has been "
+                                "downgraded, but please also cancel it there so Google Play "
+                                "stops billing you."
+                            )
+                        elif result["payfast_notified"]:
                             st.success("Subscription cancelled — you won't be billed again.")
                         else:
                             st.warning(

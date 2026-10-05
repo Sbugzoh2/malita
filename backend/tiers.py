@@ -68,6 +68,20 @@ TIER_CONFIG = {
 
 TIER_ORDER = ["free", "learner", "premium", "super_premium"]
 
+# Google Play subscription product IDs - must match EXACTLY what you create
+# in Play Console under Monetize > Products > Subscriptions for each paid
+# tier (the free tier has nothing to buy, so it isn't listed here). These
+# are placeholders - rename them to whatever you actually create, then
+# update this dict to match; everything else (billing_google_products,
+# the mobile purchase screen) reads from here so there's nowhere else to
+# keep in sync.
+GOOGLE_PLAY_PRODUCT_IDS = {
+    "learner": "malita_learner_monthly",
+    "premium": "malita_premium_monthly",
+    "super_premium": "malita_super_premium_monthly",
+}
+GOOGLE_PLAY_TIER_BY_PRODUCT_ID = {v: k for k, v in GOOGLE_PLAY_PRODUCT_IDS.items()}
+
 
 def tier_config(tier: str) -> dict:
     return TIER_CONFIG.get(tier, TIER_CONFIG["free"])

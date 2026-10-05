@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" type="image/png" href="favicon.png" />
+<title>Malita — Grade 12 Maths &amp; Physical Sciences, solved step by step</title>
+<meta name="description" content="Malita is an AI-powered study platform for South African Grade 12 learners, covering Mathematics and Physical Sciences — an AI Tutor, narrated AI lessons, practice questions, past papers and a learner collaboration forum, aligned to the CAPS curriculum." />
+<style>
+  :root {
+    --brand: #2a78d6;
+    --brand-dark: #184f95;
+    --ink: #1a1a1a;
+    --ink-soft: #475569;
+    --bg-soft: #f6f7f9;
+    --border: #e4e7eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    color: var(--ink);
+    line-height: 1.6;
+  }
+  a { color: var(--brand); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  header.top {
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  header.top .wrap { display: flex; align-items: center; gap: 12px; }
+  header.top img { width: 36px; height: 36px; border-radius: 9px; }
+  header.top .wordmark { font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; }
+
+  .hero {
+    background: linear-gradient(135deg, #0d2a52 0%, var(--brand) 100%);
+    color: #fff;
+    padding: 72px 0 84px;
+  }
+  .hero .wrap { text-align: center; }
+  .hero h1 {
+    font-size: clamp(2rem, 4.5vw, 3rem);
+    margin: 0 0 14px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .hero p.lead {
+    font-size: 1.15rem;
+    color: #dbe8fb;
+    max-width: 620px;
+    margin: 0 auto 32px;
+  }
+  .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 13px 28px;
+    border-radius: 999px;
+    font-weight: 700;
+    text-decoration: none;
+    font-size: 0.98rem;
+  }
+  .btn-primary { background: #fff; color: var(--brand-dark); }
+  .btn-ghost { background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.4); }
+  .badge-soon {
+    display: inline-block;
+    margin-top: 18px;
+    font-size: 0.85rem;
+    color: #c6d9f4;
+  }
+
+  section { padding: 64px 0; }
+  section.alt { background: var(--bg-soft); }
+  h2 { font-size: 1.6rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .section-sub { color: var(--ink-soft); margin: 0 0 36px; max-width: 640px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 20px;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+  }
+  .card .icon { font-size: 1.6rem; margin-bottom: 10px; }
+  .card h3 { font-size: 1.05rem; margin: 0 0 6px; }
+  .card p { color: var(--ink-soft); font-size: 0.92rem; margin: 0; }
+  .card .tag {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--brand-dark);
+    background: #e9f1fc;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+
+  .about p { color: var(--ink-soft); max-width: 700px; }
+  .about .facts {
+    display: flex;
+    gap: 36px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+  }
+  .about .facts div { min-width: 140px; }
+  .about .facts strong { display: block; font-size: 1.5rem; color: var(--brand-dark); }
+  .about .facts span { color: var(--ink-soft); font-size: 0.88rem; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 36px 0;
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+  }
+  footer .wrap {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  footer a { color: var(--ink-soft); text-decoration: none; margin-right: 18px; }
+  footer a:hover { color: var(--brand); }
+
+  @media (max-width: 560px) {
+    footer .wrap { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <img src="favicon.png" alt="Malita logo" />
+    <span class="wordmark">Malita</span>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>Grade 12 Maths &amp; Physical Sciences,<br>solved step by step.</h1>
+    <p class="lead">
+      Malita is an AI-powered study companion for South African Grade 12 learners —
+      aligned to the CAPS curriculum, built to explain the working, not just the answer.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://malita-maths.streamlit.app">Try it on the web →</a>
+      <a class="btn btn-ghost" href="#features">See what's inside</a>
+    </div>
+    <div class="badge-soon">📱 Android app launching soon on Google Play</div>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Everything a Grade 12 learner needs in one place</h2>
+    <p class="section-sub">Mathematics and Physical Sciences, Paper 1 and Paper 2, worked the way a good teacher would.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="icon">🧮</div>
+        <h3>AI Tutor</h3>
+        <p>Type a question, snap a photo, or upload a PDF — solved step by step, with the reasoning shown at every stage.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🧑‍🏫</div>
+        <h3>AI Teacher</h3>
+        <p>A full narrated lesson on any topic you choose — explained, worked through, and read aloud like a real class.</p>
+        <span class="tag">Super Premium</span>
+      </div>
+      <div class="card">
+        <div class="icon">📝</div>
+        <h3>Practice Questions</h3>
+        <p>Curated Grade 12 questions by topic, with hints and complete worked solutions.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🗂️</div>
+        <h3>Past Papers Library</h3>
+        <p>Real NSC past exam papers, organised by year and subject, ready to download and work through.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🤝</div>
+        <h3>Collaboration Forum</h3>
+        <p>Ask a question or help another learner — a study community built around the same CAPS topics.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🎯</div>
+        <h3>Learner Profile</h3>
+        <p>Track your progress, badges, and solved-question history as you work through each subject.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt about">
+  <div class="wrap">
+    <h2>Built for South African learners</h2>
+    <p>
+      Malita is developed by Malita (Pty) Ltd, a South African company, for Grade 12
+      learners studying under the CAPS curriculum. Every worked solution, past paper
+      and formula follows the exact conventions used in the NSC exams — degrees, not
+      radians; South African terminology; real past exam questions.
+    </p>
+    <div class="facts">
+      <div><strong>2</strong><span>Subjects covered</span></div>
+      <div><strong>CAPS</strong><span>Curriculum aligned</span></div>
+      <div><strong>🇿🇦</strong><span>Proudly South African</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a href="privacy-policy.html">Privacy Policy</a>
+      <a href="mailto:sbugzoh2@gmail.com">Contact</a>
+    </div>
+    <div>Malita (Pty) Ltd · Reg. No. 2026/660069/07 · © 2026</div>
+  </div>
+</footer>
+
+</body>
+</html>

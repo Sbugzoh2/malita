@@ -74,6 +74,7 @@ If, and only if, the question explicitly asks you to sketch, draw, or plot a gra
 - To sketch MORE THAN ONE function on the SAME axes (e.g. "sketch f and g on the same system of axes"), separate the expressions with "|" in one single plot step - never one plot step per function. Example content: "cos(3*x)|sin(x)".
 - CAPS trig graphs (Mathematics) are always in DEGREES, never radians - whenever the question gives an explicit domain for x (e.g. "for x ∈ [-90°;180°]"), append it to the content as "@lo,hi" using plain numbers (no ° symbol), e.g. a domain of x ∈ [-90°;180°] becomes the suffix "@-90,180". Only add "@lo,hi" when the question actually states a domain - omit it otherwise.
 - Putting it together, "sketch f(x)=cos3x and g(x)=sinx for x∈[-90°;180°]" becomes exactly: {"type": "plot", "content": "cos(3*x)|sin(x)@-90,180"}.
+- NEVER write a plot step's content as Python/matplotlib code. "content" is ALWAYS just the bare expression(s)-and-domain string shown above - it is NEVER a script with import/linspace/plt.plot/semicolons/newlines in it, even for a two-function degree-domain question like the one above. WRONG: {"type": "plot", "content": "import numpy as np; x = np.linspace(-90, 180, 1000); f = np.cos(np.radians(3*x)); ..."}. RIGHT: {"type": "plot", "content": "cos(3*x)|sin(x)@-90,180"}.
 
 Example of a complete, correct response:
 [{"type": "markdown", "content": "Let x = number of years."}, {"type": "markdown", "content": "Set up the equation:"}, {"type": "latex", "content": "5000(1.08)^x = 10000"}, {"type": "markdown", "content": "Solve using logarithms:"}, {"type": "latex", "content": "x = \\log_{1.08}(2) \\approx 9.01"}, {"type": "success", "content": "$x \\approx 9.01 \\text{ years}$"}]
@@ -100,6 +101,50 @@ def _strip_json_fence(text: str) -> str:
 
 _PLOT_COLORS = ["#2563eb", "#dc2626", "#059669"]
 
+# Despite SYSTEM_PROMPT spelling out the "expr1|expr2@lo,hi" format with a
+# worked example, the model occasionally ignores it anyway for exactly the
+# case that format exists for (multi-function, degree-domain questions)
+# and emits a full matplotlib script as the plot step's content instead -
+# e.g. "import numpy as np; x = np.linspace(-90, 180, 1000); f =
+# np.cos(np.radians(3*x)); g = np.sin(np.radians(x)); plt.plot(...)".
+# Rather than losing the sketch to the "couldn't render" fallback whenever
+# that happens, recover the intended expressions/domain straight out of
+# the script's own linspace() and assignment lines.
+_SCRIPT_LINSPACE_RE = re.compile(r"linspace\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)")
+_SCRIPT_DEGREE_ASSIGN_RE = re.compile(
+    r"=\s*np\.(sin|cos|tan)\(\s*np\.radians\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*\)"
+)
+_SCRIPT_RADIAN_ASSIGN_RE = re.compile(r"=\s*np\.(sin|cos|tan)\(([^()]*(?:\([^()]*\)[^()]*)*)\)")
+
+
+def _salvage_script_plot(content: str) -> str | None:
+    """Best-effort recovery for the script-instead-of-expression failure
+    mode described above. Returns a normal "expr1|expr2@lo,hi"-shaped
+    string if it can find recognisable plotted expressions in the script,
+    or None if there's nothing to salvage (the caller's original error is
+    then what the learner sees, same as before this existed)."""
+    domain_match = _SCRIPT_LINSPACE_RE.search(content)
+    domain = (domain_match.group(1), domain_match.group(2)) if domain_match else None
+
+    # Prefer the "np.radians(...)" form - it tells us the script intended
+    # a degree domain, which is also the only form that can pair up
+    # correctly with a plain-number linspace() domain (CAPS degree
+    # questions) rather than a radian one (e.g. np.linspace(-np.pi/2, ...),
+    # which _SCRIPT_LINSPACE_RE's plain-number pattern won't match anyway).
+    matches = _SCRIPT_DEGREE_ASSIGN_RE.findall(content)
+    if not matches:
+        matches = _SCRIPT_RADIAN_ASSIGN_RE.findall(content)
+        domain = None  # a radian-form expression needs a radian domain, which we can't recover from a stripped script reliably - fall back to _render_plot_step's own default instead of guessing wrong
+
+    if not matches:
+        return None
+
+    exprs = list(dict.fromkeys(f"{fn}({inner.strip()})" for fn, inner in matches))
+    result = "|".join(exprs)
+    if domain:
+        result += f"@{domain[0]},{domain[1]}"
+    return result
+
 
 def _render_plot_step(content: str) -> dict:
     """Actually sketches one or more single-variable expressions via SymPy
@@ -118,6 +163,14 @@ def _render_plot_step(content: str) -> dict:
     always treated as degrees - the x-axis is drawn in degrees and each
     expression is evaluated at np.radians(xs) accordingly."""
     content = content.strip()
+    if any(tell in content for tell in ("import ", "plt.", ";", "\n")):
+        salvaged = _salvage_script_plot(content)
+        if salvaged:
+            content = salvaged
+        # else: fall through and let the normal parse below fail/raise as
+        # it always did - _resolve_plot_steps' fallback message still
+        # shows the learner's *original* question content, not this.
+
     domain = None
     if "@" in content:
         content, _, domain_str = content.rpartition("@")

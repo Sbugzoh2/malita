@@ -31,7 +31,8 @@ TIER_CONFIG = {
         # except price, which is its own bug (nothing to "upgrade" to).
         "past_papers_enabled": False,
         "llm_fallback_enabled": True,
-        "collab_enabled": True,
+        # Forum access starts at Premium, not Learner - see Premium below.
+        "collab_enabled": False,
         "ai_teacher_enabled": False,
     },
     "premium": {
@@ -47,11 +48,13 @@ TIER_CONFIG = {
     },
     "super_premium": {
         "label": "Super Premium",
-        # Placeholder price - adjust to whatever you want to charge; the
-        # checkout/upgrade UI (app.py's sidebar, api_server.py's
-        # /billing/checkout-page, the mobile Subscription screen) all
-        # read this value automatically, nothing else to change.
-        "price_zar": 199.99,
+        # Introductory price - the checkout/upgrade UI (app.py's sidebar,
+        # api_server.py's /billing/checkout-page, the mobile Subscription
+        # screen) all read this value automatically, nothing else to
+        # change for PayFast. The Google Play base plan price is set
+        # separately in Play Console and must be updated there too if
+        # this ever changes again.
+        "price_zar": 159.99,
         "ai_tutor_daily_limit": None,
         "ocr_enabled": True,
         "pdf_enabled": True,

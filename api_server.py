@@ -661,8 +661,8 @@ def learner_profile(subject: str = "Mathematics", authorization: str = Header(No
 
 
 def _require_collab_access(authorization: str | None) -> dict:
-    """Collaboration Forum is Learner/Premium only (see can_use_collab) - shared
-    by every endpoint below so the gate can't drift between them."""
+    """Collaboration Forum is Premium/Super Premium only (see can_use_collab) -
+    shared by every endpoint below so the gate can't drift between them."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
     effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])

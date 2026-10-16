@@ -1302,7 +1302,7 @@ elif mode == "🤝 Collaboration Forum":
     st.caption("Ask a question, help another learner, or browse what others are stuck on.")
 
     if not can_use_collab(effective_tier):
-        st.warning("🤝 Collaboration Forum is a Learner/Premium feature. Upgrade from the sidebar to unlock it.")
+        st.warning("🤝 Collaboration Forum is a Premium/Super Premium feature. Upgrade from the sidebar to unlock it.")
     else:
         if "collab_selected_question_id" not in st.session_state:
             st.session_state.collab_selected_question_id = None
@@ -1834,7 +1834,7 @@ else:
          "desc": "Browse and download real NSC past exam papers.",
          "css_class": "tile-c7", "illustration": _SVG_LIBRARY},
         {"mode": "🤝 Collaboration Forum", "icon": "🤝", "title": "Collaboration Forum",
-         "desc": "Ask a question or help another learner. Learner/Premium.",
+         "desc": "Ask a question or help another learner. Premium/Super Premium.",
          "css_class": "tile-c3", "illustration": _SVG_COLLAB},
         {"mode": "🎯 Learner Profile", "icon": "🎯", "title": "Learner Profile",
          "desc": "Track your progress, badges, and solved-question history.",

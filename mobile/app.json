@@ -7,6 +7,12 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/dea19c46-b69f-485e-95d3-0694e5ab06f2"
+    },
     "extra": {
       "apiBaseUrl": "https://malita-api.onrender.com",
       "eas": {

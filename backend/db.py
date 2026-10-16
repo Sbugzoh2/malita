@@ -85,6 +85,11 @@ class Subscription(Base):
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
     tier = Column(String(20), default="free", nullable=False)  # free | learner | premium
     status = Column(String(20), default="active", nullable=False)  # active | cancelled | past_due
+    # Set when a learner downgrades to a lower tier mid-cycle - they keep
+    # `tier`'s access (already paid for) until current_period_end, at
+    # which point get_user_tier() applies this and clears it. See
+    # backend/auth.py's schedule_downgrade().
+    pending_tier = Column(String(20), nullable=True)
     # Which checkout the CURRENT tier was bought through - decides whether
     # cancellation goes through PayFast's API or has to be done in the Play
     # Store app (Google doesn't let us cancel a Play-billed subscription on
@@ -325,6 +330,7 @@ def init_db():
     _ensure_column("subscriptions", "payment_provider", "VARCHAR(20) DEFAULT 'payfast'")
     _ensure_column("subscriptions", "google_purchase_token", "VARCHAR(500)")
     _ensure_column("subscriptions", "google_product_id", "VARCHAR(100)")
+    _ensure_column("subscriptions", "pending_tier", "VARCHAR(20)")
 
 
 @contextmanager

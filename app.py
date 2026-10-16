@@ -25,10 +25,11 @@ import random
 
 #from frontend import *
 
-from backend.db import init_db, SA_PROVINCES
+from backend.db import init_db, SA_PROVINCES, get_session, Subscription
 from backend.auth import (
     register_user, login_user, get_user_tier, is_user_admin, AuthError,
     create_password_reset, reset_password, cancel_subscription, create_api_token,
+    schedule_downgrade,
 )
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher, daily_limit
@@ -550,9 +551,17 @@ if "copied_text" not in st.session_state:
 st.sidebar.title("🎓 Matric Study Master")
 
 # Always re-check the tier from the DB (not a cached value from login),
-# since a PayFast webhook may have upgraded/cancelled it since then.
+# since a PayFast webhook may have upgraded/cancelled it since then. This
+# also applies any scheduled downgrade whose effective date has passed
+# (see get_user_tier()'s lazy pending_tier check).
 current_tier = get_user_tier(auth_user["id"])
 tier_info = TIER_CONFIG[current_tier]
+
+with get_session() as _db:
+    _sub = _db.query(Subscription).filter(Subscription.user_id == auth_user["id"]).first()
+    current_provider = _sub.payment_provider if _sub else None
+    pending_tier = _sub.pending_tier if _sub else None
+    current_period_end = _sub.current_period_end if _sub else None
 
 # Admins get full (Premium-equivalent) access regardless of their actual
 # subscription, purely for testing — their real billing tier/label is
@@ -564,6 +573,10 @@ effective_tier = TIER_ORDER[-1] if is_admin_user else current_tier
 
 st.sidebar.markdown(f"👋 **{auth_user['name']}**")
 st.sidebar.markdown(f"Plan: **{tier_info['label']}**" + (" · 👑 Admin" if is_admin_user else ""))
+if pending_tier and current_period_end:
+    st.sidebar.caption(
+        f"Moving to **{TIER_CONFIG[pending_tier]['label']}** on {current_period_end.strftime('%d %b %Y')}"
+    )
 
 if daily_limit(effective_tier) is not None:
     used_today = get_today_count(auth_user["id"])
@@ -616,6 +629,55 @@ with st.sidebar.expander("💳 Upgrade / Manage Plan"):
                     st.session_state[confirm_key] = True
                     st.rerun()
             continue
+
+        is_downgrade = (
+            current_tier != "free"
+            and TIER_ORDER.index(tier_key) < TIER_ORDER.index(current_tier)
+        )
+        if is_downgrade:
+            st.markdown(f"**{cfg['label']} — R{cfg['price_zar']}/month**")
+            confirm_down_key = f"confirm_downgrade_{tier_key}"
+            if st.session_state.get(confirm_down_key):
+                st.warning(
+                    f"Move to {cfg['label']} at the end of your current billing period? "
+                    "You'll keep your current plan's access until then."
+                )
+                col_yes, col_no = st.columns(2)
+                with col_yes:
+                    if st.button("Yes, schedule it", key=f"downgrade_yes_{tier_key}"):
+                        if current_provider == "play_billing":
+                            # Changing a Play-billed plan requires the native
+                            # purchase flow (to tell Google which replacement
+                            # mode to use) - a browser can't do that, so this
+                            # must happen in the mobile app, not here.
+                            st.warning(
+                                "This subscription is billed through Google Play — please open the "
+                                "Malita mobile app and change your plan from there instead, so Google "
+                                "Play is updated correctly."
+                            )
+                        else:
+                            result = schedule_downgrade(auth_user["id"], tier_key)
+                            if result["scheduled"]:
+                                effective = result["effective_date"]
+                                date_str = effective.strftime("%d %b %Y") if effective else "the end of your billing period"
+                                st.info(
+                                    f"Scheduled — you'll keep {tier_info['label']} until {date_str}. "
+                                    "After that, come back here and subscribe to the new plan to keep "
+                                    "paid access, otherwise your account moves to Free."
+                                )
+                            else:
+                                st.error("Couldn't schedule that change. Please try again.")
+                        st.session_state[confirm_down_key] = False
+                with col_no:
+                    if st.button("Never mind", key=f"downgrade_no_{tier_key}"):
+                        st.session_state[confirm_down_key] = False
+                        st.rerun()
+            else:
+                if st.button(f"Downgrade to {cfg['label']}", key=f"downgrade_{tier_key}"):
+                    st.session_state[confirm_down_key] = True
+                    st.rerun()
+            continue
+
         st.markdown(f"**{cfg['label']} — R{cfg['price_zar']}/month**")
         if st.button(f"Upgrade to {cfg['label']}", key=f"upgrade_{tier_key}"):
             payload = build_checkout_payload(

@@ -66,6 +66,10 @@ export type MeResponse = {
   daily_limit: number | null;
   used_today: number;
   payment_provider: "payfast" | "play_billing" | null;
+  pending_tier: string | null;
+  pending_tier_label: string | null;
+  current_period_end: string | null;
+  google_product_id: string | null;
 };
 
 export type SolveStep = { type: string; content: string };
@@ -229,6 +233,17 @@ export function verifyGooglePlayPurchase(token: string, productId: string, purch
     body: { product_id: productId, purchase_token: purchaseToken },
     token,
   });
+}
+
+// Schedules a move to a LOWER tier at the end of the current paid period
+// (not immediately) - see api_server.py's /billing/downgrade. For a
+// Play-billed subscription, call this right after the native deferred-
+// replacement purchase has already been requested via expo-iap.
+export function scheduleDowngrade(token: string, tier: string) {
+  return request<{ scheduled: boolean; effective_date: string | null; new_tier?: string; payfast_notified?: boolean | null }>(
+    "/billing/downgrade",
+    { method: "POST", body: { tier }, token }
+  );
 }
 
 // Best-effort log of a Google User Choice Billing selection (the learner

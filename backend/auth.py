@@ -14,6 +14,7 @@ import bcrypt
 
 from .db import get_session, User, Subscription, PasswordReset, ApiToken, LoginEvent
 from .payfast import cancel_payfast_subscription
+from .tiers import TIER_ORDER
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_TOKEN_VALID_MINUTES = 60
@@ -146,14 +147,26 @@ def login_user(email: str, password: str, source: str = None) -> dict:
 def get_user_tier(user_id: int) -> str:
     """Live lookup — always call this before gating a feature, rather than
     trusting a cached tier in session_state, since a payment/cancellation
-    could have changed it since login."""
+    could have changed it since login.
+
+    Also the one place a scheduled downgrade (see schedule_downgrade())
+    actually takes effect: if pending_tier is set and current_period_end
+    has passed, this flips tier -> pending_tier right here, lazily, on
+    whichever request happens to notice it first - no cron job needed
+    for a service at this scale."""
     with get_session() as db:
         user = db.query(User).get(user_id)
         if not user or not user.subscription:
             return "free"
-        if user.subscription.status != "active":
+        sub = user.subscription
+        if sub.pending_tier and sub.current_period_end and dt.datetime.utcnow() >= sub.current_period_end:
+            sub.tier = sub.pending_tier
+            sub.pending_tier = None
+            if sub.tier == "free":
+                sub.status = "cancelled"
+        if sub.status != "active":
             return "free"
-        return user.subscription.tier
+        return sub.tier
 
 
 def is_user_admin(user_id: int) -> bool:
@@ -216,6 +229,53 @@ def cancel_subscription(user_id: int) -> dict:
         payfast_notified = cancel_payfast_subscription(sub.payfast_token)
         sub.status = "cancelled"
         return {"had_subscription": True, "provider": "payfast", "payfast_notified": payfast_notified}
+
+
+def schedule_downgrade(user_id: int, new_tier: str) -> dict:
+    """Move to a LOWER tier at the end of the currently-paid period,
+    rather than immediately - the learner keeps their current tier's
+    access (already paid for, not refunded) until current_period_end,
+    matching how the Play Store/App Store/most subscription apps handle
+    a downgrade. get_user_tier() is where pending_tier actually takes
+    effect, once that date arrives.
+
+    Only valid for moving to a tier STRICTLY LOWER than the one currently
+    active - an upgrade should go through the normal checkout flow
+    instead (billing_checkout_page / billing_google_verify), which still
+    applies immediately, same as before.
+
+    PayFast has no "change this recurring agreement's amount later" API
+    - it's cancel-and-recreate only - so for a PayFast-billed
+    subscription this cancels the current recurring billing right away
+    (so it won't renew at the old, higher price) while leaving tier/
+    status untouched until current_period_end. The learner needs to
+    actively check out again for the new lower tier once that date
+    arrives if they still want paid access at that tier rather than
+    drop to Free - callers must make that tradeoff clear in the UI.
+
+    For a Play-billed subscription, this should be called right after
+    the native deferred-replacement purchase has already been requested
+    via expo-iap (Play Billing handles the actual billing-time swap
+    itself); this call just mirrors "keep current tier until period end"
+    in our own records too, since we won't hear from Google again until
+    the swap has already happened on their side."""
+    with get_session() as db:
+        sub = db.query(Subscription).filter(Subscription.user_id == user_id).first()
+        if not sub or sub.tier == "free" or sub.status != "active":
+            return {"scheduled": False, "effective_date": None}
+        if TIER_ORDER.index(new_tier) >= TIER_ORDER.index(sub.tier):
+            return {"scheduled": False, "effective_date": None}  # not actually a downgrade
+
+        payfast_notified = None
+        if sub.payment_provider == "payfast":
+            payfast_notified = cancel_payfast_subscription(sub.payfast_token)
+        sub.pending_tier = new_tier
+        return {
+            "scheduled": True,
+            "effective_date": sub.current_period_end,
+            "new_tier": new_tier,
+            "payfast_notified": payfast_notified,
+        }
 
 
 def create_api_token(user_id: int) -> str:

@@ -44,6 +44,7 @@ from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
+    schedule_downgrade,
 )
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher, GOOGLE_PLAY_PRODUCT_IDS, GOOGLE_PLAY_TIER_BY_PRODUCT_ID
@@ -200,6 +201,10 @@ class GoogleChoiceRequest(BaseModel):
     product_ids: list[str]
 
 
+class DowngradeRequest(BaseModel):
+    tier: str
+
+
 def _auth_user(authorization: str | None):
     """FastAPI dependency-style helper: parse 'Bearer <token>' and resolve
     it to a user dict, or raise 401. Not using FastAPI's OAuth2 machinery
@@ -310,6 +315,9 @@ def me(authorization: str = Header(None)):
     with get_session() as db:
         sub = db.query(Subscription).filter(Subscription.user_id == user["id"]).first()
         payment_provider = sub.payment_provider if sub else None
+        pending_tier = sub.pending_tier if sub else None
+        current_period_end = sub.current_period_end.isoformat() if sub and sub.current_period_end else None
+        google_product_id = sub.google_product_id if sub else None
     return {
         "user": user,
         "is_admin": is_admin,
@@ -318,6 +326,10 @@ def me(authorization: str = Header(None)):
         "daily_limit": limit,
         "used_today": used_today,
         "payment_provider": payment_provider,
+        "pending_tier": pending_tier,
+        "pending_tier_label": TIER_CONFIG[pending_tier]["label"] if pending_tier else None,
+        "current_period_end": current_period_end,
+        "google_product_id": google_product_id,
     }
 
 
@@ -500,6 +512,27 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
 def billing_cancel(authorization: str = Header(None)):
     user = _auth_user(authorization)
     result = cancel_subscription(user["id"])
+    return result
+
+
+@app.post("/billing/downgrade")
+def billing_downgrade(payload: DowngradeRequest, authorization: str = Header(None)):
+    """Schedules a move to a lower tier at the end of the current paid
+    period, rather than applying it immediately - see
+    backend.auth.schedule_downgrade. For a Play-billed subscription, the
+    mobile app calls this right after requesting the native deferred-
+    replacement purchase; for PayFast it's the whole action (no payment
+    screen needed, since the lower tier only starts billing once the
+    learner re-checks-out after the effective date)."""
+    user = _auth_user(authorization)
+    if payload.tier not in TIER_CONFIG:
+        raise HTTPException(status_code=400, detail="Unknown tier.")
+    result = schedule_downgrade(user["id"], payload.tier)
+    if not result["scheduled"]:
+        raise HTTPException(
+            status_code=400,
+            detail="That isn't a downgrade from your current plan, or you don't have an active paid subscription.",
+        )
     return result
 
 

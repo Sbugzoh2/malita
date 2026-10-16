@@ -17,12 +17,22 @@ import {
   fetchTiers,
   checkoutPageUrl,
   cancelSubscription,
+  scheduleDowngrade,
   fetchGooglePlayProducts,
   verifyGooglePlayPurchase,
   logGooglePlayChoice,
   TierInfo,
   API_BASE_URL,
 } from "../api/client";
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString("en-ZA", { year: "numeric", month: "long", day: "numeric" });
+  } catch {
+    return iso;
+  }
+}
 
 // expo-iap only has anything to initialise on Android (no Apple/App Store
 // products exist for this app) - importing it on web would also break the
@@ -38,7 +48,12 @@ export default function SubscriptionScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busyTier, setBusyTier] = useState<string | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [confirmingDowngrade, setConfirmingDowngrade] = useState<string | null>(null);
   const [googleProducts, setGoogleProducts] = useState<Record<string, string> | null>(null);
+  // Set right before a deferred-replacement purchase is requested so the
+  // onPurchaseSuccess handler below knows to call scheduleDowngrade
+  // instead of the normal immediate-grant verifyGooglePlayPurchase path.
+  const [downgradeInFlightTier, setDowngradeInFlightTier] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTiers()
@@ -65,9 +80,24 @@ export default function SubscriptionScreen() {
         onPurchaseSuccess: async (purchase: any) => {
           if (!token) return;
           try {
-            await verifyGooglePlayPurchase(token, purchase.productId, purchase.purchaseToken ?? "");
-            await iap.finishTransaction({ purchase, isConsumable: false });
-            await refreshMe();
+            if (downgradeInFlightTier) {
+              // Play Billing handles the deferred swap itself at the next
+              // renewal - this just mirrors "keep current tier until then"
+              // in our own records, same as the PayFast downgrade path.
+              const result = await scheduleDowngrade(token, downgradeInFlightTier);
+              await iap.finishTransaction({ purchase, isConsumable: false });
+              await refreshMe();
+              Alert.alert(
+                "Downgrade scheduled",
+                result.effective_date
+                  ? `You'll keep your current plan until ${formatDate(result.effective_date)}, then move to the new plan.`
+                  : "Your plan will change at the end of your current billing period."
+              );
+            } else {
+              await verifyGooglePlayPurchase(token, purchase.productId, purchase.purchaseToken ?? "");
+              await iap.finishTransaction({ purchase, isConsumable: false });
+              await refreshMe();
+            }
           } catch (e) {
             Alert.alert(
               "Purchase couldn't be verified",
@@ -75,10 +105,12 @@ export default function SubscriptionScreen() {
             );
           } finally {
             setBusyTier(null);
+            setDowngradeInFlightTier(null);
           }
         },
         onPurchaseError: (e: any) => {
           setBusyTier(null);
+          setDowngradeInFlightTier(null);
           if (e?.code !== "E_USER_CANCELLED") {
             setError("Google Play purchase failed. Please try again.");
           }
@@ -155,6 +187,75 @@ export default function SubscriptionScreen() {
     }
   }
 
+  async function downgradeWithGooglePlay(tierKey: string) {
+    if (!token || !googleProducts || !iap || !me?.google_product_id) return;
+    const productId = googleProducts[tierKey];
+    if (!productId) {
+      setError("This plan isn't available via Google Play yet.");
+      return;
+    }
+    setError(null);
+    setBusyTier(tierKey);
+    setDowngradeInFlightTier(tierKey);
+    const product = iap.subscriptions.find((s: any) => s.id === productId);
+    const offer = product?.subscriptionOffers?.[0];
+    try {
+      await iap.requestPurchase({
+        type: "subs",
+        request: {
+          google: {
+            skus: [productId],
+            subscriptionOffers: offer?.offerTokenAndroid
+              ? [{ sku: productId, offerToken: offer.offerTokenAndroid }]
+              : undefined,
+            // DEFERRED: Play Billing swaps to the new plan at the next
+            // renewal instead of charging now - no payment dialog shows
+            // for a deferred change, it just schedules it on Google's side.
+            subscriptionProductReplacementParams: {
+              oldProductId: me.google_product_id,
+              replacementMode: "deferred",
+            },
+          },
+        },
+      });
+      // busyTier/downgradeInFlightTier are cleared in onPurchaseSuccess/
+      // onPurchaseError above, once Play Billing actually resolves this.
+    } catch (e) {
+      setBusyTier(null);
+      setDowngradeInFlightTier(null);
+      setError("Could not schedule the Google Play downgrade. Please try again.");
+    }
+  }
+
+  async function downgradeWithPayfast(tierKey: string) {
+    if (!token) return;
+    setError(null);
+    setBusyTier(tierKey);
+    try {
+      const result = await scheduleDowngrade(token, tierKey);
+      await refreshMe();
+      Alert.alert(
+        "Downgrade scheduled",
+        result.effective_date
+          ? `You'll keep your current plan until ${formatDate(result.effective_date)}. After that, you'll need to come back here and subscribe to the new plan to keep paid access - otherwise your account moves to Free.`
+          : "Your plan will change at the end of your current billing period."
+      );
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not schedule the downgrade. Please try again.");
+    } finally {
+      setBusyTier(null);
+    }
+  }
+
+  function confirmDowngrade(tierKey: string) {
+    setConfirmingDowngrade(null);
+    if (currentProvider === "play_billing") {
+      downgradeWithGooglePlay(tierKey);
+    } else {
+      downgradeWithPayfast(tierKey);
+    }
+  }
+
   async function confirmCancel() {
     if (!token) return;
     setConfirmingCancel(false);
@@ -183,6 +284,9 @@ export default function SubscriptionScreen() {
 
   const currentTier = me?.effective_tier ?? "free";
   const currentProvider = me?.payment_provider;
+  // tiers (from /billing/tiers) comes back in TIER_ORDER already - used to
+  // tell an upgrade apart from a downgrade for each plan card below.
+  const currentTierRank = tiers ? tiers.findIndex((t) => t.key === currentTier) : -1;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -202,6 +306,11 @@ export default function SubscriptionScreen() {
         {currentProvider === "play_billing" ? (
           <Text style={styles.currentUsage}>Billed through Google Play</Text>
         ) : null}
+        {me?.pending_tier ? (
+          <Text style={styles.pendingNotice}>
+            Moving to {me.pending_tier_label} on {formatDate(me.current_period_end)}
+          </Text>
+        ) : null}
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -214,6 +323,8 @@ export default function SubscriptionScreen() {
           .map((t) => {
             const isCurrent = t.key === currentTier;
             const hasGooglePlan = isAndroid && !!googleProducts?.[t.key];
+            const tierRank = tiers.findIndex((x) => x.key === t.key);
+            const isDowngrade = !isCurrent && currentTier !== "free" && tierRank < currentTierRank;
             return (
               <View key={t.key} style={styles.planCard}>
                 <View style={styles.planHeaderRow}>
@@ -255,6 +366,35 @@ export default function SubscriptionScreen() {
                   ) : (
                     <Pressable style={styles.cancelButton} onPress={() => setConfirmingCancel(true)}>
                       <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
+                    </Pressable>
+                  )
+                ) : isDowngrade ? (
+                  confirmingDowngrade === t.key ? (
+                    <View style={styles.confirmRow}>
+                      <Text style={styles.confirmText}>
+                        Move to {t.label} at the end of your current billing period? You'll keep your current
+                        plan's access until then.
+                      </Text>
+                      <View style={styles.confirmButtonRow}>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => confirmDowngrade(t.key)}
+                          disabled={busyTier === t.key}
+                        >
+                          {busyTier === t.key ? (
+                            <ActivityIndicator color={colors.text} />
+                          ) : (
+                            <Text style={styles.smallButtonTextDark}>Yes, schedule it</Text>
+                          )}
+                        </Pressable>
+                        <Pressable style={styles.smallButton} onPress={() => setConfirmingDowngrade(null)}>
+                          <Text style={styles.smallButtonTextDark}>Never mind</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <Pressable style={styles.downgradeButton} onPress={() => setConfirmingDowngrade(t.key)}>
+                      <Text style={styles.downgradeButtonText}>Downgrade to {t.label}</Text>
                     </Pressable>
                   )
                 ) : (
@@ -314,6 +454,7 @@ const styles = StyleSheet.create({
   currentLabel: { fontSize: 12, color: colors.textSecondary },
   currentTier: { fontSize: 20, fontWeight: "700", color: colors.text, marginTop: 2 },
   currentUsage: { fontSize: 13, color: colors.textSecondary, marginTop: 6 },
+  pendingNotice: { fontSize: 12, color: colors.primary, marginTop: 8, fontWeight: "600" },
   error: { color: colors.error, marginTop: 16, textAlign: "center" },
   planCard: {
     backgroundColor: colors.surface,
@@ -347,6 +488,15 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   cancelButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
+  downgradeButton: {
+    marginTop: 14,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  downgradeButtonText: { color: colors.textSecondary, fontWeight: "700", fontSize: 15 },
   confirmRow: { marginTop: 14 },
   confirmText: { fontSize: 13, color: colors.textSecondary },
   confirmButtonRow: { flexDirection: "row", gap: 10, marginTop: 10 },

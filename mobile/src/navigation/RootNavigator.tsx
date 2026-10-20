@@ -77,7 +77,21 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      linking={{
+        // Lets PayFast's checkout redirect (return_url/cancel_url) bring
+        // the learner straight back into the app instead of landing in a
+        // browser with nowhere to go - see api_server.py's
+        // /billing/checkout-page, which points PayFast at malita://billing
+        // rather than the web app's URL for exactly this reason.
+        prefixes: ["malita://"],
+        config: {
+          screens: {
+            Subscription: "billing",
+          },
+        },
+      }}
+    >
       {token ? <AppNavigator /> : <AuthNavigator />}
     </NavigationContainer>
   );

@@ -3,6 +3,7 @@
     "name": "Malita",
     "slug": "mobileapp",
     "owner": "malita-app",
+    "scheme": "malita",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

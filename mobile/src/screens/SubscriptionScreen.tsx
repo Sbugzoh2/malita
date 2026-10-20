@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 import {
@@ -54,6 +55,17 @@ export default function SubscriptionScreen() {
   // onPurchaseSuccess handler below knows to call scheduleDowngrade
   // instead of the normal immediate-grant verifyGooglePlayPurchase path.
   const [downgradeInFlightTier, setDowngradeInFlightTier] = useState<string | null>(null);
+
+  // Refreshes the learner's plan every time this screen regains focus -
+  // in particular, when PayFast's checkout redirects back into the app
+  // via the malita:// deep link (see RootNavigator's linking config),
+  // this is what actually picks up the new tier without needing the
+  // learner to restart the app.
+  useFocusEffect(
+    useCallback(() => {
+      refreshMe();
+    }, [refreshMe])
+  );
 
   useEffect(() => {
     fetchTiers()

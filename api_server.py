@@ -496,8 +496,14 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
         item_name=f"Malita {cfg['label']} Subscription",
         name_first=user["name"].split(" ")[0],
         email_address=user["email"],
-        return_url=f"{APP_BASE_URL}/?upgraded=1",
-        cancel_url=f"{APP_BASE_URL}/?cancelled=1",
+        # Deep-links straight back into the mobile app (see
+        # mobile/src/navigation/RootNavigator.tsx's linking config) rather
+        # than APP_BASE_URL (the web app's own URL) - the native app opens
+        # this checkout page in the phone's external browser, so a web
+        # return_url left the learner stranded on the website's login
+        # screen after paying instead of back in the app.
+        return_url="malita://billing?upgraded=1",
+        cancel_url="malita://billing?cancelled=1",
         notify_url=APP_WEBHOOK_URL,
         recurring=True,
         recurring_amount=cfg["price_zar"],

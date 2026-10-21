@@ -18,6 +18,8 @@ RUN IT WITH:
 """
 
 import datetime as dt
+import html
+import json
 import logging
 import os
 import uuid
@@ -76,6 +78,9 @@ from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
 # through the same webhook, so both apps' PayFast configuration must agree.
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
+# This service's own public URL - needed so PayFast's mobile checkout can
+# redirect back to a real https page (see /billing/return below).
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8002")
 
 app = FastAPI(title="Malita API")
 init_db()
@@ -496,14 +501,13 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
         item_name=f"Malita {cfg['label']} Subscription",
         name_first=user["name"].split(" ")[0],
         email_address=user["email"],
-        # Deep-links straight back into the mobile app (see
-        # mobile/src/navigation/RootNavigator.tsx's linking config) rather
-        # than APP_BASE_URL (the web app's own URL) - the native app opens
-        # this checkout page in the phone's external browser, so a web
-        # return_url left the learner stranded on the website's login
-        # screen after paying instead of back in the app.
-        return_url="malita://billing?upgraded=1",
-        cancel_url="malita://billing?cancelled=1",
+        # Points at our own bridge page (see /billing/return below) rather
+        # than APP_BASE_URL (the web app's own URL) or a bare malita://
+        # deep link - PayFast rejects a non-http(s) return_url/cancel_url
+        # outright ("invalid url format"), so the bridge page is what
+        # actually forwards the browser into the mobile app afterward.
+        return_url=f"{API_BASE_URL}/billing/return?status=upgraded",
+        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled",
         notify_url=APP_WEBHOOK_URL,
         recurring=True,
         recurring_amount=cfg["price_zar"],
@@ -512,6 +516,27 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
         custom_fields={"custom_str1": str(user["id"]), "custom_str2": tier},
     )
     return build_checkout_page_html(payload)
+
+
+@app.get("/billing/return", response_class=HTMLResponse)
+def billing_return(status: str = "upgraded"):
+    """Bridge page for PayFast's mobile return_url/cancel_url. PayFast
+    requires a real http(s) URL and rejects a bare malita:// deep link
+    outright ("invalid url format") - this page is what PayFast actually
+    redirects the phone's browser to, and it then forwards the browser
+    into the mobile app via that same deep link once it loads (the OS
+    only resolves a custom-scheme navigation triggered from a real
+    webpage, not from PayFast's own server-side redirect chain)."""
+    if status not in ("upgraded", "cancelled"):
+        status = "upgraded"
+    app_url = f"malita://billing?{status}=1"
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Returning to Malita…</title></head>
+<body onload='window.location.href = {json.dumps(app_url)};'>
+<p style="font-family: sans-serif; text-align: center; margin-top: 60px;">Returning to the Malita app…</p>
+<p style="font-family: sans-serif; text-align: center;">
+<a href="{html.escape(app_url)}">Tap here if it doesn't open automatically</a></p>
+</body></html>"""
 
 
 @app.post("/billing/cancel")

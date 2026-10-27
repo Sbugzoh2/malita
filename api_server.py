@@ -330,6 +330,7 @@ def me(authorization: str = Header(None)):
         "tier_label": TIER_CONFIG[effective_tier]["label"],
         "daily_limit": limit,
         "used_today": used_today,
+        "ai_teacher_enabled": can_use_ai_teacher(effective_tier),
         "payment_provider": payment_provider,
         "pending_tier": pending_tier,
         "pending_tier_label": TIER_CONFIG[pending_tier]["label"] if pending_tier else None,
@@ -725,8 +726,8 @@ def learner_profile(subject: str = "Mathematics", authorization: str = Header(No
 
 
 def _require_collab_access(authorization: str | None) -> dict:
-    """Collaboration Forum is Premium/Super Premium only (see can_use_collab) -
-    shared by every endpoint below so the gate can't drift between them."""
+    """Collaboration Forum is any paid tier (see can_use_collab) - shared
+    by every endpoint below so the gate can't drift between them."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
     effective_tier = TIER_ORDER[-1] if is_admin else get_user_tier(user["id"])
@@ -861,7 +862,7 @@ def collab_report_resolve(report_id: int, body: CollabResolveRequest, authorizat
 
 @app.post("/ai-teacher/lesson")
 def ai_teacher_lesson(body: AITeacherLessonRequest, authorization: str = Header(None)):
-    """Super Premium only - generates a full narrated lesson (see
+    """Premium only - generates a full narrated lesson (see
     backend/ai_teacher.py) rather than answering one specific question."""
     user = _auth_user(authorization)
     is_admin = is_user_admin(user["id"])
@@ -869,7 +870,7 @@ def ai_teacher_lesson(body: AITeacherLessonRequest, authorization: str = Header(
     if not can_use_ai_teacher(effective_tier):
         raise HTTPException(
             status_code=403,
-            detail="The AI Teacher is a Super Premium feature. Upgrade to unlock it.",
+            detail="The AI Teacher is a Premium feature. Upgrade to unlock it.",
         )
     try:
         steps = generate_lesson(body.subject, body.topic)

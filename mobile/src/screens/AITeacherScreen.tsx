@@ -24,7 +24,7 @@ export default function AITeacherScreen({ navigation }: any) {
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
 
-  const locked = me != null && me.effective_tier !== "super_premium";
+  const locked = me != null && !me.ai_teacher_enabled;
 
   async function handleStart() {
     if (!token) return;
@@ -88,7 +88,7 @@ export default function AITeacherScreen({ navigation }: any) {
       {locked ? (
         <View style={styles.lockedBanner}>
           <Text style={styles.lockedText}>
-            AI Teacher is a Super Premium feature. Upgrade from the Home screen to unlock it.
+            AI Teacher is a Premium feature. Upgrade from the Home screen to unlock it.
           </Text>
           <Pressable style={styles.upgradeButton} onPress={() => navigation.navigate("Subscription")}>
             <Text style={styles.upgradeButtonText}>View Plans</Text>

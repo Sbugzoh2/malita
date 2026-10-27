@@ -17,7 +17,7 @@ const TILES: Tile[] = [
     key: "AITeacher",
     icon: "🧑‍🏫",
     title: "AI Teacher",
-    desc: "A narrated, live-style lesson on any topic you choose. Super Premium.",
+    desc: "A narrated, live-style lesson on any topic you choose. Premium.",
     color: "#eda100",
   },
   {
@@ -38,7 +38,7 @@ const TILES: Tile[] = [
     key: "Collab",
     icon: "🤝",
     title: "Collaboration Forum",
-    desc: "Ask a question or help another learner. Premium/Super Premium.",
+    desc: "Ask a question or help another learner. Learner & Premium.",
     color: "#1baf7a",
   },
   {

@@ -1159,14 +1159,14 @@ elif mode == "🧮 AI Tutor":
                     st.warning("Couldn't detect individual questions in this document.")
 
 # =====================================================
-# AI TEACHER (Super Premium)
+# AI TEACHER (Premium)
 # =====================================================
 elif mode == "🧑‍🏫 AI Teacher":
     st.title("🧑‍🏫 AI Teacher")
     st.caption("A narrated, live-style lesson on any Mathematics or Physical Sciences topic you choose.")
 
     if not can_use_ai_teacher(effective_tier):
-        st.warning("🧑‍🏫 AI Teacher is a Super Premium feature. Upgrade from the sidebar to unlock it.")
+        st.warning("🧑‍🏫 AI Teacher is a Premium feature. Upgrade from the sidebar to unlock it.")
     else:
         teacher_subject = st.radio(
             "Subject", ["🧮 Mathematics", "🔬 Physical Sciences"], horizontal=True, key="ai_teacher_subject"
@@ -1364,7 +1364,7 @@ elif mode == "🤝 Collaboration Forum":
     st.caption("Ask a question, help another learner, or browse what others are stuck on.")
 
     if not can_use_collab(effective_tier):
-        st.warning("🤝 Collaboration Forum is a Premium/Super Premium feature. Upgrade from the sidebar to unlock it.")
+        st.warning("🤝 Collaboration Forum is a paid-plan feature. Upgrade from the sidebar to unlock it.")
     else:
         if "collab_selected_question_id" not in st.session_state:
             st.session_state.collab_selected_question_id = None
@@ -1887,7 +1887,7 @@ else:
          "desc": "Type a question, snap or upload a photo, or upload a PDF — all solved step by step.",
          "css_class": "tile-c1", "illustration": _SVG_TUTOR},
         {"mode": "🧑‍🏫 AI Teacher", "icon": "🧑‍🏫", "title": "AI Teacher",
-         "desc": "A narrated live-style lesson on any topic you choose. Super Premium.",
+         "desc": "A narrated live-style lesson on any topic you choose. Premium.",
          "css_class": "tile-c4", "illustration": _SVG_TEACHER},
         {"mode": "📝 Practice Questions", "icon": "📝", "title": "Practice Questions",
          "desc": "Work through curated questions with hints and full solutions.",
@@ -1896,7 +1896,7 @@ else:
          "desc": "Browse and download real NSC past exam papers.",
          "css_class": "tile-c7", "illustration": _SVG_LIBRARY},
         {"mode": "🤝 Collaboration Forum", "icon": "🤝", "title": "Collaboration Forum",
-         "desc": "Ask a question or help another learner. Premium/Super Premium.",
+         "desc": "Ask a question or help another learner. Learner &amp; Premium.",
          "css_class": "tile-c3", "illustration": _SVG_COLLAB},
         {"mode": "🎯 Learner Profile", "icon": "🎯", "title": "Learner Profile",
          "desc": "Track your progress, badges, and solved-question history.",

@@ -31,8 +31,7 @@ TIER_CONFIG = {
         # except price, which is its own bug (nothing to "upgrade" to).
         "past_papers_enabled": False,
         "llm_fallback_enabled": True,
-        # Forum access starts at Premium, not Learner - see Premium below.
-        "collab_enabled": False,
+        "collab_enabled": True,
         "ai_teacher_enabled": False,
     },
     "premium": {
@@ -44,32 +43,14 @@ TIER_CONFIG = {
         "past_papers_enabled": True,
         "llm_fallback_enabled": True,
         "collab_enabled": True,
-        "ai_teacher_enabled": False,
-    },
-    "super_premium": {
-        "label": "Super Premium",
-        # Introductory price - the checkout/upgrade UI (app.py's sidebar,
-        # api_server.py's /billing/checkout-page, the mobile Subscription
-        # screen) all read this value automatically, nothing else to
-        # change for PayFast. The Google Play base plan price is set
-        # separately in Play Console and must be updated there too if
-        # this ever changes again.
-        "price_zar": 159.99,
-        "ai_tutor_daily_limit": None,
-        "ocr_enabled": True,
-        "pdf_enabled": True,
-        "past_papers_enabled": True,
-        "llm_fallback_enabled": True,
-        "collab_enabled": True,
-        # The AI Teacher: narrated, free-topic CAPS lessons - see
-        # backend/ai_teacher.py. Everything else Super Premium gets is
-        # identical to Premium (it's a strict superset), so only this one
-        # flag differs between the two tier configs above.
+        # Absorbed from the now-removed Super Premium tier - narrated,
+        # free-topic CAPS lessons (see backend/ai_teacher.py). Premium is
+        # now the top tier, a strict superset of Learner.
         "ai_teacher_enabled": True,
     },
 }
 
-TIER_ORDER = ["free", "learner", "premium", "super_premium"]
+TIER_ORDER = ["free", "learner", "premium"]
 
 # Google Play subscription product IDs - must match EXACTLY what you create
 # in Play Console under Monetize > Products > Subscriptions for each paid
@@ -81,7 +62,6 @@ TIER_ORDER = ["free", "learner", "premium", "super_premium"]
 GOOGLE_PLAY_PRODUCT_IDS = {
     "learner": "malita_learner_monthly",
     "premium": "malita_premium_monthly",
-    "super_premium": "malita_super_premium_monthly",
 }
 GOOGLE_PLAY_TIER_BY_PRODUCT_ID = {v: k for k, v in GOOGLE_PLAY_PRODUCT_IDS.items()}
 

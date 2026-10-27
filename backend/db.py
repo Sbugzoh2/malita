@@ -31,7 +31,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 Base = declarative_base()
 
-TIERS = ("free", "learner", "premium", "super_premium")
+TIERS = ("free", "learner", "premium")
 
 SA_PROVINCES = (
     "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
@@ -322,6 +322,28 @@ def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
         conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_type}")
 
 
+def _migrate_removed_tier(old_tier: str, new_tier: str) -> None:
+    """One-time data fix for when a tier is removed/merged into another -
+    e.g. Super Premium was merged into Premium. Without this, any learner
+    whose stored tier/pending_tier is still the old (now-nonexistent) tier
+    string would crash TIER_CONFIG[effective_tier] lookups elsewhere. Safe
+    to call every startup since it's a no-op once no rows match."""
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    if "subscriptions" not in inspector.get_table_names():
+        return
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE subscriptions SET tier = :new WHERE tier = :old"),
+            {"old": old_tier, "new": new_tier},
+        )
+        conn.execute(
+            text("UPDATE subscriptions SET pending_tier = :new WHERE pending_tier = :old"),
+            {"old": old_tier, "new": new_tier},
+        )
+
+
 def init_db():
     Base.metadata.create_all(engine)
     _ensure_column("collab_answers", "parent_id", "INTEGER")
@@ -331,6 +353,7 @@ def init_db():
     _ensure_column("subscriptions", "google_purchase_token", "VARCHAR(500)")
     _ensure_column("subscriptions", "google_product_id", "VARCHAR(100)")
     _ensure_column("subscriptions", "pending_tier", "VARCHAR(20)")
+    _migrate_removed_tier("super_premium", "premium")
 
 
 @contextmanager

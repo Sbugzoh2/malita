@@ -65,6 +65,7 @@ export type MeResponse = {
   tier_label: string;
   daily_limit: number | null;
   used_today: number;
+  ai_teacher_enabled: boolean;
   payment_provider: "payfast" | "play_billing" | null;
   pending_tier: string | null;
   pending_tier_label: string | null;

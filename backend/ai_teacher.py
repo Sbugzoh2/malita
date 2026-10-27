@@ -1,6 +1,6 @@
 """
 Malita (Pty) Ltd — AI Teacher: live-style narrated lessons for the
-Super Premium tier.
+Premium tier.
 
 Distinct from backend/llm_tutor.py's AI Tutor fallback (which answers one
 specific question a learner already has) - this generates a full

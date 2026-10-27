@@ -16,15 +16,22 @@ import { colors } from "../theme";
 import {
   ApiError,
   fetchTiers,
-  checkoutPageUrl,
   cancelSubscription,
   scheduleDowngrade,
   fetchGooglePlayProducts,
   verifyGooglePlayPurchase,
-  logGooglePlayChoice,
   TierInfo,
   API_BASE_URL,
 } from "../api/client";
+
+// New subscriptions on mobile go through Google Play only - PayFast's
+// hosted checkout proved too unreliable in the native app's external-
+// browser flow (see the deep-link bridge-page saga in git history). The
+// web app (malita-maths.streamlit.app) still offers PayFast; existing
+// learners who already subscribed via PayFast through this app keep
+// working as before (cancel/downgrade still understand that provider),
+// this only removes PayFast as an option for NEW purchases here.
+const WEB_APP_URL = "https://malita-maths.streamlit.app";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -75,20 +82,16 @@ export default function SubscriptionScreen() {
       fetchGooglePlayProducts(token)
         .then((res) => setGoogleProducts(res.products))
         .catch(() => {
-          // Non-fatal - learners can still subscribe via PayFast.
+          // Non-fatal - the fallback "Subscribe via the Malita website"
+          // link below still works if this fails to load.
         });
     }
   }, [token]);
 
-  // Google Play purchase handling (Android only). enableBillingProgramAndroid
-  // is set to "user-choice-billing" so that once Google approves Malita's
-  // User Choice Billing enrollment, the Play Billing dialog automatically
-  // starts showing Google's own PayFast-vs-Play-Billing choice screen with
-  // no further app changes - until that approval lands, Play Billing just
-  // behaves like a normal purchase.
+  // Google Play purchase handling (Android only) - the only way to buy a
+  // new subscription on mobile now (see the WEB_APP_URL note above).
   const iap = isAndroid
     ? useIAP({
-        enableBillingProgramAndroid: "user-choice-billing",
         onPurchaseSuccess: async (purchase: any) => {
           if (!token) return;
           try {
@@ -127,24 +130,6 @@ export default function SubscriptionScreen() {
             setError("Google Play purchase failed. Please try again.");
           }
         },
-        onUserChoiceBillingAndroid: async (details: { externalTransactionToken: string; products: string[] }) => {
-          // The learner picked the alternative billing option (PayFast) in
-          // Google's own choice screen. Google's dialog only records that
-          // choice - it doesn't process the alternative payment - so we log
-          // it (see GooglePlayChoiceEvent) and send them into the existing
-          // PayFast checkout for whichever plan they were buying.
-          setBusyTier(null);
-          if (token) {
-            logGooglePlayChoice(token, details.externalTransactionToken, details.products).catch(() => {});
-          }
-          const productId = details.products[0];
-          const tierKey = googleProducts
-            ? Object.keys(googleProducts).find((k) => googleProducts[k] === productId)
-            : null;
-          if (token && tierKey) {
-            Linking.openURL(checkoutPageUrl(token, tierKey));
-          }
-        },
       })
     : null;
 
@@ -154,19 +139,6 @@ export default function SubscriptionScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAndroid && iap?.connected, googleProducts]);
-
-  async function upgradeWithPayfast(tierKey: string) {
-    if (!token) return;
-    setError(null);
-    setBusyTier(tierKey);
-    try {
-      await Linking.openURL(checkoutPageUrl(token, tierKey));
-    } catch (e) {
-      setError("Could not start checkout. Please try again.");
-    } finally {
-      setBusyTier(null);
-    }
-  }
 
   async function upgradeWithGooglePlay(tierKey: string) {
     if (!token || !googleProducts || !iap) return;
@@ -409,29 +381,27 @@ export default function SubscriptionScreen() {
                       <Text style={styles.downgradeButtonText}>Downgrade to {t.label}</Text>
                     </Pressable>
                   )
+                ) : hasGooglePlan ? (
+                  <Pressable
+                    style={[styles.upgradeButton, busyTier === t.key && styles.buttonDisabled]}
+                    onPress={() => upgradeWithGooglePlay(t.key)}
+                    disabled={busyTier === t.key}
+                  >
+                    {busyTier === t.key ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.upgradeButtonText}>Upgrade to {t.label}</Text>
+                    )}
+                  </Pressable>
                 ) : (
-                  <View style={styles.upgradeButtonGroup}>
-                    <Pressable
-                      style={[styles.upgradeButton, busyTier === t.key && styles.buttonDisabled]}
-                      onPress={() => upgradeWithPayfast(t.key)}
-                      disabled={busyTier === t.key}
-                    >
-                      {busyTier === t.key ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={styles.upgradeButtonText}>Pay with PayFast</Text>
-                      )}
-                    </Pressable>
-                    {hasGooglePlan ? (
-                      <Pressable
-                        style={[styles.upgradeButtonSecondary, busyTier === t.key && styles.buttonDisabled]}
-                        onPress={() => upgradeWithGooglePlay(t.key)}
-                        disabled={busyTier === t.key}
-                      >
-                        <Text style={styles.upgradeButtonSecondaryText}>Pay with Google Play</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
+                  <Pressable
+                    style={styles.upgradeButtonSecondary}
+                    onPress={() => Linking.openURL(WEB_APP_URL)}
+                  >
+                    <Text style={styles.upgradeButtonSecondaryText}>
+                      {isAndroid ? "Loading Google Play…" : "Subscribe via the Malita website"}
+                    </Text>
+                  </Pressable>
                 )}
               </View>
             );
@@ -478,12 +448,12 @@ const styles = StyleSheet.create({
   planName: { fontSize: 18, fontWeight: "700", color: colors.text },
   planPrice: { fontSize: 15, fontWeight: "600", color: colors.primary },
   planFeature: { fontSize: 13, color: colors.textSecondary, marginTop: 6 },
-  upgradeButtonGroup: { marginTop: 14, gap: 10 },
   upgradeButton: {
     backgroundColor: colors.primary,
     borderRadius: 999,
     paddingVertical: 12,
     alignItems: "center",
+    marginTop: 14,
   },
   upgradeButtonSecondary: {
     borderRadius: 999,
@@ -491,6 +461,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: colors.primary,
+    marginTop: 14,
   },
   upgradeButtonSecondaryText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   buttonDisabled: { opacity: 0.6 },

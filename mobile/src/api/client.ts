@@ -202,15 +202,6 @@ export function fetchTiers() {
   return request<{ tiers: TierInfo[] }>("/billing/tiers");
 }
 
-// PayFast's live environment rejects a plain GET link (only sandbox
-// tolerates that) - it requires a real form POST, which a phone browser
-// can only do by loading a page that submits one on load. This URL points
-// at that page (api_server.py's /billing/checkout-page) instead of at
-// PayFast directly.
-export function checkoutPageUrl(token: string, tier: string) {
-  return `${API_BASE_URL}/billing/checkout-page?tier=${encodeURIComponent(tier)}&token=${encodeURIComponent(token)}`;
-}
-
 export function cancelSubscription(token: string) {
   return request<{ had_subscription: boolean; provider: "payfast" | "play_billing" | null; payfast_notified: boolean | null }>(
     "/billing/cancel",
@@ -244,20 +235,6 @@ export function scheduleDowngrade(token: string, tier: string) {
     "/billing/downgrade",
     { method: "POST", body: { tier }, token }
   );
-}
-
-// Best-effort log of a Google User Choice Billing selection (the learner
-// picked the alternative - PayFast - in Google's own choice screen).
-// Google requires this reported to their API within 24 hours once the app
-// is actually approved/enrolled for the program; until then this just
-// records it so nothing is lost. See api_server.py's
-// /billing/google/choice and backend/db.py's GooglePlayChoiceEvent.
-export function logGooglePlayChoice(token: string, externalTransactionToken: string, productIds: string[]) {
-  return request<{ ok: boolean }>("/billing/google/choice", {
-    method: "POST",
-    body: { external_transaction_token: externalTransactionToken, product_ids: productIds },
-    token,
-  });
 }
 
 export type PracticeSolutionStep = { explain: string; latex: string };

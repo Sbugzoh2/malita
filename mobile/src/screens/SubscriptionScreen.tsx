@@ -20,6 +20,7 @@ import {
   scheduleDowngrade,
   fetchGooglePlayProducts,
   verifyGooglePlayPurchase,
+  deleteAccount,
   TierInfo,
   API_BASE_URL,
 } from "../api/client";
@@ -51,7 +52,8 @@ const isAndroid = Platform.OS === "android";
 const { useIAP } = isAndroid ? require("expo-iap") : { useIAP: null };
 
 export default function SubscriptionScreen() {
-  const { token, me, refreshMe } = useAuth();
+  const { token, me, refreshMe, logout } = useAuth();
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [tiers, setTiers] = useState<TierInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyTier, setBusyTier] = useState<string | null>(null);
@@ -266,6 +268,41 @@ export default function SubscriptionScreen() {
     }
   }
 
+  async function runDeleteAccount() {
+    if (!token) return;
+    setDeletingAccount(true);
+    setError(null);
+    try {
+      const res = await deleteAccount(token);
+      if (res.had_active_subscription && res.provider === "play_billing") {
+        Alert.alert(
+          "One more step in Google Play",
+          "Your Malita account has been deleted, but Google requires subscriptions to be cancelled from the Play Store app (Subscriptions) separately - please cancel it there too so Google Play stops billing you."
+        );
+      } else if (res.provider === "payfast" && res.payfast_notified === false) {
+        Alert.alert(
+          "Account deleted, but please double check",
+          "Your Malita account has been deleted, but we couldn't confirm the cancellation with PayFast automatically. Please also check your PayFast dashboard to make sure the recurring payment is stopped."
+        );
+      }
+      await logout();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not delete your account. Please try again.");
+      setDeletingAccount(false);
+    }
+  }
+
+  function handleDeleteAccount() {
+    Alert.alert(
+      "Delete your account?",
+      "This permanently deletes your Malita account and all associated data - your profile, subscription, study history, and Collaboration Forum posts. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete my account", style: "destructive", onPress: runDeleteAccount },
+      ]
+    );
+  }
+
   const currentTier = me?.effective_tier ?? "free";
   const currentProvider = me?.payment_provider;
   // tiers (from /billing/tiers) comes back in TIER_ORDER already - used to
@@ -420,6 +457,21 @@ export default function SubscriptionScreen() {
         </Text>
         , including the Refund and Cancellation Policy.
       </Text>
+
+      <View style={styles.deleteAccountSection}>
+        <Text style={styles.deleteAccountTitle}>Account</Text>
+        <Pressable
+          style={styles.deleteAccountButton}
+          onPress={handleDeleteAccount}
+          disabled={deletingAccount}
+        >
+          {deletingAccount ? (
+            <ActivityIndicator color={colors.error} />
+          ) : (
+            <Text style={styles.deleteAccountButtonText}>Delete My Account</Text>
+          )}
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
@@ -497,4 +549,13 @@ const styles = StyleSheet.create({
   paymentNote: { fontSize: 12, color: colors.textSecondary, marginTop: 20, fontStyle: "italic" },
   legalNote: { fontSize: 12, color: colors.textSecondary, marginTop: 10, lineHeight: 17 },
   legalLink: { color: colors.primary, fontWeight: "600" },
+  deleteAccountSection: {
+    marginTop: 32,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  deleteAccountTitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 8 },
+  deleteAccountButton: { alignSelf: "flex-start" },
+  deleteAccountButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
 });

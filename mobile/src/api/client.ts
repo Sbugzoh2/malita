@@ -238,6 +238,13 @@ export function scheduleDowngrade(token: string, tier: string) {
   );
 }
 
+export function deleteAccount(token: string) {
+  return request<{ deleted: boolean; had_active_subscription: boolean; provider?: string | null; payfast_notified?: boolean | null }>(
+    "/account",
+    { method: "DELETE", token }
+  );
+}
+
 export type PracticeSolutionStep = { explain: string; latex: string };
 
 export type PracticeQuestion = {

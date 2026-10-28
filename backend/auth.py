@@ -231,6 +231,36 @@ def cancel_subscription(user_id: int) -> dict:
         return {"had_subscription": True, "provider": "payfast", "payfast_notified": payfast_notified}
 
 
+def delete_account(user_id: int) -> dict:
+    """Permanently delete a learner's account and all associated data, for
+    the in-app "Delete My Account" flow (Play Store account-deletion
+    requirement). Best-effort cancels any active PayFast recurring billing
+    first, same as cancel_subscription - Play-billed subscriptions can't be
+    cancelled on the user's behalf via the API, so for those we only warn
+    the caller to point the learner at the Play Store Subscriptions screen.
+    Deleting the User row cascades to Subscription, UsageLog,
+    SolvedQuestion, PasswordReset, ApiToken, and LoginEvent via the
+    relationships already defined on the User model (cascade="all,
+    delete-orphan"). Forum content (CollabQuestion/CollabAnswer/
+    CollabReport) is left in place, attributed to the now-deleted user id,
+    matching how most forums handle a departed member's posts rather than
+    silently breaking other learners' threads that reference them.
+    Returns a dict the caller uses to tell the learner what happened."""
+    with get_session() as db:
+        user = db.query(User).get(user_id)
+        if not user:
+            raise AuthError("Account not found.")
+
+        sub = user.subscription
+        provider = sub.payment_provider if sub and sub.status == "active" else None
+        payfast_notified = None
+        if sub and sub.status == "active" and sub.payment_provider == "payfast":
+            payfast_notified = cancel_payfast_subscription(sub.payfast_token)
+
+        db.delete(user)
+        return {"deleted": True, "had_active_subscription": provider is not None, "provider": provider, "payfast_notified": payfast_notified}
+
+
 def schedule_downgrade(user_id: int, new_tier: str) -> dict:
     """Move to a LOWER tier at the end of the currently-paid period,
     rather than immediately - the learner keeps their current tier's

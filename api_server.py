@@ -46,7 +46,7 @@ from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
-    schedule_downgrade,
+    schedule_downgrade, delete_account,
 )
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher, GOOGLE_PLAY_PRODUCT_IDS, GOOGLE_PLAY_TIER_BY_PRODUCT_ID
@@ -544,6 +544,20 @@ def billing_return(status: str = "upgraded"):
 def billing_cancel(authorization: str = Header(None)):
     user = _auth_user(authorization)
     result = cancel_subscription(user["id"])
+    return result
+
+
+@app.delete("/account")
+def delete_my_account(authorization: str = Header(None)):
+    """Play Store account-deletion requirement: lets a logged-in learner
+    permanently delete their own account and all associated data from
+    inside the app, without needing to email support. See
+    backend.auth.delete_account for exactly what is and isn't removed."""
+    user = _auth_user(authorization)
+    try:
+        result = delete_account(user["id"])
+    except AuthError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     return result
 
 

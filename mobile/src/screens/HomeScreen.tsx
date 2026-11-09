@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet, ScrollView, Image } from "react-nati
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 
-type Tile = { key: string; icon: string; title: string; desc: string; color: string; disabled?: boolean };
+type Tile = { key: string; icon: string; title: string; desc: string; tierNote?: string; color: string; disabled?: boolean };
 
 const TILES: Tile[] = [
   {
@@ -17,7 +17,8 @@ const TILES: Tile[] = [
     key: "AITeacher",
     icon: "🧑‍🏫",
     title: "AI Teacher",
-    desc: "A narrated, live-style lesson on any topic you choose. Premium.",
+    desc: "A narrated, live-style lesson on any topic you choose.",
+    tierNote: "Premium.",
     color: "#eda100",
   },
   {
@@ -31,14 +32,16 @@ const TILES: Tile[] = [
     key: "PastPapersLibrary",
     icon: "🗂️",
     title: "Past Papers Library",
-    desc: "Browse curated past exam papers by year and subject. Premium.",
+    desc: "Browse curated past exam papers by year and subject.",
+    tierNote: "Premium.",
     color: "#4a3aa7",
   },
   {
     key: "Collab",
     icon: "🤝",
     title: "Collaboration Forum",
-    desc: "Ask a question or help another learner. Learner & Premium.",
+    desc: "Ask a question or help another learner.",
+    tierNote: "Learner & Premium.",
     color: "#1baf7a",
   },
   {
@@ -93,7 +96,10 @@ export default function HomeScreen({ navigation }: any) {
             </View>
             <View style={styles.tileTextCol}>
               <Text style={styles.tileTitle}>{tile.title}</Text>
-              <Text style={styles.tileDesc}>{tile.desc}</Text>
+              <Text style={styles.tileDesc}>
+                {tile.desc}
+                {tile.tierNote ? <Text style={styles.tileTierNote}> {tile.tierNote}</Text> : null}
+              </Text>
             </View>
             <Text style={styles.tileChevron}>›</Text>
           </Pressable>
@@ -162,14 +168,19 @@ const styles = StyleSheet.create({
   tileTextCol: { flex: 1 },
   tileTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 2 },
   tileDesc: { fontSize: 12, color: colors.textSecondary },
+  tileTierNote: { color: colors.success, fontWeight: "700" },
   tileChevron: { fontSize: 22, color: colors.border, fontWeight: "700", marginLeft: 6 },
   logoutButton: {
-    marginTop: 12,
+    // Generous top/bottom margins so this sits well clear of the device's
+    // own bottom nav bar/gesture area - too close caused accidental
+    // system back/home taps instead of logging out (reported by a tester).
+    marginTop: 24,
+    marginBottom: 24,
     alignSelf: "center",
     backgroundColor: colors.primary,
     borderRadius: 999,
-    paddingVertical: 12,
-    paddingHorizontal: 28,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
   },
   logoutText: { color: "#fff", fontWeight: "700" },
 });

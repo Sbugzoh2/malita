@@ -9,6 +9,7 @@ export const colors = {
   primary: "#2a78d6",
   primaryDark: "#184f95",
   error: "#e34948",
+  success: "#1baf7a",
 };
 
 export const topicColors: Record<string, string> = {

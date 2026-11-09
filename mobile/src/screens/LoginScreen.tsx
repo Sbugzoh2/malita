@@ -18,6 +18,7 @@ export default function LoginScreen({ navigation }: any) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -117,13 +118,18 @@ export default function LoginScreen({ navigation }: any) {
           />
 
           <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            placeholder="••••••••"
-          />
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={[styles.input, styles.passwordInput]}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              placeholder="••••••••"
+            />
+            <Pressable onPress={() => setShowPassword((s) => !s)} style={styles.showPasswordButton}>
+              <Text style={styles.showPasswordText}>{showPassword ? "Hide" : "Show"}</Text>
+            </Pressable>
+          </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {info ? <Text style={styles.info}>{info}</Text> : null}
@@ -228,6 +234,10 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: "#fff",
   },
+  passwordRow: { flexDirection: "row", alignItems: "center" },
+  passwordInput: { flex: 1 },
+  showPasswordButton: { marginLeft: 10, paddingHorizontal: 4, paddingVertical: 10 },
+  showPasswordText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
   button: {
     backgroundColor: colors.primary,
     borderRadius: 999,

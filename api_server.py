@@ -277,6 +277,22 @@ class TutorLoginRequest(BaseModel):
     password: str
 
 
+def _parse_iso_datetime(value: str) -> dt.datetime:
+    """Parse an ISO 8601 string from the mobile app (which sends a
+    trailing 'Z', e.g. via JS Date.toISOString()) into a NAIVE UTC
+    datetime - matching every other datetime in this codebase (DB columns,
+    dt.datetime.utcnow() comparisons). On Python 3.11+, fromisoformat()
+    parses 'Z' into an AWARE datetime; comparing that against a naive one
+    (e.g. scheduled_at <= dt.datetime.utcnow() in backend/tutoring.py)
+    raises TypeError, which isn't a TutoringError and so isn't caught by
+    our normal error handling - it surfaces as a generic 500 to the app.
+    Stripping tzinfo here, once, keeps every caller naive-safe."""
+    parsed = dt.datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def _auth_user(authorization: str | None):
     """FastAPI dependency-style helper: parse 'Bearer <token>' and resolve
     it to a user dict, or raise 401. Not using FastAPI's OAuth2 machinery
@@ -1169,7 +1185,7 @@ def tutor_propose_time(request_id: int, payload: TutorProposeTimeRequest, author
     learner's exact requested time (see propose_new_time)."""
     tutor = _auth_tutor(authorization)
     try:
-        proposed_at = dt.datetime.fromisoformat(payload.proposed_scheduled_at)
+        proposed_at = _parse_iso_datetime(payload.proposed_scheduled_at)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date/time format.")
     try:
@@ -1272,7 +1288,7 @@ def tutoring_create_request(payload: TutoringRequestRequest, authorization: str 
     including Free, since tutoring is billed separately."""
     user = _auth_user(authorization)
     try:
-        scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at)
+        scheduled_at = _parse_iso_datetime(payload.scheduled_at)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date/time format.")
     try:
@@ -1428,7 +1444,7 @@ def admin_tutoring_match(request_id: int, payload: TutorMatchRequest, authorizat
     scheduled_at = None
     if payload.scheduled_at:
         try:
-            scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at)
+            scheduled_at = _parse_iso_datetime(payload.scheduled_at)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid scheduled date/time format.")
     try:

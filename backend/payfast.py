@@ -9,16 +9,20 @@ Two directions of traffic:
      data with PayFast's own servers before trusting it (PayFast's own
      recommended security process — never trust an ITN on signature alone).
 
-IMPORTANT — VERIFY BEFORE GOING LIVE:
-PayFast's own documentation has, at different times, described the outgoing
-signature field order as either a fixed field order or alphabetical, and
-this has caused real production signature-mismatch bugs for other
-developers. Before accepting real payments:
-  1. Log into your PayFast dashboard -> Sandbox -> use their built-in
+IMPORTANT — the signature field order:
+PayFast's own reference PHP SDK does not sort/reorder fields at all when
+signing a checkout — it signs whatever order the caller's own data
+dict/array is in. The rule that actually matters is: generate_signature()
+must be called on the data dict in the EXACT same field order it will
+later be physically submitted in the POST body (build_checkout_payload
+below only ever adds the 'signature' key AFTER signing, so this holds as
+long as nothing reorders `data` in between). Before accepting real
+payments:
+  1. Do a full sandbox test purchase end-to-end (see README).
+  2. Log into your PayFast dashboard -> Sandbox -> use their built-in
      "signature tool" to generate a signature from a sample parameter set,
-     and compare it to what generate_signature() below produces.
-  2. Do a full sandbox test purchase end-to-end (see README) before
-     switching PASSPHRASE/merchant IDs to live/production values.
+     and compare it to what generate_signature() below produces for the
+     identical input, as a final sanity check.
 """
 
 import os
@@ -41,20 +45,6 @@ PAYFAST_HOST = "sandbox.payfast.co.za" if PAYFAST_SANDBOX else "www.payfast.co.z
 PAYFAST_PROCESS_URL = f"https://{PAYFAST_HOST}/eng/process"
 PAYFAST_VALIDATE_URL = f"https://{PAYFAST_HOST}/eng/query/validate"
 
-# Fixed field order matching PayFast's documented parameter definition order.
-# We build the checkout data dict in this exact order so the signature
-# string is deterministic and matches what PayFast expects to verify.
-CHECKOUT_FIELD_ORDER = [
-    "merchant_id", "merchant_key", "return_url", "cancel_url", "notify_url",
-    "name_first", "name_last", "email_address", "cell_number",
-    "m_payment_id", "amount", "item_name", "item_description",
-    "custom_int1", "custom_int2", "custom_int3", "custom_int4", "custom_int5",
-    "custom_str1", "custom_str2", "custom_str3", "custom_str4", "custom_str5",
-    "email_confirmation", "confirmation_address",
-    "payment_method",
-    "subscription_type", "billing_date", "recurring_amount", "frequency", "cycles",
-]
-
 
 def _payfast_urlencode(value: str) -> str:
     # PayFast expects '+' for spaces (classic application/x-www-form-urlencoded),
@@ -63,20 +53,21 @@ def _payfast_urlencode(value: str) -> str:
 
 
 def generate_signature(data: dict, passphrase: str = "") -> str:
-    """Build the '&'-joined, url-encoded parameter string in PayFast's
-    documented field order (skipping empty values), optionally append the
-    passphrase, MD5 hash it, and return the lowercase hex digest."""
-    ordered = OrderedDict()
-    for key in CHECKOUT_FIELD_ORDER:
-        if key in data and data[key] not in (None, ""):
-            ordered[key] = data[key]
-    # include any keys not in our known list too (forward-compatible)
-    for key, value in data.items():
-        if key not in ordered and value not in (None, ""):
-            ordered[key] = value
+    """Build the '&'-joined, url-encoded parameter string (skipping empty
+    values), optionally append the passphrase, MD5 hash it, and return the
+    lowercase hex digest.
 
+    PayFast does NOT verify against a fixed documented field order — their
+    own reference PHP SDK (Auth::generateSignature) signs whatever order the
+    caller's own data array happens to be in, with no sort/reorder step.
+    What actually matters is that this string's field order EXACTLY matches
+    the order the same fields are physically submitted in the POST body
+    (build_checkout_payload below relies on `data` being passed in here
+    unmodified, before the 'signature' key is added, and then posted as-is) —
+    sign in one order and submit in another and PayFast recomputes a
+    different signature and rejects the transaction."""
     param_string = "&".join(
-        f"{k}={_payfast_urlencode(v)}" for k, v in ordered.items()
+        f"{k}={_payfast_urlencode(v)}" for k, v in data.items() if v not in (None, "")
     )
     if passphrase:
         param_string += f"&passphrase={_payfast_urlencode(passphrase)}"

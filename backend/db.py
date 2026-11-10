@@ -345,6 +345,14 @@ class TutorAccount(Base):
     # the applicant didn't attach anything. See backend/storage.py.
     id_document_path = Column(String, nullable=True)
     matric_certificate_path = Column(String, nullable=True)
+    # A one-page CV, same optional-upload-with-free-text-fallback pattern
+    # as the ID/matric certificate fields above.
+    cv_note = Column(String, nullable=True)
+    cv_document_path = Column(String, nullable=True)
+    # Free text (e.g. "Weekdays after 16:00, Saturday mornings") - no
+    # structured day/time picker in v1, since matching is already a manual
+    # admin step (see backend/tutoring.py) where an admin reads this by eye.
+    availability_note = Column(String, nullable=True)
     bank_account_note = Column(String, nullable=True)
     bio = Column(String, nullable=True)
     # pending_review | approved | rejected | suspended
@@ -381,12 +389,22 @@ class TutorSubject(Base):
 class TutoringSessionRequest(Base):
     """A learner's request for a paid 1-on-1 tutoring session - billed
     separately from the subscription, so available regardless of tier.
-    v1 matching is manual (an admin picks a tutor and sets the price/time)
-    rather than an automated marketplace algorithm - see backend/tutoring.py.
 
-    status flow: requested -> matched -> awaiting_payment -> confirmed
-    (the learner's payment cleared) -> completed, or cancelled at any point
-    before confirmed."""
+    v2 matching is inDrive-style self-service: the LEARNER sets the price
+    (and duration) when requesting, and ANY approved tutor who teaches
+    that subject can accept it at that price - no admin has to pick a
+    tutor or set a price first (an admin can still force-assign one as a
+    manual override - see backend/tutoring.py's match_tutor_to_request -
+    but that's no longer the primary path).
+
+    status flow: requested (open, priced by the learner, visible to
+    qualifying tutors) -> accepted (a tutor took it) -> awaiting_payment
+    -> confirmed (the learner's payment cleared) -> completed (BOTH the
+    learner and the tutor have independently confirmed the session
+    actually happened and rated each other - see learner_confirmed_at/
+    tutor_confirmed_at below; this is also when the payout row is
+    created, not at payment time, so a no-show can't collect a payout),
+    or cancelled at any point before confirmed."""
     __tablename__ = "tutoring_session_requests"
 
     id = Column(Integer, primary_key=True)
@@ -396,19 +414,41 @@ class TutoringSessionRequest(Base):
     preferred_times_note = Column(String, nullable=True)
     status = Column(String(20), default="requested", nullable=False)
     tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=True)
+    # Set by the LEARNER at request time (not by an admin at match time,
+    # as in v1) - this is the price a tutor accepts or doesn't.
     duration_minutes = Column(Integer, nullable=True)
     price_zar = Column(Float, nullable=True)
-    # Snapshot of the platform's cut % at match time, so a later change to
-    # the global rate never retroactively changes an already-matched session.
+    # Snapshot of the platform's cut % at accept time, so a later change
+    # to the global rate never retroactively changes an already-accepted
+    # session's payout split.
     platform_cut_percent = Column(Float, nullable=True)
     m_payment_id = Column(String(64), nullable=True, unique=True)
     scheduled_at = Column(DateTime, nullable=True)
+    # The Google Meet link + Calendar event id generated once a tutor
+    # accepts (see backend/google_calendar.py) - both nullable since Meet
+    # creation can fail/not be configured yet, and the session itself
+    # must never be blocked on that.
+    meet_link = Column(String, nullable=True)
+    calendar_event_id = Column(String, nullable=True)
     admin_notes = Column(String, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
+    # Set the moment a tutor_id is assigned, whether via self-accept or
+    # an admin's manual override - kept as "matched_at" rather than
+    # renamed to "accepted_at" to avoid a DB column rename migration.
     matched_at = Column(DateTime, nullable=True)
     paid_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     cancelled_at = Column(DateTime, nullable=True)
+    # Each side confirms independently that the session actually took
+    # place and rates the other - completed_at/the payout only happen
+    # once BOTH are set (see confirm_session_by_learner/
+    # confirm_session_by_tutor in backend/tutoring.py).
+    learner_confirmed_at = Column(DateTime, nullable=True)
+    learner_rating = Column(Integer, nullable=True)  # 1-5, the learner's rating OF the tutor
+    learner_rating_comment = Column(String, nullable=True)
+    tutor_confirmed_at = Column(DateTime, nullable=True)
+    tutor_rating = Column(Integer, nullable=True)  # 1-5, the tutor's rating OF the learner
+    tutor_rating_comment = Column(String, nullable=True)
 
     learner = relationship("User")
     tutor = relationship("TutorAccount", back_populates="sessions")
@@ -435,6 +475,37 @@ class TutoringPayout(Base):
     paid_at = Column(DateTime, nullable=True)
 
     session = relationship("TutoringSessionRequest", back_populates="payout")
+
+
+class TutorApiToken(Base):
+    """Bearer tokens for a tutor's own login to the native app - mirrors
+    ApiToken, but scoped to tutor_accounts rather than users, since a
+    tutor is a different kind of actor from a learner with an entirely
+    separate login (see TutorAccount), not another row in the same users
+    table."""
+    __tablename__ = "tutor_api_tokens"
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=False)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+
+class GoogleCalendarCredentials(Base):
+    """A single stored OAuth refresh token for the ONE Google account that
+    "owns" every session's Calendar event/Meet link (see
+    backend/google_calendar.py) - not per-tutor, not per-learner, just one
+    row for the whole platform. One-time human consent (see
+    /admin/google-calendar/connect) mints this; everything after that is
+    silent server-side token refresh."""
+    __tablename__ = "google_calendar_credentials"
+
+    id = Column(Integer, primary_key=True)
+    account_email = Column(String(255), nullable=True)
+    refresh_token = Column(String, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
 
 def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
@@ -494,6 +565,17 @@ def init_db():
     _ensure_column("tutor_accounts", "matric_certificate_note", "VARCHAR")
     _ensure_column("tutor_accounts", "id_document_path", "VARCHAR")
     _ensure_column("tutor_accounts", "matric_certificate_path", "VARCHAR")
+    _ensure_column("tutor_accounts", "cv_note", "VARCHAR")
+    _ensure_column("tutor_accounts", "cv_document_path", "VARCHAR")
+    _ensure_column("tutor_accounts", "availability_note", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "meet_link", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "calendar_event_id", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "learner_confirmed_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "learner_rating", "INTEGER")
+    _ensure_column("tutoring_session_requests", "learner_rating_comment", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "tutor_confirmed_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "tutor_rating", "INTEGER")
+    _ensure_column("tutoring_session_requests", "tutor_rating_comment", "VARCHAR")
     _migrate_removed_tier("super_premium", "premium")
 
 

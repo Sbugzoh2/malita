@@ -246,14 +246,15 @@ export function deleteAccount(token: string) {
 }
 
 // 1-on-1 tutoring, billed separately from the subscription - available
-// regardless of tier. v1 matching/payouts are manual (an admin matches a
-// tutor and sets the price) - see backend/tutoring.py.
+// regardless of tier. inDrive-style self-service matching: the LEARNER
+// sets the price/duration when requesting, and any qualifying tutor can
+// accept it - see backend/tutoring.py.
 export type TutoringRequest = {
   id: number;
   subject: string;
   topic: string | null;
   preferred_times_note: string | null;
-  status: "requested" | "matched" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
+  status: "requested" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
   status_label: string;
   tutor_id: number | null;
   tutor_name: string | null;
@@ -263,19 +264,42 @@ export type TutoringRequest = {
   created_at: string | null;
   matched_at: string | null;
   paid_at: string | null;
+  meet_link: string | null;
+  learner_confirmed: boolean;
+  learner_rating: number | null;
+  tutor_confirmed: boolean;
+  tutor_rating: number | null;
 };
 
 export function requestTutoringSession(
   token: string,
-  params: { subject: string; topic?: string; preferred_times_note?: string }
+  params: {
+    subject: string;
+    price_zar: number;
+    duration_minutes?: number;
+    topic?: string;
+    preferred_times_note?: string;
+  }
 ) {
   return request<{ id: number; status: string }>("/tutoring/requests", {
     method: "POST",
     body: {
       subject: params.subject,
+      price_zar: params.price_zar,
+      duration_minutes: params.duration_minutes ?? 60,
       topic: params.topic ?? "",
       preferred_times_note: params.preferred_times_note ?? "",
     },
+    token,
+  });
+}
+
+export function confirmTutoringSessionAsLearner(
+  token: string, requestId: number, rating: number, comment?: string
+) {
+  return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}/confirm`, {
+    method: "POST",
+    body: { rating, comment: comment ?? "" },
     token,
   });
 }
@@ -288,6 +312,76 @@ export function fetchMyTutoringRequests(token: string) {
 // as pastPaperDownloadUrl) the token rides along as a query param instead.
 export function tutoringCheckoutUrl(token: string, requestId: number) {
   return `${API_BASE_URL}/tutoring/requests/${requestId}/checkout-page?token=${encodeURIComponent(token)}`;
+}
+
+// --- Tutor self-service (a tutor's OWN login, entirely separate from a
+// learner's /auth/* account - see backend/tutoring.py's login_tutor) ---
+
+export type TutorMe = {
+  id: number;
+  name: string;
+  email: string;
+  status: TutorApplication["status"];
+  status_label: string;
+};
+
+export function tutorLogin(email: string, password: string) {
+  return request<{ token: string; tutor: TutorMe }>("/tutor/login", {
+    method: "POST",
+    body: { email, password },
+  });
+}
+
+export function tutorLogout(token: string) {
+  return request<{ ok: boolean }>("/tutor/logout", { method: "POST", token });
+}
+
+export function fetchTutorMe(token: string) {
+  return request<TutorMe>("/tutor/me", { token });
+}
+
+// Returns the same shape as the admin's TutorProfile (see below) - the
+// tutor_id is derived from the bearer token server-side, so a tutor can
+// only ever see their own record this way.
+export function fetchTutorMyProfile(token: string) {
+  return request<TutorProfile>("/tutor/me/profile", { token });
+}
+
+export type TutorPayout = {
+  id: number;
+  session_id: number;
+  amount_zar: number;
+  status: "pending" | "paid";
+  payment_reference: string | null;
+  created_at: string | null;
+  paid_at: string | null;
+};
+
+export function fetchTutorMyPayouts(token: string) {
+  return request<{ payouts: TutorPayout[] }>("/tutor/me/payouts", { token });
+}
+
+// A tutor's own "open requests" queue - only requests for subjects
+// they're approved and active to teach - and the self-accept action.
+export function fetchTutorOpenRequests(token: string) {
+  return request<{ requests: TutoringRequest[] }>("/tutor/requests/open", { token });
+}
+
+export function acceptTutoringRequest(token: string, requestId: number, scheduledAt?: string | null) {
+  return request<{ id: number; status: string; m_payment_id: string; meet_link: string | null }>(
+    `/tutor/requests/${requestId}/accept`,
+    { method: "POST", body: { scheduled_at: scheduledAt ?? null }, token }
+  );
+}
+
+export function confirmTutoringSessionAsTutor(
+  token: string, requestId: number, rating: number, comment?: string
+) {
+  return request<{ id: number; status: string }>(`/tutor/sessions/${requestId}/confirm`, {
+    method: "POST",
+    body: { rating, comment: comment ?? "" },
+    token,
+  });
 }
 
 // --- Tutoring admin (mirrors app.py's "Tutoring Admin" screen) ---
@@ -306,6 +400,9 @@ export type TutorApplication = {
   matric_certificate_note: string | null;
   has_id_document: boolean;
   has_matric_certificate_document: boolean;
+  cv_note: string | null;
+  has_cv_document: boolean;
+  availability_note: string | null;
   bank_account_note: string | null;
   status: "pending_review" | "approved" | "rejected" | "suspended";
   status_label: string;
@@ -341,7 +438,7 @@ export function rejectTutorApplication(token: string, tutorId: number, reason: s
   });
 }
 
-export function fetchTutorDocumentUrl(token: string, tutorId: number, kind: "id" | "matric_certificate") {
+export function fetchTutorDocumentUrl(token: string, tutorId: number, kind: "id" | "matric_certificate" | "cv") {
   return request<{ url: string }>(`/admin/tutoring/applications/${tutorId}/documents/${kind}`, { token });
 }
 
@@ -349,25 +446,57 @@ export type ApprovedTutor = {
   id: number;
   name: string;
   email: string;
+  sessions_completed: number;
   subjects: { subject: string; matric_percentage: number; topics: string | null; hourly_rate_zar: number | null }[];
 };
 
-export function fetchApprovedTutors(token: string, subject: string) {
-  return request<{ tutors: ApprovedTutor[] }>(`/admin/tutoring/tutors?subject=${encodeURIComponent(subject)}`, {
-    token,
-  });
+export function fetchApprovedTutors(token: string, subject?: string) {
+  const qs = subject ? `?subject=${encodeURIComponent(subject)}` : "";
+  return request<{ tutors: ApprovedTutor[] }>(`/admin/tutoring/tutors${qs}`, { token });
+}
+
+// A tutor's full standing record - subjects plus every session they've
+// ever been matched to - so an admin can review their track record
+// before re-matching them to a new request. An approved tutor's record
+// persists indefinitely, like an employee's, rather than disappearing
+// once a session ends.
+export type TutorProfile = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  bio: string | null;
+  status: TutorApplication["status"];
+  status_label: string;
+  availability_note: string | null;
+  sessions_completed: number;
+  subjects: {
+    subject: string;
+    matric_percentage: number;
+    topics: string | null;
+    hourly_rate_zar: number | null;
+    is_active: boolean;
+  }[];
+  sessions: TutoringRequest[];
+};
+
+export function fetchTutorProfile(token: string, tutorId: number) {
+  return request<TutorProfile>(`/admin/tutoring/tutors/${tutorId}/profile`, { token });
 }
 
 export function fetchOpenTutoringRequestsAdmin(token: string) {
   return request<{ requests: TutoringRequest[] }>("/admin/tutoring/requests/open", { token });
 }
 
+// Admin override only - price/duration are set by the learner at
+// request time now, not here (see backend/tutoring.py's
+// match_tutor_to_request docstring).
 export function matchTutorToRequestAdmin(
   token: string,
   requestId: number,
-  params: { tutor_id: number; price_zar: number; duration_minutes: number; scheduled_at?: string | null }
+  params: { tutor_id: number; scheduled_at?: string | null }
 ) {
-  return request<{ id: number; status: string; m_payment_id: string }>(
+  return request<{ id: number; status: string; m_payment_id: string; meet_link: string | null }>(
     `/admin/tutoring/requests/${requestId}/match`,
     { method: "POST", body: params, token }
   );

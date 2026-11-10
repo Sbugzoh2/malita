@@ -1,9 +1,15 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, TextInput } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
-import { ApiError, fetchMyTutoringRequests, tutoringCheckoutUrl, TutoringRequest } from "../api/client";
+import {
+  ApiError,
+  fetchMyTutoringRequests,
+  tutoringCheckoutUrl,
+  confirmTutoringSessionAsLearner,
+  TutoringRequest,
+} from "../api/client";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "";
@@ -18,17 +24,31 @@ function formatDate(iso: string | null): string {
 
 const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   requested: colors.textSecondary,
-  matched: colors.primary,
   awaiting_payment: "#eda100",
-  confirmed: colors.success,
+  confirmed: colors.primary,
   completed: colors.success,
   cancelled: colors.error,
 };
+
+function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <View style={styles.starRow}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Pressable key={n} onPress={() => onChange(n)}>
+          <Text style={styles.star}>{n <= value ? "⭐" : "☆"}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
 
 export default function MyTutoringRequestsScreen({ navigation }: any) {
   const { token } = useAuth();
   const [requests, setRequests] = useState<TutoringRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ratingDraft, setRatingDraft] = useState<Record<number, number>>({});
+  const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -51,6 +71,25 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   function handlePay(requestId: number) {
     if (!token) return;
     Linking.openURL(tutoringCheckoutUrl(token, requestId));
+  }
+
+  async function handleConfirm(requestId: number) {
+    if (!token) return;
+    const rating = ratingDraft[requestId];
+    if (!rating) {
+      setError("Please pick a rating (tap a star) before confirming.");
+      return;
+    }
+    setConfirmingId(requestId);
+    setError(null);
+    try {
+      await confirmTutoringSessionAsLearner(token, requestId, rating, commentDraft[requestId] || "");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not confirm this session.");
+    } finally {
+      setConfirmingId(null);
+    }
   }
 
   return (
@@ -87,11 +126,49 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
               </Text>
             ) : null}
             {r.scheduled_at ? <Text style={styles.cardMeta}>Scheduled: {formatDate(r.scheduled_at)}</Text> : null}
+            {r.meet_link ? (
+              <Pressable onPress={() => Linking.openURL(r.meet_link!)}>
+                <Text style={styles.meetLink}>🎥 Join via Google Meet</Text>
+              </Pressable>
+            ) : null}
 
             {r.status === "awaiting_payment" && (
               <Pressable style={styles.payButton} onPress={() => handlePay(r.id)}>
                 <Text style={styles.payButtonText}>Pay Now</Text>
               </Pressable>
+            )}
+
+            {r.status === "confirmed" && !r.learner_confirmed && (
+              <View style={styles.confirmBox}>
+                <Text style={styles.confirmLabel}>Did this session happen? Rate your tutor:</Text>
+                <StarPicker
+                  value={ratingDraft[r.id] || 0}
+                  onChange={(v) => setRatingDraft((prev) => ({ ...prev, [r.id]: v }))}
+                />
+                <TextInput
+                  style={styles.commentInput}
+                  placeholder="Comment (optional)"
+                  value={commentDraft[r.id] || ""}
+                  onChangeText={(v) => setCommentDraft((prev) => ({ ...prev, [r.id]: v }))}
+                />
+                <Pressable
+                  style={styles.confirmButton}
+                  onPress={() => handleConfirm(r.id)}
+                  disabled={confirmingId === r.id}
+                >
+                  {confirmingId === r.id ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>Confirm & Rate</Text>
+                  )}
+                </Pressable>
+              </View>
+            )}
+            {r.status === "confirmed" && r.learner_confirmed && (
+              <Text style={styles.cardMeta}>✓ You confirmed this session - waiting on your tutor to confirm too.</Text>
+            )}
+            {r.status === "completed" && r.learner_rating != null && (
+              <Text style={styles.cardMeta}>You rated this session {r.learner_rating}/5 ⭐</Text>
             )}
           </View>
         ))
@@ -129,6 +206,30 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   payButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  meetLink: { color: colors.primary, fontWeight: "700", fontSize: 13, marginTop: 10 },
+  confirmBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+  confirmLabel: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 8 },
+  starRow: { flexDirection: "row", gap: 6 },
+  star: { fontSize: 26 },
+  commentInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: colors.text,
+    backgroundColor: "#fff",
+    marginTop: 10,
+  },
+  confirmButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  confirmButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   newRequestButton: {
     borderRadius: 999,
     paddingVertical: 14,

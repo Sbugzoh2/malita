@@ -197,6 +197,10 @@ export default function LoginScreen({ navigation }: any) {
         <Pressable onPress={() => navigation.navigate("Register")} style={styles.linkButton}>
           <Text style={styles.link}>New here? Create a free account</Text>
         </Pressable>
+
+        <Pressable onPress={() => navigation.navigate("TutorLogin")} style={styles.linkButton}>
+          <Text style={styles.link}>Are you a tutor? Log in here</Text>
+        </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );

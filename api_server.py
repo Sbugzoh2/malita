@@ -35,7 +35,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, RedirectResponse
 from pydantic import BaseModel
 from PIL import Image
 
@@ -71,9 +71,17 @@ from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.tutoring import (
     TutoringError, apply_as_tutor, list_tutor_applications, approve_tutor,
     reject_tutor, list_approved_tutors, request_tutoring_session,
-    list_learner_requests, list_open_requests, match_tutor_to_request,
+    list_learner_requests, list_open_requests, list_open_requests_for_tutor,
+    match_tutor_to_request, accept_tutoring_request,
+    confirm_session_by_learner, confirm_session_by_tutor,
     cancel_session, complete_session, list_pending_payouts, mark_payout_paid,
-    get_tutor_document_url,
+    get_tutor_document_url, get_tutor_profile, login_tutor,
+    create_tutor_api_token, get_tutor_by_token, revoke_tutor_api_token,
+    list_tutor_own_payouts,
+)
+from backend.google_calendar import (
+    GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
+    handle_oauth_callback as handle_google_calendar_oauth_callback,
 )
 from backend.practice import practice_data, check_practice_answer, MATHEMATICS_TOPICS, PHYSICAL_SCIENCES_TOPICS
 from backend.past_papers import list_past_papers, get_past_paper_file
@@ -226,6 +234,8 @@ class TutorSubjectInput(BaseModel):
 
 class TutoringRequestRequest(BaseModel):
     subject: str
+    price_zar: float
+    duration_minutes: int = 60
     topic: str = ""
     preferred_times_note: str = ""
 
@@ -236,9 +246,16 @@ class TutorRejectRequest(BaseModel):
 
 class TutorMatchRequest(BaseModel):
     tutor_id: int
-    price_zar: float
-    duration_minutes: int
     scheduled_at: str | None = None  # ISO 8601, optional
+
+
+class TutorAcceptRequest(BaseModel):
+    scheduled_at: str | None = None  # ISO 8601, optional
+
+
+class SessionConfirmRequest(BaseModel):
+    rating: int
+    comment: str = ""
 
 
 class SessionCancelRequest(BaseModel):
@@ -247,6 +264,11 @@ class SessionCancelRequest(BaseModel):
 
 class PayoutMarkPaidRequest(BaseModel):
     payment_reference: str = ""
+
+
+class TutorLoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 def _auth_user(authorization: str | None):
@@ -262,6 +284,19 @@ def _auth_user(authorization: str | None):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
     return user
+
+
+def _auth_tutor(authorization: str | None):
+    """Same pattern as _auth_user, but resolves against TutorApiToken - a
+    tutor is a different kind of actor from a learner (see
+    backend.db.TutorAccount), with its own, entirely separate login."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    token = authorization[len("Bearer "):]
+    tutor = get_tutor_by_token(token)
+    if not tutor:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+    return tutor
 
 
 @app.get("/health")
@@ -1011,6 +1046,91 @@ def privacy():
 # request a session.
 # ---------------------------------------------------------------------------
 
+@app.post("/tutor/login")
+def tutor_login(body: TutorLoginRequest):
+    """A tutor's own login to the native app - entirely separate from
+    /auth/login (learner accounts). Any application status can log in,
+    so a still-pending or rejected applicant can check their own status
+    in the app rather than being locked out until an admin acts."""
+    try:
+        tutor = login_tutor(body.email, body.password)
+    except TutoringError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    token = create_tutor_api_token(tutor["id"])
+    return {"token": token, "tutor": tutor}
+
+
+@app.post("/tutor/logout")
+def tutor_logout(authorization: str = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        revoke_tutor_api_token(authorization[len("Bearer "):])
+    return {"ok": True}
+
+
+@app.get("/tutor/me")
+def tutor_me(authorization: str = Header(None)):
+    return _auth_tutor(authorization)
+
+
+@app.get("/tutor/me/profile")
+def tutor_me_profile(authorization: str = Header(None)):
+    """The authenticated tutor's own full profile + session history -
+    reuses get_tutor_profile(), safe here because the tutor id comes from
+    the authenticated token, never from client input."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return get_tutor_profile(tutor["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/tutor/me/payouts")
+def tutor_me_payouts(authorization: str = Header(None)):
+    tutor = _auth_tutor(authorization)
+    return {"payouts": list_tutor_own_payouts(tutor["id"])}
+
+
+@app.get("/tutor/requests/open")
+def tutor_requests_open(authorization: str = Header(None)):
+    """A tutor's own "open requests" queue - only requests for subjects
+    they're approved and active to teach (see
+    list_open_requests_for_tutor)."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return {"requests": list_open_requests_for_tutor(tutor["id"])}
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutor/requests/{request_id}/accept")
+def tutor_accept_request(request_id: int, payload: TutorAcceptRequest, authorization: str = Header(None)):
+    """A tutor accepting a learner's open, already-priced request - the
+    primary matching path (see backend/tutoring.py's
+    accept_tutoring_request)."""
+    tutor = _auth_tutor(authorization)
+    scheduled_at = None
+    if payload.scheduled_at:
+        try:
+            scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid scheduled date/time format.")
+    try:
+        return accept_tutoring_request(request_id, tutor["id"], scheduled_at=scheduled_at)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutor/sessions/{request_id}/confirm")
+def tutor_confirm_session(request_id: int, payload: SessionConfirmRequest, authorization: str = Header(None)):
+    """The tutor confirming a paid session actually happened, and rating
+    the learner."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return confirm_session_by_tutor(request_id, tutor["id"], payload.rating, payload.comment)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/tutoring/apply")
 async def tutoring_apply(
     name: str = Form(...),
@@ -1021,20 +1141,23 @@ async def tutoring_apply(
     id_number: str = Form(""),
     id_verification_note: str = Form(""),
     matric_certificate_note: str = Form(""),
+    cv_note: str = Form(""),
+    availability_note: str = Form(""),
     bank_account_note: str = Form(""),
     subjects: str = Form(...),
     id_document: UploadFile | None = File(None),
     matric_certificate: UploadFile | None = File(None),
+    cv: UploadFile | None = File(None),
 ):
     """Public, unauthenticated - a prospective tutor applying is not yet a
     Malita user of any kind. Rejects immediately (no admin review needed)
     if any subject's matric mark is below Malita's stated 65% minimum.
 
-    multipart/form-data, not JSON - id_document/matric_certificate are
-    optional file uploads (an ID photo and NSC certificate), and FastAPI
-    requires every other field to ride along as Form(...) rather than a
-    JSON body when any File(...) param is present. `subjects` is a
-    JSON-encoded string of [{"subject", "matric_percentage", "topics"?,
+    multipart/form-data, not JSON - id_document/matric_certificate/cv are
+    optional file uploads (an ID photo, NSC certificate, and a one-page
+    CV), and FastAPI requires every other field to ride along as Form(...)
+    rather than a JSON body when any File(...) param is present. `subjects`
+    is a JSON-encoded string of [{"subject", "matric_percentage", "topics"?,
     "hourly_rate_zar"?}, ...] for the same reason - multipart has no
     native nested-list encoding."""
     try:
@@ -1051,6 +1174,9 @@ async def tutoring_apply(
         matric_document_tuple = (
             await matric_certificate.read(), matric_certificate.content_type or "application/octet-stream"
         )
+    cv_document_tuple = None
+    if cv is not None:
+        cv_document_tuple = (await cv.read(), cv.content_type or "application/octet-stream")
 
     try:
         return apply_as_tutor(
@@ -1058,10 +1184,12 @@ async def tutoring_apply(
             phone=phone, bio=bio, id_number=id_number,
             id_verification_note=id_verification_note,
             matric_certificate_note=matric_certificate_note,
+            cv_note=cv_note, availability_note=availability_note,
             bank_account_note=bank_account_note,
             subjects=[s.model_dump() for s in parsed_subjects],
             id_document=id_document_tuple,
             matric_certificate_document=matric_document_tuple,
+            cv_document=cv_document_tuple,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1070,7 +1198,7 @@ async def tutoring_apply(
 @app.get("/admin/tutoring/applications/{tutor_id}/documents/{kind}")
 def admin_tutoring_document_url(tutor_id: int, kind: str, authorization: str = Header(None)):
     """Returns a short-lived signed URL for an admin to view one uploaded
-    document. `kind` is "id" or "matric_certificate"."""
+    document. `kind` is "id", "matric_certificate", or "cv"."""
     user = _auth_user(authorization)
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
@@ -1087,7 +1215,8 @@ def tutoring_create_request(payload: TutoringRequestRequest, authorization: str 
     user = _auth_user(authorization)
     try:
         return request_tutoring_session(
-            user["id"], payload.subject, payload.topic, payload.preferred_times_note,
+            user["id"], payload.subject, payload.price_zar, payload.duration_minutes,
+            payload.topic, payload.preferred_times_note,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1124,7 +1253,12 @@ def tutoring_checkout_page(request_id: int, authorization: str = Header(None), t
     payload = build_checkout_payload(
         m_payment_id=m_payment_id,
         amount=req["price_zar"],
-        item_name=f"Malita Tutoring Session — {req['subject']}",
+        # Plain ASCII, matching /billing/checkout-page's item_name -
+        # PayFast's edge (CloudFront) has been seen returning a raw,
+        # un-PayFast-branded 403 "Request blocked" for payloads containing
+        # non-ASCII characters like an em dash, before the request even
+        # reaches PayFast's own app.
+        item_name=f"Malita Tutoring Session: {req['subject']}",
         name_first=user["name"].split(" ")[0],
         email_address=user["email"],
         return_url=f"{API_BASE_URL}/billing/return?status=upgraded&target=tutoring",
@@ -1134,6 +1268,19 @@ def tutoring_checkout_page(request_id: int, authorization: str = Header(None), t
         custom_fields={"custom_str1": "tutoring_session", "custom_str2": str(req["id"])},
     )
     return build_checkout_page_html(payload)
+
+
+@app.post("/tutoring/requests/{request_id}/confirm")
+def tutoring_confirm_session(request_id: int, payload: SessionConfirmRequest, authorization: str = Header(None)):
+    """The learner confirming a paid session actually happened, and
+    rating the tutor - see backend/tutoring.py's confirm_session_by_learner.
+    The payout is only created once the tutor has also confirmed
+    (confirm_session_by_tutor)."""
+    user = _auth_user(authorization)
+    try:
+        return confirm_session_by_learner(request_id, user["id"], payload.rating, payload.comment)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/admin/tutoring/applications")
@@ -1176,6 +1323,20 @@ def admin_tutoring_tutors(subject: str | None = None, authorization: str = Heade
     return {"tutors": list_approved_tutors(subject)}
 
 
+@app.get("/admin/tutoring/tutors/{tutor_id}/profile")
+def admin_tutoring_tutor_profile(tutor_id: int, authorization: str = Header(None)):
+    """A tutor's full standing record - subjects plus every session
+    they've ever been matched to - so an admin can review their track
+    record before re-matching them to a new request."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return get_tutor_profile(tutor_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @app.get("/admin/tutoring/requests/open")
 def admin_tutoring_open_requests(authorization: str = Header(None)):
     user = _auth_user(authorization)
@@ -1189,12 +1350,14 @@ def admin_tutoring_match(request_id: int, payload: TutorMatchRequest, authorizat
     user = _auth_user(authorization)
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
-    scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at) if payload.scheduled_at else None
+    scheduled_at = None
+    if payload.scheduled_at:
+        try:
+            scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid scheduled date/time format.")
     try:
-        return match_tutor_to_request(
-            request_id, payload.tutor_id, payload.price_zar, payload.duration_minutes,
-            scheduled_at=scheduled_at,
-        )
+        return match_tutor_to_request(request_id, payload.tutor_id, scheduled_at=scheduled_at)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1241,3 +1404,50 @@ def admin_tutoring_mark_paid(payout_id: int, payload: PayoutMarkPaidRequest, aut
     except TutoringError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"status": "paid"}
+
+
+# ---------------------------------------------------------------------------
+# Google Calendar/Meet connection (see backend/google_calendar.py for the
+# one-time Google Cloud Console setup this requires, and the caveat about
+# refresh tokens expiring weekly until the OAuth app is verified).
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/google-calendar/connect")
+def admin_google_calendar_connect(authorization: str = Header(None)):
+    """Admin-gated: visiting this URL in a browser (while logged into the
+    ONE Google account that should own every session's Calendar event)
+    redirects to Google's consent screen. Needed once initially, and
+    again whenever the stored refresh token expires (weekly, until the
+    OAuth app passes Google's verification - see
+    backend/google_calendar.py)."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    redirect_uri = f"{API_BASE_URL}/admin/google-calendar/oauth-callback"
+    try:
+        return RedirectResponse(build_google_calendar_auth_url(redirect_uri))
+    except GoogleCalendarError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/admin/google-calendar/oauth-callback", response_class=HTMLResponse)
+def admin_google_calendar_oauth_callback(code: str = None, error: str = None):
+    """Google redirects the browser here after consent - can't be
+    bearer-token-gated since Google navigates here directly, not our own
+    client. The authorization code itself is the real guard: only a
+    browser that completed OUR consent screen (restricted to allow-listed
+    test-user accounts while in Testing mode) can ever produce one."""
+    if error:
+        return f"<h1>Google Calendar connection failed</h1><p>{html.escape(error)}</p>"
+    if not code:
+        return "<h1>Google Calendar connection failed</h1><p>No authorization code received.</p>"
+    redirect_uri = f"{API_BASE_URL}/admin/google-calendar/oauth-callback"
+    try:
+        account_email = handle_google_calendar_oauth_callback(code, redirect_uri)
+    except GoogleCalendarError as e:
+        return f"<h1>Google Calendar connection failed</h1><p>{html.escape(str(e))}</p>"
+    return (
+        f"<h1>✅ Google Calendar connected</h1>"
+        f"<p>New tutoring sessions will get a Google Meet link, organized from "
+        f"<strong>{html.escape(account_email)}</strong>.</p>"
+    )

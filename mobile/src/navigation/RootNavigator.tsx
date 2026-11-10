@@ -3,9 +3,12 @@ import { View, ActivityIndicator, Pressable, Text, StyleSheet } from "react-nati
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
+import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
+import TutorLoginScreen from "../screens/TutorLoginScreen";
+import TutorHomeScreen from "../screens/TutorHomeScreen";
 import HomeScreen from "../screens/HomeScreen";
 import AITutorScreen from "../screens/AITutorScreen";
 import AITeacherScreen from "../screens/AITeacherScreen";
@@ -22,13 +25,32 @@ import TutoringAdminScreen from "../screens/TutoringAdminScreen";
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
+const TutorStack = createNativeStackNavigator();
 
 function AuthNavigator() {
   return (
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Register" component={RegisterScreen} />
+      <AuthStack.Screen name="TutorLogin" component={TutorLoginScreen} />
     </AuthStack.Navigator>
+  );
+}
+
+// A tutor's own app, entirely separate from AppNavigator (learner) -
+// just one screen for now (sessions + payouts), since a tutor's app
+// surface is intentionally small in v1.
+function TutorAppNavigator() {
+  return (
+    <TutorStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.surface },
+        headerTitleStyle: { color: colors.text },
+        headerTintColor: colors.primary,
+      }}
+    >
+      <TutorStack.Screen name="TutorHome" component={TutorHomeScreen} options={{ title: "Malita Tutor" }} />
+    </TutorStack.Navigator>
   );
 }
 
@@ -81,8 +103,9 @@ function AppNavigator() {
 
 export default function RootNavigator() {
   const { token, loading } = useAuth();
+  const { token: tutorToken, loading: tutorLoading } = useTutorAuth();
 
-  if (loading) {
+  if (loading || tutorLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -107,7 +130,7 @@ export default function RootNavigator() {
         },
       }}
     >
-      {token ? <AppNavigator /> : <AuthNavigator />}
+      {token ? <AppNavigator /> : tutorToken ? <TutorAppNavigator /> : <AuthNavigator />}
     </NavigationContainer>
   );
 }

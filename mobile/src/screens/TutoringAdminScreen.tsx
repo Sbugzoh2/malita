@@ -27,10 +27,12 @@ import {
   TutoringPayout,
   fetchPendingPayoutsAdmin,
   markPayoutPaidAdmin,
+  TutorProfile,
+  fetchTutorProfile,
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
 
-type Section = "applications" | "match" | "payouts";
+type Section = "applications" | "match" | "tutors" | "payouts";
 
 const STATUS_OPTIONS: { label: string; value: TutorApplication["status"] }[] = [
   { label: "Pending Review", value: "pending_review" },
@@ -55,6 +57,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
         {([
           { key: "applications", label: "Applications" },
           { key: "match", label: "Match Requests" },
+          { key: "tutors", label: "Tutors" },
           { key: "payouts", label: "Payouts" },
         ] as { key: Section; label: string }[]).map((s) => (
           <Pressable
@@ -71,6 +74,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
 
       {token && section === "applications" && <ApplicationsSection token={token} />}
       {token && section === "match" && <MatchSection token={token} />}
+      {token && section === "tutors" && <TutorsSection token={token} />}
       {token && section === "payouts" && <PayoutsSection token={token} />}
     </ScrollView>
   );
@@ -125,7 +129,7 @@ function ApplicationsSection({ token }: { token: string }) {
     }
   }
 
-  async function handleGetDocUrl(tutorId: number, kind: "id" | "matric_certificate") {
+  async function handleGetDocUrl(tutorId: number, kind: "id" | "matric_certificate" | "cv") {
     try {
       const res = await fetchTutorDocumentUrl(token, tutorId, kind);
       setDocUrls((prev) => ({ ...prev, [`${tutorId}_${kind}`]: res.url }));
@@ -165,37 +169,32 @@ function ApplicationsSection({ token }: { token: string }) {
                   <Text style={styles.detailLine}>ID number: {a.id_number || "—"}</Text>
                   <Text style={styles.detailLine}>ID verification note: {a.id_verification_note || "—"}</Text>
                   <Text style={styles.detailLine}>Matric certificate note: {a.matric_certificate_note || "—"}</Text>
+                  <Text style={styles.detailLine}>CV note: {a.cv_note || "—"}</Text>
+                  <Text style={styles.detailLine}>Availability: {a.availability_note || "—"}</Text>
                   <Text style={styles.detailLine}>Bank details: {a.bank_account_note || "—"}</Text>
 
-                  {a.has_id_document ? (
-                    docUrls[`${a.id}_id`] ? (
-                      <Pressable style={styles.docButton} onPress={() => Linking.openURL(docUrls[`${a.id}_id`])}>
-                        <Text style={styles.docButtonText}>Open ID document</Text>
-                      </Pressable>
+                  {([
+                    ["id", "ID document", a.has_id_document] as const,
+                    ["matric_certificate", "Matric certificate", a.has_matric_certificate_document] as const,
+                    ["cv", "CV", a.has_cv_document] as const,
+                  ]).map(([kind, label, hasDoc]) =>
+                    hasDoc ? (
+                      docUrls[`${a.id}_${kind}`] ? (
+                        <Pressable
+                          key={kind}
+                          style={styles.docButton}
+                          onPress={() => Linking.openURL(docUrls[`${a.id}_${kind}`])}
+                        >
+                          <Text style={styles.docButtonText}>Open {label}</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable key={kind} style={styles.docButton} onPress={() => handleGetDocUrl(a.id, kind)}>
+                          <Text style={styles.docButtonText}>🔗 Get {label} link</Text>
+                        </Pressable>
+                      )
                     ) : (
-                      <Pressable style={styles.docButton} onPress={() => handleGetDocUrl(a.id, "id")}>
-                        <Text style={styles.docButtonText}>🔗 Get ID document link</Text>
-                      </Pressable>
+                      <Text key={kind} style={styles.detailLine}>{label}: not uploaded</Text>
                     )
-                  ) : (
-                    <Text style={styles.detailLine}>ID document: not uploaded</Text>
-                  )}
-
-                  {a.has_matric_certificate_document ? (
-                    docUrls[`${a.id}_matric_certificate`] ? (
-                      <Pressable
-                        style={styles.docButton}
-                        onPress={() => Linking.openURL(docUrls[`${a.id}_matric_certificate`])}
-                      >
-                        <Text style={styles.docButtonText}>Open matric certificate</Text>
-                      </Pressable>
-                    ) : (
-                      <Pressable style={styles.docButton} onPress={() => handleGetDocUrl(a.id, "matric_certificate")}>
-                        <Text style={styles.docButtonText}>🔗 Get matric certificate link</Text>
-                      </Pressable>
-                    )
-                  ) : (
-                    <Text style={styles.detailLine}>Matric certificate: not uploaded</Text>
                   )}
 
                   <Text style={styles.detailLabel}>Subjects applied for:</Text>
@@ -263,8 +262,6 @@ function MatchSection({ token }: { token: string }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [candidatesBySubject, setCandidatesBySubject] = useState<Record<string, ApprovedTutor[]>>({});
   const [selectedTutor, setSelectedTutor] = useState<Record<number, number | null>>({});
-  const [price, setPrice] = useState<Record<number, string>>({});
-  const [duration, setDuration] = useState<Record<number, string>>({});
   const [scheduledAt, setScheduledAt] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -293,15 +290,24 @@ function MatchSection({ token }: { token: string }) {
 
   async function handleMatch(r: TutoringRequest) {
     const tutorId = selectedTutor[r.id];
-    const priceVal = parseFloat(price[r.id] || "");
-    const durationVal = parseInt(duration[r.id] || "60", 10);
-    if (!tutorId || isNaN(priceVal) || priceVal <= 0) {
-      setError("Please choose a tutor and a valid price.");
+    if (!tutorId) {
+      setError("Please choose a tutor.");
       return;
     }
     let scheduled_at: string | null = null;
     const raw = (scheduledAt[r.id] || "").trim();
     if (raw) {
+      // A strict 4-digit-year format check, not just "did Date() accept
+      // it" - Hermes (React Native's JS engine) parses malformed strings
+      // like a mistyped 5-digit year far more leniently than Node/Chrome
+      // do, so isNaN(parsed.getTime()) alone let a typo ("20126-...")
+      // through as a "valid" but nonsensical date that then crashed the
+      // backend (datetime.fromisoformat can't parse what toISOString()
+      // produces for a year that far out).
+      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(raw)) {
+        setError("Scheduled date/time must look like 2026-11-20 18:00");
+        return;
+      }
       const parsed = new Date(raw.replace(" ", "T"));
       if (isNaN(parsed.getTime())) {
         setError("Scheduled date/time must look like 2026-11-20 18:00");
@@ -312,13 +318,8 @@ function MatchSection({ token }: { token: string }) {
     setBusyId(r.id);
     setError(null);
     try {
-      await matchTutorToRequestAdmin(token, r.id, {
-        tutor_id: tutorId,
-        price_zar: priceVal,
-        duration_minutes: durationVal,
-        scheduled_at,
-      });
-      Alert.alert("Matched!", "The learner can now pay to confirm the session.");
+      await matchTutorToRequestAdmin(token, r.id, { tutor_id: tutorId, scheduled_at });
+      Alert.alert("Assigned!", "The learner can now pay to confirm the session.");
       setExpandedId(null);
       load();
     } catch (e) {
@@ -334,7 +335,7 @@ function MatchSection({ token }: { token: string }) {
       {!requests ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
       ) : requests.length === 0 ? (
-        <Text style={styles.empty}>No open requests waiting to be matched.</Text>
+        <Text style={styles.empty}>No open requests right now (tutors can accept these directly in their app).</Text>
       ) : (
         requests.map((r) => {
           const expanded = expandedId === r.id;
@@ -344,7 +345,7 @@ function MatchSection({ token }: { token: string }) {
               <Pressable onPress={() => expandRequest(r)}>
                 <Text style={styles.cardTitle}>
                   #{r.id} — {r.subject}
-                  {r.topic ? ` (${r.topic})` : ""}
+                  {r.topic ? ` (${r.topic})` : ""} — R{r.price_zar} ({r.duration_minutes} min)
                 </Text>
                 {r.preferred_times_note ? (
                   <Text style={styles.cardSubtitle}>{r.preferred_times_note}</Text>
@@ -358,24 +359,12 @@ function MatchSection({ token }: { token: string }) {
                     <>
                       <Dropdown
                         label="Tutor"
-                        options={candidates.map((t) => ({ label: `${t.name} (${t.email})`, value: String(t.id) }))}
+                        options={candidates.map((t) => ({
+                          label: `${t.name} (${t.email}) — ${t.sessions_completed} completed`,
+                          value: String(t.id),
+                        }))}
                         value={selectedTutor[r.id] != null ? String(selectedTutor[r.id]) : null}
                         onChange={(v) => setSelectedTutor((prev) => ({ ...prev, [r.id]: parseInt(v, 10) }))}
-                      />
-                      <Text style={styles.label}>Session price (ZAR)</Text>
-                      <TextInput
-                        style={styles.input}
-                        keyboardType="numeric"
-                        value={price[r.id] || ""}
-                        onChangeText={(v) => setPrice((prev) => ({ ...prev, [r.id]: v }))}
-                        placeholder="e.g. 300"
-                      />
-                      <Text style={styles.label}>Duration (minutes)</Text>
-                      <TextInput
-                        style={styles.input}
-                        keyboardType="numeric"
-                        value={duration[r.id] || "60"}
-                        onChangeText={(v) => setDuration((prev) => ({ ...prev, [r.id]: v }))}
                       />
                       <Text style={styles.label}>Scheduled date/time (optional)</Text>
                       <TextInput
@@ -392,9 +381,104 @@ function MatchSection({ token }: { token: string }) {
                         {busyId === r.id ? (
                           <ActivityIndicator color="#fff" />
                         ) : (
-                          <Text style={styles.approveButtonText}>Match & Generate Payment</Text>
+                          <Text style={styles.approveButtonText}>Force-Assign Tutor</Text>
                         )}
                       </Pressable>
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
+// Approved tutors' standing record - subjects plus full session history,
+// so an admin can review a tutor's track record before re-matching them
+// to a new request. An approved tutor's record never goes away, the
+// same way you'd keep recalling a reliable employee for new work.
+function TutorsSection({ token }: { token: string }) {
+  const [tutors, setTutors] = useState<ApprovedTutor[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [profiles, setProfiles] = useState<Record<number, TutorProfile>>({});
+
+  const load = useCallback(() => {
+    fetchApprovedTutors(token)
+      .then((res) => setTutors(res.tutors))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load tutors."));
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function expandTutor(t: ApprovedTutor) {
+    const nowExpanded = expandedId === t.id ? null : t.id;
+    setExpandedId(nowExpanded);
+    if (nowExpanded !== null && !profiles[t.id]) {
+      try {
+        const profile = await fetchTutorProfile(token, t.id);
+        setProfiles((prev) => ({ ...prev, [t.id]: profile }));
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "Could not load tutor profile.");
+      }
+    }
+  }
+
+  return (
+    <View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!tutors ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      ) : tutors.length === 0 ? (
+        <Text style={styles.empty}>No approved tutors yet.</Text>
+      ) : (
+        tutors.map((t) => {
+          const expanded = expandedId === t.id;
+          const profile = profiles[t.id];
+          return (
+            <View key={t.id} style={styles.card}>
+              <Pressable onPress={() => expandTutor(t)}>
+                <Text style={styles.cardTitle}>
+                  {t.name} — {t.sessions_completed} completed session(s)
+                </Text>
+                <Text style={styles.cardSubtitle}>{t.email}</Text>
+              </Pressable>
+              {expanded && (
+                <View style={styles.cardDetail}>
+                  {!profile ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <>
+                      <Text style={styles.detailLine}>Phone: {profile.phone || "—"}</Text>
+                      <Text style={styles.detailLine}>Bio: {profile.bio || "—"}</Text>
+                      <Text style={styles.detailLine}>Availability: {profile.availability_note || "—"}</Text>
+                      <Text style={styles.detailLabel}>Subjects:</Text>
+                      {profile.subjects.map((s, i) => (
+                        <Text key={i} style={styles.detailLine}>
+                          • {s.subject}: {s.matric_percentage.toFixed(0)}% matric
+                          {s.hourly_rate_zar ? `, R${s.hourly_rate_zar}/hr` : ""}
+                        </Text>
+                      ))}
+                      <Text style={styles.detailLabel}>Session history:</Text>
+                      {profile.sessions.length === 0 ? (
+                        <Text style={styles.detailLine}>No sessions yet.</Text>
+                      ) : (
+                        profile.sessions.map((sess) => {
+                          const when = sess.scheduled_at || sess.created_at;
+                          const whenStr = when ? new Date(when).toLocaleDateString("en-ZA") : "—";
+                          return (
+                            <Text key={sess.id} style={styles.detailLine}>
+                              • {sess.subject}
+                              {sess.topic ? ` (${sess.topic})` : ""} — {sess.status_label} — {whenStr}
+                            </Text>
+                          );
+                        })
+                      )}
                     </>
                   )}
                 </View>

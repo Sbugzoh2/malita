@@ -121,6 +121,17 @@ least <strong>65%</strong> in a subject is required to apply to tutor it.
   <label for="matricCertificateNote">Matric certificate note (optional)</label>
   <input type="text" id="matricCertificateNote" placeholder="e.g. a link to where you've already uploaded it" />
 
+  <label for="cvDocument">CV (one page)</label>
+  <input type="file" id="cvDocument" accept="image/*,.pdf" />
+  <div class="file-note">Or leave this blank and describe below where we can find it instead.</div>
+  <label for="cvNote">CV note (optional)</label>
+  <input type="text" id="cvNote" placeholder="e.g. a link to where you've already uploaded it" />
+
+  <h2>Availability</h2>
+  <label for="availabilityNote">When are you generally available to tutor?</label>
+  <div class="hint">Days and times that work for you — we'll match sessions around this.</div>
+  <textarea id="availabilityNote" placeholder="e.g. Weekdays after 16:00, Saturday mornings"></textarea>
+
   <label for="bankAccountNote">Bank account details for payouts</label>
   <div class="hint">Bank name, account number, branch code — used to pay you once we automate payouts; for now we'll confirm this with you directly.</div>
   <textarea id="bankAccountNote"></textarea>
@@ -202,6 +213,8 @@ document.getElementById("tutorApplyForm").addEventListener("submit", async (e) =
   formData.append("id_number", document.getElementById("idNumber").value);
   formData.append("id_verification_note", document.getElementById("idVerificationNote").value);
   formData.append("matric_certificate_note", document.getElementById("matricCertificateNote").value);
+  formData.append("cv_note", document.getElementById("cvNote").value);
+  formData.append("availability_note", document.getElementById("availabilityNote").value);
   formData.append("bank_account_note", document.getElementById("bankAccountNote").value);
   formData.append("subjects", JSON.stringify(subjects));
 
@@ -209,6 +222,8 @@ document.getElementById("tutorApplyForm").addEventListener("submit", async (e) =
   if (idFile) formData.append("id_document", idFile);
   const matricFile = document.getElementById("matricCertificate").files[0];
   if (matricFile) formData.append("matric_certificate", matricFile);
+  const cvFile = document.getElementById("cvDocument").files[0];
+  if (cvFile) formData.append("cv", cvFile);
 
   submitBtn.disabled = true;
   submitBtn.textContent = "Submitting…";

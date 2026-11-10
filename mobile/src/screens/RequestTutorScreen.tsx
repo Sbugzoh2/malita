@@ -17,6 +17,8 @@ import Dropdown from "../components/Dropdown";
 export default function RequestTutorScreen({ navigation }: any) {
   const { token } = useAuth();
   const [subject, setSubject] = useState<Subject>("Mathematics");
+  const [price, setPrice] = useState("");
+  const [duration, setDuration] = useState("60");
   const [topic, setTopic] = useState("");
   const [preferredTimes, setPreferredTimes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -24,11 +26,18 @@ export default function RequestTutorScreen({ navigation }: any) {
 
   async function handleSubmit() {
     if (!token) return;
+    const priceVal = parseFloat(price);
+    if (isNaN(priceVal) || priceVal <= 0) {
+      setError("Please enter a price greater than R0.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       await requestTutoringSession(token, {
         subject,
+        price_zar: priceVal,
+        duration_minutes: parseInt(duration, 10) || 60,
         topic: topic.trim(),
         preferred_times_note: preferredTimes.trim(),
       });
@@ -63,6 +72,24 @@ export default function RequestTutorScreen({ navigation }: any) {
           onChange={(v) => setSubject(v as Subject)}
         />
 
+        <Text style={styles.label}>What are you willing to pay? (R)</Text>
+        <TextInput
+          style={styles.input}
+          value={price}
+          onChangeText={setPrice}
+          keyboardType="numeric"
+          placeholder="e.g. 250"
+        />
+
+        <Text style={styles.label}>Session duration (minutes)</Text>
+        <TextInput
+          style={styles.input}
+          value={duration}
+          onChangeText={setDuration}
+          keyboardType="numeric"
+          placeholder="60"
+        />
+
         <Text style={styles.label}>Topic (optional)</Text>
         <TextInput
           style={styles.input}
@@ -91,8 +118,8 @@ export default function RequestTutorScreen({ navigation }: any) {
         </Pressable>
 
         <Text style={styles.note}>
-          Once submitted, our team will match you with a suitable tutor and let you know the session
-          price and time. You'll then be asked to pay securely before the session is confirmed.
+          Your request goes straight to tutors who teach this subject - once one accepts at your
+          price, you'll be asked to pay securely before the session is confirmed.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

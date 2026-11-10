@@ -61,7 +61,7 @@ import uuid
 
 from .db import (
     get_session, User, TutorAccount, TutorSubject, TutoringSessionRequest,
-    TutoringPayout, TutorApiToken,
+    TutoringPayout, TutorApiToken, TutorPasswordReset,
 )
 from . import storage as _storage
 from . import google_calendar as _google_calendar
@@ -90,11 +90,19 @@ TUTOR_STATUS_LABELS = {
 
 SESSION_STATUS_LABELS = {
     "requested": "Waiting for a tutor to accept",
+    "time_proposed": "Tutor proposed a new time — awaiting your approval",
     "awaiting_payment": "Accepted! Awaiting payment",
     "confirmed": "Paid — confirm once the session happens",
     "completed": "Completed",
     "cancelled": "Cancelled",
 }
+
+# A session must be at least this long, and no two of the same person's
+# (learner's or tutor's) sessions may be scheduled with less than this
+# many minutes between them - enforced by _check_schedule_conflict below
+# at every point a time is set or proposed.
+MIN_SESSION_DURATION_MINUTES = 60
+SCHEDULING_BUFFER_MINUTES = 15
 
 
 class TutoringError(Exception):
@@ -136,6 +144,46 @@ def login_tutor(email: str, password: str) -> dict:
         if not tutor or not _verify_password(password, tutor.password_hash):
             raise TutoringError("Incorrect email or password.")
         return _serialize_tutor_self(tutor)
+
+
+TUTOR_RESET_TOKEN_VALID_MINUTES = 60
+
+
+def create_tutor_password_reset(email: str) -> str | None:
+    """Generate a one-time reset token for a tutor's own login - mirrors
+    backend/auth.py's create_password_reset() for learners. Returns the
+    token, or None if no tutor account matches - callers must show the
+    SAME message either way so this can't be used to enumerate which
+    emails have a tutor account."""
+    email = (email or "").strip().lower()
+    with get_session() as db:
+        tutor = db.query(TutorAccount).filter(TutorAccount.email == email).first()
+        if not tutor:
+            return None
+        token = secrets.token_urlsafe(32)
+        db.add(TutorPasswordReset(
+            tutor_id=tutor.id,
+            token=token,
+            expires_at=dt.datetime.utcnow() + dt.timedelta(minutes=TUTOR_RESET_TOKEN_VALID_MINUTES),
+        ))
+        return token
+
+
+def reset_tutor_password(token: str, new_password: str) -> None:
+    """Consume a reset token and set a new tutor password. Raises
+    TutoringError on any invalid/expired/already-used token, or a
+    too-short new password."""
+    if len(new_password) < 8:
+        raise TutoringError("Password must be at least 8 characters long.")
+    with get_session() as db:
+        reset = db.query(TutorPasswordReset).filter(TutorPasswordReset.token == token).first()
+        if not reset or reset.used or reset.expires_at < dt.datetime.utcnow():
+            raise TutoringError("This reset link is invalid or has expired. Please request a new one.")
+        tutor = db.query(TutorAccount).get(reset.tutor_id)
+        if not tutor:
+            raise TutoringError("This reset link is invalid or has expired. Please request a new one.")
+        tutor.password_hash = _hash_password(new_password)
+        reset.used = True
 
 
 def create_tutor_api_token(tutor_id: int) -> str:
@@ -481,23 +529,69 @@ def get_tutor_profile(tutor_id: int) -> dict:
         }
 
 
+def _check_schedule_conflict(
+    db, *, kind: str, person_id: int, scheduled_at: dt.datetime, duration_minutes: int,
+    exclude_request_id: int | None = None,
+) -> None:
+    """Raises TutoringError if `person_id` (a learner_user_id if
+    kind="learner", a tutor_id if kind="tutor") already has another
+    non-cancelled session whose time window - padded by
+    SCHEDULING_BUFFER_MINUTES on each side - overlaps
+    [scheduled_at, scheduled_at + duration_minutes). This is what
+    enforces both "no double-booking" and "at least 15 minutes between
+    back-to-back sessions", for both sides, at every point a time is set
+    or proposed (request, accept, propose, and approving a proposal)."""
+    column = TutoringSessionRequest.learner_user_id if kind == "learner" else TutoringSessionRequest.tutor_id
+    q = db.query(TutoringSessionRequest).filter(
+        column == person_id,
+        TutoringSessionRequest.status != "cancelled",
+        TutoringSessionRequest.scheduled_at.isnot(None),
+    )
+    if exclude_request_id is not None:
+        q = q.filter(TutoringSessionRequest.id != exclude_request_id)
+
+    new_start = scheduled_at
+    new_end = scheduled_at + dt.timedelta(minutes=duration_minutes)
+    buffer = dt.timedelta(minutes=SCHEDULING_BUFFER_MINUTES)
+
+    for other in q.all():
+        other_start = other.scheduled_at
+        other_end = other_start + dt.timedelta(minutes=other.duration_minutes or 60)
+        if new_start < (other_end + buffer) and new_end > (other_start - buffer):
+            who = "You already have" if kind == "learner" else "This tutor already has"
+            raise TutoringError(
+                f"{who} a session scheduled around {other_start.strftime('%d %b %Y %H:%M')} - "
+                f"sessions need at least {SCHEDULING_BUFFER_MINUTES} minutes' gap between them. "
+                "Please choose a different time."
+            )
+
+
 def request_tutoring_session(
-    learner_user_id: int, subject: str, price_zar: float, duration_minutes: int = 60,
-    topic: str = "", preferred_times_note: str = "",
+    learner_user_id: int, subject: str, price_zar: float, scheduled_at: dt.datetime,
+    duration_minutes: int = 60, topic: str = "", preferred_times_note: str = "",
 ) -> dict:
     """A learner asking for a tutor, inDrive-style: the LEARNER sets the
-    price (and duration) right here, and the request then sits open for
-    any approved tutor who teaches `subject` to accept at that price (see
-    list_open_requests_for_tutor/accept_tutoring_request) - available
-    regardless of subscription tier, since tutoring is billed separately."""
+    price, exact date/time, and duration right here, and the request
+    then sits open for any approved tutor who teaches `subject` to
+    accept at that price/time (see list_open_requests_for_tutor/
+    accept_tutoring_request) - available regardless of subscription
+    tier, since tutoring is billed separately."""
     if price_zar is None or price_zar <= 0:
         raise TutoringError("Please set a price greater than R0 for this session.")
-    if not duration_minutes or duration_minutes <= 0:
-        raise TutoringError("Please set a session duration.")
+    if not duration_minutes or duration_minutes < MIN_SESSION_DURATION_MINUTES:
+        raise TutoringError(f"Sessions must be at least {MIN_SESSION_DURATION_MINUTES} minutes long.")
+    if not scheduled_at:
+        raise TutoringError("Please choose a date and time for this session.")
+    if scheduled_at <= dt.datetime.utcnow():
+        raise TutoringError("Please choose a date and time in the future.")
     with get_session() as db:
         learner = db.query(User).get(learner_user_id)
         if not learner:
             raise TutoringError("Account not found.")
+        _check_schedule_conflict(
+            db, kind="learner", person_id=learner_user_id,
+            scheduled_at=scheduled_at, duration_minutes=duration_minutes,
+        )
         req = TutoringSessionRequest(
             learner_user_id=learner_user_id,
             subject=subject,
@@ -505,6 +599,7 @@ def request_tutoring_session(
             preferred_times_note=preferred_times_note.strip() or None,
             price_zar=price_zar,
             duration_minutes=duration_minutes,
+            scheduled_at=scheduled_at,
             status="requested",
         )
         db.add(req)
@@ -570,7 +665,9 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "tutor_id": r.tutor_id,
         "tutor_name": r.tutor.name if r.tutor else None,
         "duration_minutes": r.duration_minutes, "price_zar": r.price_zar,
-        "scheduled_at": r.scheduled_at, "created_at": r.created_at,
+        "platform_cut_percent": r.platform_cut_percent,
+        "scheduled_at": r.scheduled_at, "proposed_scheduled_at": r.proposed_scheduled_at,
+        "created_at": r.created_at,
         "matched_at": r.matched_at, "paid_at": r.paid_at,
         "meet_link": r.meet_link,
         "learner_confirmed": r.learner_confirmed_at is not None,
@@ -580,44 +677,41 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
     }
 
 
-def _assign_tutor_to_request(
-    db, req: TutoringSessionRequest, tutor: TutorAccount, *, scheduled_at: dt.datetime | None,
-) -> None:
-    """Shared by accept_tutoring_request (tutor self-service) and
-    match_tutor_to_request (admin override) - moves the request to
-    awaiting_payment, snapshots the platform cut, and best-effort creates
-    a Google Meet session. Caller has already validated the tutor is
-    eligible; this just does the assignment."""
+def _assign_tutor_to_request(db, req: TutoringSessionRequest, tutor: TutorAccount) -> None:
+    """Shared by accept_tutoring_request, respond_to_time_proposal (on
+    approval), and match_tutor_to_request (admin override) - moves the
+    request to awaiting_payment, snapshots the platform cut, and
+    best-effort creates a Google Meet session using req.scheduled_at
+    (the caller must already have set this to the agreed time). Caller
+    has already validated the tutor is eligible; this just does the
+    assignment."""
     req.tutor_id = tutor.id
-    req.scheduled_at = scheduled_at
     req.platform_cut_percent = DEFAULT_PLATFORM_CUT_PERCENT
     req.status = "awaiting_payment"
     req.matched_at = dt.datetime.utcnow()
     req.m_payment_id = f"tutor-session-{req.id}-{uuid.uuid4().hex[:8]}"
 
-    if scheduled_at:
-        learner = db.query(User).get(req.learner_user_id)
-        try:
-            meet = _google_calendar.create_meet_session(
-                summary=f"Malita Tutoring: {req.subject}" + (f" ({req.topic})" if req.topic else ""),
-                description=f"Malita tutoring session between {learner.name} and {tutor.name}.",
-                start=scheduled_at, duration_minutes=req.duration_minutes or 60,
-                attendee_emails=[learner.email, tutor.email],
-            )
-            req.meet_link = meet["meet_link"]
-            req.calendar_event_id = meet["event_id"]
-        except _google_calendar.GoogleCalendarError:
-            logger.exception("Could not create a Google Meet session for request %s", req.id)
+    learner = db.query(User).get(req.learner_user_id)
+    try:
+        meet = _google_calendar.create_meet_session(
+            summary=f"Malita Tutoring: {req.subject}" + (f" ({req.topic})" if req.topic else ""),
+            description=f"Malita tutoring session between {learner.name} and {tutor.name}.",
+            start=req.scheduled_at, duration_minutes=req.duration_minutes or 60,
+            attendee_emails=[learner.email, tutor.email],
+        )
+        req.meet_link = meet["meet_link"]
+        req.calendar_event_id = meet["event_id"]
+    except _google_calendar.GoogleCalendarError:
+        logger.exception("Could not create a Google Meet session for request %s", req.id)
 
 
-def accept_tutoring_request(
-    request_id: int, tutor_id: int, scheduled_at: dt.datetime | None = None,
-) -> dict:
-    """A tutor accepting a learner's open, already-priced request - the
-    primary matching path (see this module's docstring). Only an
-    approved tutor who actively teaches the request's subject can accept
-    it - enforced here, not just by what the "open requests" list shows,
-    since the list is just a UI convenience."""
+def accept_tutoring_request(request_id: int, tutor_id: int) -> dict:
+    """A tutor accepting a learner's open, already-priced AND
+    already-timed request - the primary matching path (see this module's
+    docstring). Only an approved tutor who actively teaches the
+    request's subject, and who isn't already booked too close to that
+    time, can accept it. If the tutor can't make this exact time, use
+    propose_new_time instead."""
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
         if not req:
@@ -629,14 +723,118 @@ def accept_tutoring_request(
             raise TutoringError("Your tutor account isn't approved.")
         if not any(s.subject == req.subject and s.is_active for s in tutor.subjects):
             raise TutoringError(f"You're not approved to tutor {req.subject}.")
+        _check_schedule_conflict(
+            db, kind="tutor", person_id=tutor_id, scheduled_at=req.scheduled_at,
+            duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
+        )
 
-        _assign_tutor_to_request(db, req, tutor, scheduled_at=scheduled_at)
+        _assign_tutor_to_request(db, req, tutor)
 
         result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
         learner = db.query(User).get(req.learner_user_id)
         learner_name, learner_email = learner.name, learner.email
         tutor_name, tutor_email = tutor.name, tutor.email
-        subject, topic, price_zar, duration_minutes = req.subject, req.topic, req.price_zar, req.duration_minutes
+        subject, topic, price_zar, duration_minutes, scheduled_at = (
+            req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
+        )
+
+    _notify_match(
+        learner_name=learner_name, learner_email=learner_email,
+        tutor_name=tutor_name, tutor_email=tutor_email,
+        subject=subject, topic=topic, price_zar=price_zar,
+        duration_minutes=duration_minutes, scheduled_at=scheduled_at,
+        meet_link=result["meet_link"],
+    )
+    return result
+
+
+def propose_new_time(request_id: int, tutor_id: int, proposed_scheduled_at: dt.datetime) -> dict:
+    """A tutor who can't make the learner's exact requested time proposes
+    an alternative instead of accepting - reserves the request to this
+    tutor (so it stops showing as open to other tutors) and moves it to
+    time_proposed, awaiting the learner's approve/decline (see
+    respond_to_time_proposal). The tutor's own schedule is checked
+    against the PROPOSED time, same as a direct accept."""
+    if not proposed_scheduled_at or proposed_scheduled_at <= dt.datetime.utcnow():
+        raise TutoringError("Please propose a date and time in the future.")
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Request not found.")
+        if req.status != "requested":
+            raise TutoringError("This request is no longer open.")
+        tutor = db.query(TutorAccount).get(tutor_id)
+        if not tutor or tutor.status != "approved":
+            raise TutoringError("Your tutor account isn't approved.")
+        if not any(s.subject == req.subject and s.is_active for s in tutor.subjects):
+            raise TutoringError(f"You're not approved to tutor {req.subject}.")
+        _check_schedule_conflict(
+            db, kind="tutor", person_id=tutor_id, scheduled_at=proposed_scheduled_at,
+            duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
+        )
+
+        req.tutor_id = tutor_id
+        req.proposed_scheduled_at = proposed_scheduled_at
+        req.status = "time_proposed"
+
+        result = {"id": req.id, "status": req.status}
+        learner = db.query(User).get(req.learner_user_id)
+        learner_name, learner_email = learner.name, learner.email
+        tutor_name = tutor.name
+        subject, topic = req.subject, req.topic
+
+    _notify_time_proposed(
+        learner_name=learner_name, learner_email=learner_email, tutor_name=tutor_name,
+        subject=subject, topic=topic, proposed_scheduled_at=proposed_scheduled_at,
+    )
+    return result
+
+
+def respond_to_time_proposal(request_id: int, learner_user_id: int, accept: bool) -> dict:
+    """The learner approving or declining a tutor's proposed alternative
+    time (see propose_new_time). Approving locks in that time (same
+    effect as a direct accept, including a fresh conflict recheck on
+    both sides and Meet creation); declining reopens the request for any
+    tutor to accept or propose again."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.learner_user_id != learner_user_id:
+            raise TutoringError("Request not found.")
+        if req.status != "time_proposed":
+            raise TutoringError(f"This request is '{req.status}', not awaiting a time response.")
+
+        if not accept:
+            req.tutor_id = None
+            req.proposed_scheduled_at = None
+            req.status = "requested"
+            return {"id": req.id, "status": req.status}
+
+        tutor = db.query(TutorAccount).get(req.tutor_id)
+        if not tutor or tutor.status != "approved":
+            raise TutoringError("That tutor is no longer approved.")
+        proposed_at = req.proposed_scheduled_at
+        # Re-check both sides - time has passed since the proposal, or
+        # either party may have booked something else in the meantime.
+        _check_schedule_conflict(
+            db, kind="learner", person_id=learner_user_id, scheduled_at=proposed_at,
+            duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
+        )
+        _check_schedule_conflict(
+            db, kind="tutor", person_id=req.tutor_id, scheduled_at=proposed_at,
+            duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
+        )
+        req.scheduled_at = proposed_at
+        req.proposed_scheduled_at = None
+
+        _assign_tutor_to_request(db, req, tutor)
+
+        result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
+        learner = db.query(User).get(req.learner_user_id)
+        learner_name, learner_email = learner.name, learner.email
+        tutor_name, tutor_email = tutor.name, tutor.email
+        subject, topic, price_zar, duration_minutes, scheduled_at = (
+            req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
+        )
 
     _notify_match(
         learner_name=learner_name, learner_email=learner_email,
@@ -651,37 +849,68 @@ def accept_tutoring_request(
 def match_tutor_to_request(
     request_id: int, tutor_id: int, scheduled_at: dt.datetime | None = None,
 ) -> dict:
-    """Admin override: force-assigns an approved tutor to an open request
-    at the price/duration the learner already set - bypasses the
-    subject-match check accept_tutoring_request enforces, since this is
-    a manual admin decision, not self-service. Still the exception path,
-    not the primary one - see this module's docstring."""
+    """Admin override: force-assigns an approved tutor to an open (or
+    time_proposed) request at the price the learner already set -
+    bypasses the subject-match and schedule-conflict checks
+    accept_tutoring_request enforces, since this is a manual admin
+    decision, not self-service. Defaults to the learner's own chosen
+    scheduled_at if no override is given. Still the exception path, not
+    the primary one - see this module's docstring."""
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
         if not req:
             raise TutoringError("Request not found.")
-        if req.status != "requested":
+        if req.status not in ("requested", "time_proposed"):
             raise TutoringError(f"This request is already '{req.status}', not awaiting a match.")
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor or tutor.status != "approved":
             raise TutoringError("That tutor is not an approved, active tutor.")
 
-        _assign_tutor_to_request(db, req, tutor, scheduled_at=scheduled_at)
+        if scheduled_at:
+            req.scheduled_at = scheduled_at
+        req.proposed_scheduled_at = None
+        _assign_tutor_to_request(db, req, tutor)
 
         result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
         learner = db.query(User).get(req.learner_user_id)
         learner_name, learner_email = learner.name, learner.email
         tutor_name, tutor_email = tutor.name, tutor.email
-        subject, topic, price_zar, duration_minutes = req.subject, req.topic, req.price_zar, req.duration_minutes
+        subject, topic, price_zar, duration_minutes, final_scheduled_at = (
+            req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
+        )
 
     _notify_match(
         learner_name=learner_name, learner_email=learner_email,
         tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, price_zar=price_zar,
-        duration_minutes=duration_minutes, scheduled_at=scheduled_at,
+        duration_minutes=duration_minutes, scheduled_at=final_scheduled_at,
         meet_link=result["meet_link"],
     )
     return result
+
+
+def _notify_time_proposed(
+    *, learner_name: str, learner_email: str, tutor_name: str,
+    subject: str, topic: str | None, proposed_scheduled_at: dt.datetime,
+) -> None:
+    """Best-effort, same pattern as _notify_match - a failed or
+    unconfigured email send must never break propose_new_time itself."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = proposed_scheduled_at.strftime("%A, %d %B %Y at %H:%M")
+        send_email(
+            learner_email,
+            "Your tutor proposed a new time",
+            (
+                f"Hi {learner_name},\n\n"
+                f"{tutor_name} can't make your requested time for {subject}{topic_str}, "
+                f"but proposed instead:\n\n{when_str}\n\n"
+                "Open the Malita app to approve or decline this new time.\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify learner %s of a proposed time change", learner_email)
 
 
 def _notify_match(

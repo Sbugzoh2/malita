@@ -397,20 +397,36 @@ class TutoringSessionRequest(Base):
     manual override - see backend/tutoring.py's match_tutor_to_request -
     but that's no longer the primary path).
 
-    status flow: requested (open, priced by the learner, visible to
-    qualifying tutors) -> accepted (a tutor took it) -> awaiting_payment
-    -> confirmed (the learner's payment cleared) -> completed (BOTH the
+    status flow: requested (open, priced AND timed by the learner,
+    visible to qualifying tutors) -> time_proposed (a tutor can't make
+    the learner's exact time and proposed an alternative - see
+    proposed_scheduled_at - awaiting the learner's approve/decline) ->
+    back to requested if declined, or -> awaiting_payment if the learner
+    approves (or a tutor accepted the original time directly) ->
+    confirmed (the learner's payment cleared) -> completed (BOTH the
     learner and the tutor have independently confirmed the session
     actually happened and rated each other - see learner_confirmed_at/
     tutor_confirmed_at below; this is also when the payout row is
     created, not at payment time, so a no-show can't collect a payout),
-    or cancelled at any point before confirmed."""
+    or cancelled at any point before confirmed.
+
+    scheduled_at is REQUIRED at request time (the learner picks an exact
+    date/time, not a vague "preferred times" note) - see
+    backend/tutoring.py's request_tutoring_session, which also enforces
+    a minimum 60-minute duration and checks the learner isn't already
+    booked within 15 minutes of that slot. The same two checks (no
+    double-booking, 15-minute buffer) apply to a tutor accepting or
+    proposing a time."""
     __tablename__ = "tutoring_session_requests"
 
     id = Column(Integer, primary_key=True)
     learner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     subject = Column(String(60), nullable=False)
     topic = Column(String(60), nullable=True)
+    # Free-text extra context (e.g. "need help with proofs specifically")
+    # - NOT where the learner's actual time goes anymore, that's the
+    # required scheduled_at below. Column name kept as-is to avoid a
+    # rename migration.
     preferred_times_note = Column(String, nullable=True)
     status = Column(String(20), default="requested", nullable=False)
     tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=True)
@@ -424,6 +440,11 @@ class TutoringSessionRequest(Base):
     platform_cut_percent = Column(Float, nullable=True)
     m_payment_id = Column(String(64), nullable=True, unique=True)
     scheduled_at = Column(DateTime, nullable=True)
+    # A tutor's proposed alternative to the learner's scheduled_at, set
+    # by propose_new_time() while status is "time_proposed" - cleared
+    # once the learner approves (scheduled_at is overwritten with this
+    # value) or declines (this is cleared and the request reopens).
+    proposed_scheduled_at = Column(DateTime, nullable=True)
     # The Google Meet link + Calendar event id generated once a tutor
     # accepts (see backend/google_calendar.py) - both nullable since Meet
     # creation can fail/not be configured yet, and the session itself
@@ -490,6 +511,20 @@ class TutorApiToken(Base):
     token = Column(String(64), unique=True, nullable=False, index=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
+
+
+class TutorPasswordReset(Base):
+    """One-time password-reset tokens for a tutor's own login - mirrors
+    PasswordReset, but scoped to tutor_accounts since a tutor's password
+    is entirely separate from any learner User row."""
+    __tablename__ = "tutor_password_resets"
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=False)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
 
 
 class GoogleCalendarCredentials(Base):
@@ -576,6 +611,7 @@ def init_db():
     _ensure_column("tutoring_session_requests", "tutor_confirmed_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "tutor_rating", "INTEGER")
     _ensure_column("tutoring_session_requests", "tutor_rating_comment", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "proposed_scheduled_at", "TIMESTAMP")
     _migrate_removed_tier("super_premium", "premium")
 
 

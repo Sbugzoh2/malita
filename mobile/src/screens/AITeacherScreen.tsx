@@ -157,7 +157,7 @@ export default function AITeacherScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },

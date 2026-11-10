@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  container: { flexGrow: 1, padding: 24, justifyContent: "center" },
+  container: { flexGrow: 1, padding: 24, paddingBottom: 40, justifyContent: "center" },
   title: { fontSize: 32, fontWeight: "700", textAlign: "center", color: colors.text },
   subtitle: { fontSize: 16, textAlign: "center", color: colors.textSecondary, marginBottom: 24 },
   card: {

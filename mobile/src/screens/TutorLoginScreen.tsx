@@ -9,10 +9,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from "react-native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
-import { ApiError } from "../api/client";
+import { ApiError, tutorForgotPassword, tutorResetPassword } from "../api/client";
+
+// Applying to tutor happens on a public web form, not in the app itself
+// (it needs file uploads for ID/matric/CV documents) - this is the one
+// place a prospective tutor would land without already having an
+// account, so it's the one place that needs to point them there.
+const APPLY_URL = "https://malitatech.co.za/apply-to-tutor.html";
 
 export default function TutorLoginScreen({ navigation }: any) {
   const { login } = useTutorAuth();
@@ -20,7 +27,15 @@ export default function TutorLoginScreen({ navigation }: any) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   async function handleLogin() {
     setError(null);
@@ -31,6 +46,61 @@ export default function TutorLoginScreen({ navigation }: any) {
       setError(e instanceof ApiError ? e.message : "Could not log in. Please try again.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    setError(null);
+    setInfo(null);
+    setResetDone(false);
+    if (!email.trim()) {
+      setError("Enter your email above first, then tap 'Forgot password?'");
+      return;
+    }
+    try {
+      const res = await tutorForgotPassword(email.trim().toLowerCase());
+      setInfo(res.message);
+      // Email isn't configured yet in this environment, so the API hands
+      // the reset code straight back - reveal the code + new-password
+      // fields right here instead of leaving the tutor stuck with no
+      // inbox to check (same fallback the learner login screen uses).
+      if (res.reset_token) {
+        setResetToken(res.reset_token);
+        setResetCode(res.reset_token);
+      } else {
+        setResetToken(null);
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Something went wrong.");
+    }
+  }
+
+  async function handleResetPassword() {
+    setError(null);
+    if (!resetCode.trim()) {
+      setError("Enter the reset code first.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters long.");
+      return;
+    }
+    if (newPassword !== newPasswordConfirm) {
+      setError("Passwords don't match.");
+      return;
+    }
+    setResetSubmitting(true);
+    try {
+      await tutorResetPassword(resetCode.trim(), newPassword);
+      setResetDone(true);
+      setResetToken(null);
+      setInfo("Password updated! You can now log in with your new password.");
+      setNewPassword("");
+      setNewPasswordConfirm("");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Something went wrong.");
+    } finally {
+      setResetSubmitting(false);
     }
   }
 
@@ -69,6 +139,7 @@ export default function TutorLoginScreen({ navigation }: any) {
           </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
+          {info ? <Text style={styles.info}>{info}</Text> : null}
 
           <Pressable
             style={[styles.button, submitting && styles.buttonDisabled]}
@@ -81,7 +152,58 @@ export default function TutorLoginScreen({ navigation }: any) {
               <Text style={styles.buttonText}>Log In</Text>
             )}
           </Pressable>
+
+          <Pressable onPress={handleForgotPassword} style={styles.linkButton}>
+            <Text style={styles.link}>Forgot your password?</Text>
+          </Pressable>
+
+          {resetToken && !resetDone ? (
+            <View style={styles.resetBox}>
+              <Text style={styles.label}>Reset code</Text>
+              <TextInput
+                style={styles.input}
+                value={resetCode}
+                onChangeText={setResetCode}
+                autoCapitalize="none"
+                placeholder="Reset code"
+              />
+
+              <Text style={styles.label}>New password</Text>
+              <TextInput
+                style={styles.input}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry
+                placeholder="••••••••"
+              />
+
+              <Text style={styles.label}>Confirm new password</Text>
+              <TextInput
+                style={styles.input}
+                value={newPasswordConfirm}
+                onChangeText={setNewPasswordConfirm}
+                secureTextEntry
+                placeholder="••••••••"
+              />
+
+              <Pressable
+                style={[styles.button, resetSubmitting && styles.buttonDisabled]}
+                onPress={handleResetPassword}
+                disabled={resetSubmitting}
+              >
+                {resetSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>Update Password</Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
         </View>
+
+        <Pressable onPress={() => Linking.openURL(APPLY_URL)} style={styles.linkButton}>
+          <Text style={styles.link}>Not a tutor yet? Apply here</Text>
+        </Pressable>
 
         <Pressable onPress={() => navigation.goBack()} style={styles.linkButton}>
           <Text style={styles.link}>‹ Back to learner login</Text>
@@ -93,7 +215,13 @@ export default function TutorLoginScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  container: { flexGrow: 1, padding: 24, justifyContent: "center" },
+  resetBox: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  container: { flexGrow: 1, padding: 24, paddingBottom: 40, justifyContent: "center" },
   title: { fontSize: 28, fontWeight: "700", textAlign: "center", color: colors.text },
   subtitle: { fontSize: 14, textAlign: "center", color: colors.textSecondary, marginTop: 6, marginBottom: 24 },
   card: {
@@ -133,4 +261,5 @@ const styles = StyleSheet.create({
   linkButton: { marginTop: 16, alignItems: "center" },
   link: { color: colors.primary, fontWeight: "600" },
   error: { color: colors.error, marginTop: 12 },
+  info: { color: colors.primaryDark, marginTop: 12 },
 });

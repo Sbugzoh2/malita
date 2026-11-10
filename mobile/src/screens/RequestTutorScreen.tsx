@@ -13,14 +13,21 @@ import { useAuth } from "../context/AuthContext";
 import { colors, SUBJECTS, Subject } from "../theme";
 import { ApiError, requestTutoringSession } from "../api/client";
 import Dropdown from "../components/Dropdown";
+import SessionDateTimePicker, {
+  SessionDateTimeValue,
+  sessionDateTimeToIso,
+} from "../components/SessionDateTimePicker";
+
+const MIN_DURATION_MINUTES = 60;
 
 export default function RequestTutorScreen({ navigation }: any) {
   const { token } = useAuth();
   const [subject, setSubject] = useState<Subject>("Mathematics");
   const [price, setPrice] = useState("");
   const [duration, setDuration] = useState("60");
+  const [dateTime, setDateTime] = useState<SessionDateTimeValue>(null);
   const [topic, setTopic] = useState("");
-  const [preferredTimes, setPreferredTimes] = useState("");
+  const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,15 +38,25 @@ export default function RequestTutorScreen({ navigation }: any) {
       setError("Please enter a price greater than R0.");
       return;
     }
+    const durationVal = parseInt(duration, 10) || 0;
+    if (durationVal < MIN_DURATION_MINUTES) {
+      setError(`Sessions must be at least ${MIN_DURATION_MINUTES} minutes long.`);
+      return;
+    }
+    if (!dateTime) {
+      setError("Please select a date and time for your session.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       await requestTutoringSession(token, {
         subject,
         price_zar: priceVal,
-        duration_minutes: parseInt(duration, 10) || 60,
+        scheduled_at: sessionDateTimeToIso(dateTime),
+        duration_minutes: durationVal,
         topic: topic.trim(),
-        preferred_times_note: preferredTimes.trim(),
+        preferred_times_note: notes.trim(),
       });
       navigation.replace("MyTutoringRequests");
     } catch (e) {
@@ -81,7 +98,7 @@ export default function RequestTutorScreen({ navigation }: any) {
           placeholder="e.g. 250"
         />
 
-        <Text style={styles.label}>Session duration (minutes)</Text>
+        <Text style={styles.label}>Session duration (minutes, 60 min minimum)</Text>
         <TextInput
           style={styles.input}
           value={duration}
@@ -89,6 +106,8 @@ export default function RequestTutorScreen({ navigation }: any) {
           keyboardType="numeric"
           placeholder="60"
         />
+
+        <SessionDateTimePicker label="Session date & time" value={dateTime} onChange={setDateTime} />
 
         <Text style={styles.label}>Topic (optional)</Text>
         <TextInput
@@ -98,12 +117,12 @@ export default function RequestTutorScreen({ navigation }: any) {
           placeholder="e.g. Calculus, Electric Circuits..."
         />
 
-        <Text style={styles.label}>Preferred times (optional)</Text>
+        <Text style={styles.label}>Additional notes (optional)</Text>
         <TextInput
           style={[styles.input, styles.textArea]}
-          value={preferredTimes}
-          onChangeText={setPreferredTimes}
-          placeholder="e.g. Weekday evenings after 5pm, or Saturday mornings"
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="e.g. I'd like help with proofs specifically"
           multiline
         />
 
@@ -118,8 +137,9 @@ export default function RequestTutorScreen({ navigation }: any) {
         </Pressable>
 
         <Text style={styles.note}>
-          Your request goes straight to tutors who teach this subject - once one accepts at your
-          price, you'll be asked to pay securely before the session is confirmed.
+          Your request goes straight to tutors who teach this subject - once one accepts your
+          price and time (or proposes a different time for you to approve), you'll be asked to
+          pay securely before the session is confirmed.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -128,7 +148,7 @@ export default function RequestTutorScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },

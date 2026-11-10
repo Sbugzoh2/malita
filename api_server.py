@@ -72,12 +72,13 @@ from backend.tutoring import (
     TutoringError, apply_as_tutor, list_tutor_applications, approve_tutor,
     reject_tutor, list_approved_tutors, request_tutoring_session,
     list_learner_requests, list_open_requests, list_open_requests_for_tutor,
-    match_tutor_to_request, accept_tutoring_request,
-    confirm_session_by_learner, confirm_session_by_tutor,
+    match_tutor_to_request, accept_tutoring_request, propose_new_time,
+    respond_to_time_proposal, confirm_session_by_learner, confirm_session_by_tutor,
     cancel_session, complete_session, list_pending_payouts, mark_payout_paid,
     get_tutor_document_url, get_tutor_profile, login_tutor,
     create_tutor_api_token, get_tutor_by_token, revoke_tutor_api_token,
-    list_tutor_own_payouts,
+    list_tutor_own_payouts, create_tutor_password_reset, reset_tutor_password,
+    DEFAULT_PLATFORM_CUT_PERCENT,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -235,6 +236,7 @@ class TutorSubjectInput(BaseModel):
 class TutoringRequestRequest(BaseModel):
     subject: str
     price_zar: float
+    scheduled_at: str  # ISO 8601, required - not optional, see request_tutoring_session
     duration_minutes: int = 60
     topic: str = ""
     preferred_times_note: str = ""
@@ -249,8 +251,12 @@ class TutorMatchRequest(BaseModel):
     scheduled_at: str | None = None  # ISO 8601, optional
 
 
-class TutorAcceptRequest(BaseModel):
-    scheduled_at: str | None = None  # ISO 8601, optional
+class TutorProposeTimeRequest(BaseModel):
+    proposed_scheduled_at: str  # ISO 8601
+
+
+class TimeProposalResponseRequest(BaseModel):
+    accept: bool
 
 
 class SessionConfirmRequest(BaseModel):
@@ -1060,6 +1066,42 @@ def tutor_login(body: TutorLoginRequest):
     return {"token": token, "tutor": tutor}
 
 
+@app.post("/tutor/forgot-password")
+def tutor_forgot_password(body: ForgotPasswordRequest):
+    """A tutor's own password reset - no clickable web link (there's no
+    web page for a tutor to land on, unlike the learner flow's Streamlit
+    app), so this always sends/returns a plain code to enter in the app."""
+    token = create_tutor_password_reset(body.email)
+    if not token:
+        # Never reveal whether an email has a tutor account - same
+        # generic message as the "sent" case below.
+        return {"message": "If a tutor account exists for that email, a reset code has been generated.", "reset_token": None}
+
+    sent = send_email(
+        body.email,
+        "Reset your Malita tutor password",
+        f"Enter this code in the Malita app to set a new password (valid for 1 hour): {token}",
+    )
+    if sent:
+        return {"message": "Check your email for a password reset code (valid for 1 hour).", "reset_token": None}
+
+    # Email isn't configured yet - hand the token straight back so the
+    # app can still complete the reset (same fallback the learner flow uses).
+    return {
+        "message": "Email sending isn't configured yet, so here's your reset code directly (valid for 1 hour):",
+        "reset_token": token,
+    }
+
+
+@app.post("/tutor/reset-password")
+def tutor_do_reset_password(body: ResetPasswordRequest):
+    try:
+        reset_tutor_password(body.token, body.new_password)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
 @app.post("/tutor/logout")
 def tutor_logout(authorization: str = Header(None)):
     if authorization and authorization.startswith("Bearer "):
@@ -1097,25 +1139,41 @@ def tutor_requests_open(authorization: str = Header(None)):
     list_open_requests_for_tutor)."""
     tutor = _auth_tutor(authorization)
     try:
-        return {"requests": list_open_requests_for_tutor(tutor["id"])}
+        return {
+            "requests": list_open_requests_for_tutor(tutor["id"]),
+            # Not yet matched, so there's no snapshotted platform_cut_percent
+            # on these requests - the live default is what accepting one
+            # right now would actually apply, for an accurate payout preview.
+            "platform_cut_percent": DEFAULT_PLATFORM_CUT_PERCENT,
+        }
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/tutor/requests/{request_id}/accept")
-def tutor_accept_request(request_id: int, payload: TutorAcceptRequest, authorization: str = Header(None)):
-    """A tutor accepting a learner's open, already-priced request - the
-    primary matching path (see backend/tutoring.py's
-    accept_tutoring_request)."""
+def tutor_accept_request(request_id: int, authorization: str = Header(None)):
+    """A tutor accepting a learner's open, already-priced AND
+    already-timed request - the primary matching path (see
+    backend/tutoring.py's accept_tutoring_request). If the tutor can't
+    make the learner's exact time, use /propose-time instead."""
     tutor = _auth_tutor(authorization)
-    scheduled_at = None
-    if payload.scheduled_at:
-        try:
-            scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid scheduled date/time format.")
     try:
-        return accept_tutoring_request(request_id, tutor["id"], scheduled_at=scheduled_at)
+        return accept_tutoring_request(request_id, tutor["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutor/requests/{request_id}/propose-time")
+def tutor_propose_time(request_id: int, payload: TutorProposeTimeRequest, authorization: str = Header(None)):
+    """A tutor proposing an alternative time when they can't make the
+    learner's exact requested time (see propose_new_time)."""
+    tutor = _auth_tutor(authorization)
+    try:
+        proposed_at = dt.datetime.fromisoformat(payload.proposed_scheduled_at)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date/time format.")
+    try:
+        return propose_new_time(request_id, tutor["id"], proposed_at)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1214,10 +1272,27 @@ def tutoring_create_request(payload: TutoringRequestRequest, authorization: str 
     including Free, since tutoring is billed separately."""
     user = _auth_user(authorization)
     try:
+        scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date/time format.")
+    try:
         return request_tutoring_session(
-            user["id"], payload.subject, payload.price_zar, payload.duration_minutes,
-            payload.topic, payload.preferred_times_note,
+            user["id"], payload.subject, payload.price_zar, scheduled_at,
+            payload.duration_minutes, payload.topic, payload.preferred_times_note,
         )
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/respond-to-proposal")
+def tutoring_respond_to_proposal(
+    request_id: int, payload: TimeProposalResponseRequest, authorization: str = Header(None)
+):
+    """The learner approving or declining a tutor's proposed alternative
+    time (see respond_to_time_proposal)."""
+    user = _auth_user(authorization)
+    try:
+        return respond_to_time_proposal(request_id, user["id"], payload.accept)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

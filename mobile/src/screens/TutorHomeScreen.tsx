@@ -12,10 +12,25 @@ import {
   fetchTutorMyPayouts,
   fetchTutorOpenRequests,
   acceptTutoringRequest,
+  proposeNewTime,
   confirmTutoringSessionAsTutor,
 } from "../api/client";
+import SessionDateTimePicker, {
+  SessionDateTimeValue,
+  sessionDateTimeToIso,
+} from "../components/SessionDateTimePicker";
 
 type Section = "open" | "sessions" | "payouts";
+
+function formatScheduled(iso: string): string {
+  return new Date(iso).toLocaleString("en-ZA", {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function payoutPreview(priceZar: number, cutPercent: number): string {
+  return `R${(priceZar * (1 - cutPercent / 100)).toFixed(2)}`;
+}
 
 const STATUS_COLOR: Record<string, string> = {
   pending_review: colors.textSecondary,
@@ -41,10 +56,13 @@ export default function TutorHomeScreen() {
   const [profile, setProfile] = useState<TutorProfile | null>(null);
   const [payouts, setPayouts] = useState<TutorPayout[] | null>(null);
   const [openRequests, setOpenRequests] = useState<TutoringRequest[] | null>(null);
+  const [openCutPercent, setOpenCutPercent] = useState<number>(30);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("open");
-  const [scheduleDraft, setScheduleDraft] = useState<Record<number, string>>({});
+  const [proposingId, setProposingId] = useState<number | null>(null);
+  const [proposeDateTime, setProposeDateTime] = useState<Record<number, SessionDateTimeValue>>({});
   const [acceptingId, setAcceptingId] = useState<number | null>(null);
+  const [sendingProposalId, setSendingProposalId] = useState<number | null>(null);
   const [ratingDraft, setRatingDraft] = useState<Record<number, number>>({});
   const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
@@ -58,35 +76,44 @@ export default function TutorHomeScreen() {
       .then((res) => setPayouts(res.payouts))
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load your payouts."));
     fetchTutorOpenRequests(token)
-      .then((res) => setOpenRequests(res.requests))
+      .then((res) => {
+        setOpenRequests(res.requests);
+        setOpenCutPercent(res.platform_cut_percent);
+      })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load open requests."));
   }, [token]);
 
   async function handleAccept(requestId: number) {
     if (!token) return;
-    const raw = (scheduleDraft[requestId] || "").trim();
-    let scheduledAt: string | null = null;
-    if (raw) {
-      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(raw)) {
-        setError("Scheduled date/time must look like 2026-11-20 18:00");
-        return;
-      }
-      const parsed = new Date(raw.replace(" ", "T"));
-      if (isNaN(parsed.getTime())) {
-        setError("Scheduled date/time must look like 2026-11-20 18:00");
-        return;
-      }
-      scheduledAt = parsed.toISOString();
-    }
     setAcceptingId(requestId);
     setError(null);
     try {
-      await acceptTutoringRequest(token, requestId, scheduledAt);
+      await acceptTutoringRequest(token, requestId);
       load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not accept this request.");
     } finally {
       setAcceptingId(null);
+    }
+  }
+
+  async function handleSendProposal(requestId: number) {
+    if (!token) return;
+    const dt = proposeDateTime[requestId];
+    if (!dt) {
+      setError("Please pick a date and time to propose.");
+      return;
+    }
+    setSendingProposalId(requestId);
+    setError(null);
+    try {
+      await proposeNewTime(token, requestId, sessionDateTimeToIso(dt));
+      setProposingId(null);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not send that proposal.");
+    } finally {
+      setSendingProposalId(null);
     }
   }
 
@@ -179,16 +206,17 @@ export default function TutorHomeScreen() {
                   <Text style={styles.cardMeta}>
                     R{r.price_zar}{r.duration_minutes ? ` · ${r.duration_minutes} min` : ""}
                   </Text>
-                  {r.preferred_times_note ? (
-                    <Text style={styles.cardMeta}>Preferred times: {r.preferred_times_note}</Text>
+                  <Text style={styles.payoutNote}>
+                    You'll receive {r.price_zar != null ? payoutPreview(r.price_zar, openCutPercent) : "—"} after
+                    Malita's {openCutPercent}% cut — the amount above is not your final payout.
+                  </Text>
+                  {r.scheduled_at ? (
+                    <Text style={styles.cardMeta}>Requested time: {formatScheduled(r.scheduled_at)}</Text>
                   ) : null}
-                  <Text style={styles.label}>Scheduled date/time (optional)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={scheduleDraft[r.id] || ""}
-                    onChangeText={(v) => setScheduleDraft((prev) => ({ ...prev, [r.id]: v }))}
-                    placeholder="e.g. 2026-11-20 18:00"
-                  />
+                  {r.preferred_times_note ? (
+                    <Text style={styles.cardMeta}>Notes: {r.preferred_times_note}</Text>
+                  ) : null}
+
                   <Pressable
                     style={styles.acceptButton}
                     onPress={() => handleAccept(r.id)}
@@ -197,9 +225,41 @@ export default function TutorHomeScreen() {
                     {acceptingId === r.id ? (
                       <ActivityIndicator color="#fff" />
                     ) : (
-                      <Text style={styles.acceptButtonText}>Accept at R{r.price_zar}</Text>
+                      <Text style={styles.acceptButtonText}>
+                        Accept{r.scheduled_at ? ` at ${formatScheduled(r.scheduled_at)}` : ""}
+                      </Text>
                     )}
                   </Pressable>
+
+                  <Pressable
+                    style={styles.proposeLinkButton}
+                    onPress={() => setProposingId(proposingId === r.id ? null : r.id)}
+                  >
+                    <Text style={styles.proposeLinkText}>
+                      {proposingId === r.id ? "Cancel" : "Can't make that time? Propose a different one"}
+                    </Text>
+                  </Pressable>
+
+                  {proposingId === r.id && (
+                    <View style={styles.confirmBox}>
+                      <SessionDateTimePicker
+                        label="Propose a new date & time"
+                        value={proposeDateTime[r.id] || null}
+                        onChange={(v) => setProposeDateTime((prev) => ({ ...prev, [r.id]: v }))}
+                      />
+                      <Pressable
+                        style={styles.acceptButton}
+                        onPress={() => handleSendProposal(r.id)}
+                        disabled={sendingProposalId === r.id}
+                      >
+                        {sendingProposalId === r.id ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <Text style={styles.acceptButtonText}>Send Proposal</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  )}
                 </View>
               ))
             )
@@ -217,16 +277,23 @@ export default function TutorHomeScreen() {
                   </Text>
                   <Text style={styles.cardStatus}>{sess.status_label}</Text>
                   {sess.price_zar != null ? (
-                    <Text style={styles.cardMeta}>
-                      R{sess.price_zar}{sess.duration_minutes ? ` · ${sess.duration_minutes} min` : ""}
-                    </Text>
+                    <>
+                      <Text style={styles.cardMeta}>
+                        R{sess.price_zar}{sess.duration_minutes ? ` · ${sess.duration_minutes} min` : ""}
+                      </Text>
+                      <Text style={styles.payoutNote}>
+                        You'll receive {payoutPreview(sess.price_zar, sess.platform_cut_percent ?? openCutPercent)} after
+                        Malita's {sess.platform_cut_percent ?? openCutPercent}% cut.
+                      </Text>
+                    </>
                   ) : null}
-                  {sess.scheduled_at ? (
+                  {sess.status === "time_proposed" ? (
                     <Text style={styles.cardMeta}>
-                      Scheduled: {new Date(sess.scheduled_at).toLocaleString("en-ZA", {
-                        year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                      })}
+                      Your proposed time: {sess.proposed_scheduled_at ? formatScheduled(sess.proposed_scheduled_at) : "—"} -
+                      awaiting the learner's approval.
                     </Text>
+                  ) : sess.scheduled_at ? (
+                    <Text style={styles.cardMeta}>Scheduled: {formatScheduled(sess.scheduled_at)}</Text>
                   ) : null}
                   {sess.meet_link ? (
                     <Text style={styles.cardMeta}>🎥 Google Meet link sent by email</Text>
@@ -302,7 +369,7 @@ export default function TutorHomeScreen() {
 
 const styles = StyleSheet.create({
   loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-  container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   statusBadge: { fontSize: 14, fontWeight: "700", marginTop: 6, marginBottom: 16 },
   error: { color: colors.error, marginBottom: 12 },
@@ -348,6 +415,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   acceptButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  payoutNote: { fontSize: 12, color: colors.textSecondary, marginTop: 4, fontStyle: "italic" },
+  proposeLinkButton: { marginTop: 10, alignItems: "center" },
+  proposeLinkText: { color: colors.primary, fontWeight: "600", fontSize: 13 },
   confirmBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   confirmLabel: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 8 },
   starRow: { flexDirection: "row", gap: 6 },

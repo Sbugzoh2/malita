@@ -8,6 +8,7 @@ import {
   fetchMyTutoringRequests,
   tutoringCheckoutUrl,
   confirmTutoringSessionAsLearner,
+  respondToTimeProposal,
   TutoringRequest,
 } from "../api/client";
 
@@ -24,6 +25,7 @@ function formatDate(iso: string | null): string {
 
 const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   requested: colors.textSecondary,
+  time_proposed: "#eda100",
   awaiting_payment: "#eda100",
   confirmed: colors.primary,
   completed: colors.success,
@@ -49,6 +51,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const [ratingDraft, setRatingDraft] = useState<Record<number, number>>({});
   const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [respondingId, setRespondingId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -92,6 +95,20 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     }
   }
 
+  async function handleRespond(requestId: number, accept: boolean) {
+    if (!token) return;
+    setRespondingId(requestId);
+    setError(null);
+    try {
+      await respondToTimeProposal(token, requestId, accept);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not record your response.");
+    } finally {
+      setRespondingId(null);
+    }
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
@@ -116,7 +133,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
             </View>
 
             {r.preferred_times_note ? (
-              <Text style={styles.cardMeta}>Preferred times: {r.preferred_times_note}</Text>
+              <Text style={styles.cardMeta}>Notes: {r.preferred_times_note}</Text>
             ) : null}
 
             {r.tutor_name ? <Text style={styles.cardMeta}>Tutor: {r.tutor_name}</Text> : null}
@@ -131,6 +148,38 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
                 <Text style={styles.meetLink}>🎥 Join via Google Meet</Text>
               </Pressable>
             ) : null}
+
+            {r.status === "time_proposed" && (
+              <View style={styles.proposalBox}>
+                <Text style={styles.confirmLabel}>
+                  Your tutor proposed a different time: {formatDate(r.proposed_scheduled_at)}
+                </Text>
+                <View style={styles.proposalButtonRow}>
+                  <Pressable
+                    style={[styles.confirmButton, styles.proposalApproveButton]}
+                    onPress={() => handleRespond(r.id, true)}
+                    disabled={respondingId === r.id}
+                  >
+                    {respondingId === r.id ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.confirmButtonText}>Approve</Text>
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={[styles.confirmButton, styles.proposalDeclineButton]}
+                    onPress={() => handleRespond(r.id, false)}
+                    disabled={respondingId === r.id}
+                  >
+                    {respondingId === r.id ? (
+                      <ActivityIndicator color={colors.primary} />
+                    ) : (
+                      <Text style={styles.proposalDeclineButtonText}>Decline</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
 
             {r.status === "awaiting_payment" && (
               <Pressable style={styles.payButton} onPress={() => handlePay(r.id)}>
@@ -182,7 +231,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text, marginBottom: 16 },
@@ -230,6 +279,17 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   confirmButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  proposalBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+  proposalButtonRow: { flexDirection: "row", gap: 10 },
+  proposalApproveButton: { flex: 1, marginTop: 0 },
+  proposalDeclineButton: {
+    flex: 1,
+    marginTop: 0,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  proposalDeclineButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
   newRequestButton: {
     borderRadius: 999,
     paddingVertical: 14,

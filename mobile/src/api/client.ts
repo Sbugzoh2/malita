@@ -254,13 +254,15 @@ export type TutoringRequest = {
   subject: string;
   topic: string | null;
   preferred_times_note: string | null;
-  status: "requested" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
+  status: "requested" | "time_proposed" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
   status_label: string;
   tutor_id: number | null;
   tutor_name: string | null;
   duration_minutes: number | null;
   price_zar: number | null;
+  platform_cut_percent: number | null;
   scheduled_at: string | null;
+  proposed_scheduled_at: string | null;
   created_at: string | null;
   matched_at: string | null;
   paid_at: string | null;
@@ -276,6 +278,7 @@ export function requestTutoringSession(
   params: {
     subject: string;
     price_zar: number;
+    scheduled_at: string; // ISO 8601, required
     duration_minutes?: number;
     topic?: string;
     preferred_times_note?: string;
@@ -286,10 +289,19 @@ export function requestTutoringSession(
     body: {
       subject: params.subject,
       price_zar: params.price_zar,
+      scheduled_at: params.scheduled_at,
       duration_minutes: params.duration_minutes ?? 60,
       topic: params.topic ?? "",
       preferred_times_note: params.preferred_times_note ?? "",
     },
+    token,
+  });
+}
+
+export function respondToTimeProposal(token: string, requestId: number, accept: boolean) {
+  return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}/respond-to-proposal`, {
+    method: "POST",
+    body: { accept },
     token,
   });
 }
@@ -336,6 +348,20 @@ export function tutorLogout(token: string) {
   return request<{ ok: boolean }>("/tutor/logout", { method: "POST", token });
 }
 
+export function tutorForgotPassword(email: string) {
+  return request<{ message: string; reset_token: string | null }>("/tutor/forgot-password", {
+    method: "POST",
+    body: { email },
+  });
+}
+
+export function tutorResetPassword(token: string, newPassword: string) {
+  return request<{ ok: boolean }>("/tutor/reset-password", {
+    method: "POST",
+    body: { token, new_password: newPassword },
+  });
+}
+
 export function fetchTutorMe(token: string) {
   return request<TutorMe>("/tutor/me", { token });
 }
@@ -363,15 +389,27 @@ export function fetchTutorMyPayouts(token: string) {
 
 // A tutor's own "open requests" queue - only requests for subjects
 // they're approved and active to teach - and the self-accept action.
+// platform_cut_percent is the live default (not yet snapshotted on these
+// unmatched requests), for an accurate "you'll receive ~R..." preview.
 export function fetchTutorOpenRequests(token: string) {
-  return request<{ requests: TutoringRequest[] }>("/tutor/requests/open", { token });
+  return request<{ requests: TutoringRequest[]; platform_cut_percent: number }>("/tutor/requests/open", { token });
 }
 
-export function acceptTutoringRequest(token: string, requestId: number, scheduledAt?: string | null) {
+export function acceptTutoringRequest(token: string, requestId: number) {
   return request<{ id: number; status: string; m_payment_id: string; meet_link: string | null }>(
     `/tutor/requests/${requestId}/accept`,
-    { method: "POST", body: { scheduled_at: scheduledAt ?? null }, token }
+    { method: "POST", token }
   );
+}
+
+// A tutor proposing an alternative time when they can't make the
+// learner's exact requested time - goes to the learner for approval.
+export function proposeNewTime(token: string, requestId: number, proposedScheduledAtIso: string) {
+  return request<{ id: number; status: string }>(`/tutor/requests/${requestId}/propose-time`, {
+    method: "POST",
+    body: { proposed_scheduled_at: proposedScheduledAtIso },
+    token,
+  });
 }
 
 export function confirmTutoringSessionAsTutor(

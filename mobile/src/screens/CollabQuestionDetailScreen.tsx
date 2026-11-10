@@ -339,7 +339,7 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, padding: 20 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },

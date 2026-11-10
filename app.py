@@ -1950,8 +1950,10 @@ elif mode == "🛠️ Tutoring Admin":
                     f"#{r['id']} — {r['subject']}{topic_str} — R{r['price_zar']} "
                     f"({r['duration_minutes']} min) — requested {requested_str}"
                 ):
+                    if r["scheduled_at"]:
+                        st.write(f"**Learner requested:** {r['scheduled_at']}")
                     if r["preferred_times_note"]:
-                        st.write(f"**Preferred times:** {r['preferred_times_note']}")
+                        st.write(f"**Notes:** {r['preferred_times_note']}")
                     candidates = list_approved_tutors(r["subject"])
                     if not candidates:
                         st.warning(f"No approved tutors for {r['subject']} yet.")

@@ -29,6 +29,7 @@ import {
   markPayoutPaidAdmin,
   TutorProfile,
   fetchTutorProfile,
+  API_BASE_URL,
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
 
@@ -52,6 +53,12 @@ export default function TutoringAdminScreen({ navigation }: any) {
       </Pressable>
       <Text style={styles.title}>🛠️ Tutoring Admin</Text>
       <Text style={styles.subtitle}>v1 is manual by design — see backend/tutoring.py.</Text>
+      <Pressable
+        style={styles.connectCalendarButton}
+        onPress={() => Linking.openURL(`${API_BASE_URL}/admin/google-calendar/connect`)}
+      >
+        <Text style={styles.connectCalendarButtonText}>🔗 Connect Google Calendar (for session Meet links)</Text>
+      </Pressable>
 
       <View style={styles.sectionRow}>
         {([
@@ -560,7 +567,17 @@ const styles = StyleSheet.create({
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
-  subtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 4, marginBottom: 16 },
+  subtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 4, marginBottom: 12 },
+  connectCalendarButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  connectCalendarButtonText: { color: colors.primary, fontWeight: "700", fontSize: 12 },
   sectionRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 16 },
   sectionChip: {
     borderWidth: 1,

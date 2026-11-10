@@ -1854,6 +1854,14 @@ elif mode == "🛠️ Tutoring Admin":
             "v1 is manual by design: review applications, match a tutor to a request, "
             "and mark payouts paid yourself once you've sent the EFT — see backend/tutoring.py."
         )
+        st.link_button(
+            "🔗 Connect Google Calendar (for session Meet links)",
+            f"{API_BASE_URL}/admin/google-calendar/connect",
+        )
+        st.caption(
+            "Needed once, and again whenever the connection expires (weekly, until Google "
+            "verifies the app — see backend/google_calendar.py)."
+        )
 
         tab_apps, tab_match, tab_tutors, tab_payouts = st.tabs(
             ["Tutor Applications", "Match Requests", "Tutors", "Payouts"]

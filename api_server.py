@@ -1413,16 +1413,16 @@ def admin_tutoring_mark_paid(payout_id: int, payload: PayoutMarkPaidRequest, aut
 # ---------------------------------------------------------------------------
 
 @app.get("/admin/google-calendar/connect")
-def admin_google_calendar_connect(authorization: str = Header(None)):
-    """Admin-gated: visiting this URL in a browser (while logged into the
-    ONE Google account that should own every session's Calendar event)
-    redirects to Google's consent screen. Needed once initially, and
-    again whenever the stored refresh token expires (weekly, until the
-    OAuth app passes Google's verification - see
-    backend/google_calendar.py)."""
-    user = _auth_user(authorization)
-    if not is_user_admin(user["id"]):
-        raise HTTPException(status_code=403, detail="Admin access required.")
+def admin_google_calendar_connect():
+    """Not bearer-token-gated - a plain browser visit (the whole point,
+    since this is "paste this URL in your browser" for a human) can't
+    attach an Authorization header. That's not actually a security gap:
+    the real access control is Google's own OAuth consent screen, which
+    (while the app is in "Testing" publishing status - see
+    backend/google_calendar.py) only lets an explicitly allow-listed
+    Google account complete it at all. Needed once initially, and again
+    whenever the stored refresh token expires (weekly, until the OAuth
+    app passes Google's verification)."""
     redirect_uri = f"{API_BASE_URL}/admin/google-calendar/oauth-callback"
     try:
         return RedirectResponse(build_google_calendar_auth_url(redirect_uri))

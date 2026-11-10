@@ -51,6 +51,13 @@ const TILES: Tile[] = [
     desc: "Track your progress, badges, and solved-question history.",
     color: "#c0392b",
   },
+  {
+    key: "RequestTutor",
+    icon: "🙋",
+    title: "Request a Tutor",
+    desc: "Book a 1-on-1 tutoring session. Billed separately, open to every plan.",
+    color: "#e87ba4",
+  },
 ];
 
 export default function HomeScreen({ navigation }: any) {

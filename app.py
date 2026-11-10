@@ -22,6 +22,7 @@ from sympy.parsing.sympy_parser import (
 import base64
 import uuid
 import random
+import datetime as dt
 
 #from frontend import *
 
@@ -55,6 +56,11 @@ from backend.past_papers import list_past_papers, get_past_paper_file, add_past_
 from backend.llm_tutor import solve_with_llm, solve_full_paper
 from backend.ai_teacher import generate_lesson
 from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
+from backend.tutoring import (
+    TutoringError, list_tutor_applications, approve_tutor, reject_tutor,
+    list_approved_tutors, list_open_requests, match_tutor_to_request,
+    list_pending_payouts, mark_payout_paid, get_tutor_document_url,
+)
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
@@ -719,6 +725,10 @@ _NAV_OPTIONS = [
     "🎯 Learner Profile",
     "📏 Formula Sheet",
 ]
+if is_admin_user:
+    # Admin-only - never shown to a regular learner, since it's not
+    # appended to _NAV_OPTIONS at all unless is_admin_user is True.
+    _NAV_OPTIONS = _NAV_OPTIONS + ["🛠️ Tutoring Admin"]
 _radio_kwargs = {}
 if "nav_mode" not in st.session_state:
     # Passing BOTH index= and a pre-existing session_state["nav_mode"] (set
@@ -1828,6 +1838,139 @@ elif mode == "📏 Formula Sheet":
 
             with st.expander("Electrochemistry"):
                 st.latex(r"E^\circ_{cell} = E^\circ_{cathode} - E^\circ_{anode}")
+
+# =====================================================
+# TUTORING ADMIN (admin-only — not in _NAV_OPTIONS at all for a regular
+# learner, so this branch is unreachable without is_admin_user already
+# being True; the extra check below is defence in depth, not the real gate)
+# =====================================================
+elif mode == "🛠️ Tutoring Admin":
+    st.title("🛠️ Tutoring Admin")
+    if not is_admin_user:
+        st.error("Admin access required.")
+    else:
+        st.caption(
+            "v1 is manual by design: review applications, match a tutor to a request, "
+            "and mark payouts paid yourself once you've sent the EFT — see backend/tutoring.py."
+        )
+
+        tab_apps, tab_match, tab_payouts = st.tabs(["Tutor Applications", "Match Requests", "Payouts"])
+
+        # ---- Tutor applications ----
+        with tab_apps:
+            status_filter = st.selectbox(
+                "Status", ["pending_review", "approved", "rejected", "suspended"],
+                key="tutor_app_status_filter",
+            )
+            apps = list_tutor_applications(status_filter)
+            if not apps:
+                st.caption(f"No applications with status '{status_filter}'.")
+            for a in apps:
+                with st.expander(f"{a['name']} — {a['email']} ({a['status']})"):
+                    st.write(f"**Phone:** {a['phone'] or '—'}")
+                    st.write(f"**Bio:** {a['bio'] or '—'}")
+                    st.write(f"**ID number:** {a['id_number'] or '—'}")
+                    st.write(f"**ID verification note:** {a['id_verification_note'] or '—'}")
+                    st.write(f"**Matric certificate note:** {a['matric_certificate_note'] or '—'}")
+                    doc_col1, doc_col2 = st.columns(2)
+                    for doc_col, kind, label, has_doc in (
+                        (doc_col1, "id", "ID document", a["has_id_document"]),
+                        (doc_col2, "matric_certificate", "Matric certificate", a["has_matric_certificate_document"]),
+                    ):
+                        url_key = f"doc_url_{a['id']}_{kind}"
+                        with doc_col:
+                            if not has_doc:
+                                st.caption(f"{label}: not uploaded")
+                            elif st.session_state.get(url_key):
+                                st.link_button(f"Open {label} (link expires in 1hr)", st.session_state[url_key])
+                            elif st.button(f"🔗 Get {label} link", key=f"get_{url_key}"):
+                                try:
+                                    st.session_state[url_key] = get_tutor_document_url(a["id"], kind)
+                                    st.rerun()
+                                except TutoringError as e:
+                                    st.error(str(e))
+                    st.write(f"**Bank details:** {a['bank_account_note'] or '—'}")
+                    st.markdown("**Subjects applied for:**")
+                    for s in a["subjects"]:
+                        topics_str = f" — topics: {s['topics']}" if s["topics"] else ""
+                        rate_str = f", asking R{s['hourly_rate_zar']}/hr" if s["hourly_rate_zar"] else ""
+                        st.write(f"- {s['subject']}: {s['matric_percentage']:.0f}%{rate_str}{topics_str}")
+                    if a["admin_notes"]:
+                        st.caption(f"Admin notes: {a['admin_notes']}")
+
+                    if a["status"] == "pending_review":
+                        acol1, acol2 = st.columns(2)
+                        if acol1.button("✅ Approve", key=f"approve_tutor_{a['id']}"):
+                            approve_tutor(a["id"])
+                            st.success("Approved.")
+                            st.rerun()
+                        with acol2.expander("❌ Reject"):
+                            with st.form(f"reject_tutor_form_{a['id']}"):
+                                reason = st.text_input("Reason (optional)", key=f"reject_reason_{a['id']}")
+                                if st.form_submit_button("Confirm Reject"):
+                                    reject_tutor(a["id"], reason)
+                                    st.success("Rejected.")
+                                    st.rerun()
+
+        # ---- Match an approved tutor to an open request ----
+        with tab_match:
+            open_reqs = list_open_requests()
+            st.caption(f"{len(open_reqs)} request(s) waiting to be matched.")
+            for r in open_reqs:
+                topic_str = f" ({r['topic']})" if r["topic"] else ""
+                requested_str = r["created_at"].strftime("%d %b %Y") if r["created_at"] else "—"
+                with st.expander(f"#{r['id']} — {r['subject']}{topic_str} — requested {requested_str}"):
+                    if r["preferred_times_note"]:
+                        st.write(f"**Preferred times:** {r['preferred_times_note']}")
+                    candidates = list_approved_tutors(r["subject"])
+                    if not candidates:
+                        st.warning(f"No approved tutors for {r['subject']} yet.")
+                    else:
+                        tutor_labels = {f"{t['name']} ({t['email']})": t["id"] for t in candidates}
+                        with st.form(f"match_form_{r['id']}"):
+                            chosen_label = st.selectbox(
+                                "Tutor", list(tutor_labels.keys()), key=f"match_tutor_{r['id']}"
+                            )
+                            price = st.number_input(
+                                "Session price (ZAR)", min_value=0.0, step=10.0, key=f"match_price_{r['id']}"
+                            )
+                            duration = st.number_input(
+                                "Duration (minutes)", min_value=15, step=15, value=60, key=f"match_duration_{r['id']}"
+                            )
+                            scheduled_date = st.date_input(
+                                "Scheduled date (optional)", value=None, key=f"match_date_{r['id']}"
+                            )
+                            scheduled_time = st.time_input(
+                                "Scheduled time (optional)", value=None, key=f"match_time_{r['id']}"
+                            )
+                            if st.form_submit_button("Match & Generate Payment"):
+                                scheduled_at = (
+                                    dt.datetime.combine(scheduled_date, scheduled_time)
+                                    if scheduled_date and scheduled_time else None
+                                )
+                                try:
+                                    match_tutor_to_request(
+                                        r["id"], tutor_labels[chosen_label], price, int(duration),
+                                        scheduled_at=scheduled_at,
+                                    )
+                                    st.success("Matched! The learner can now pay to confirm the session.")
+                                    st.rerun()
+                                except TutoringError as e:
+                                    st.error(str(e))
+
+        # ---- Pending payouts (manual EFT, see backend/tutoring.py) ----
+        with tab_payouts:
+            payouts = list_pending_payouts()
+            st.caption(f"{len(payouts)} payout(s) pending.")
+            for p in payouts:
+                with st.expander(f"Session #{p['session_id']} — {p['tutor_name']} — R{p['amount_zar']:.2f}"):
+                    st.write(f"**Bank details:** {p['tutor_bank_note'] or '— (not provided)'}")
+                    with st.form(f"payout_form_{p['id']}"):
+                        ref = st.text_input("Payment reference (e.g. EFT ref)", key=f"payout_ref_{p['id']}")
+                        if st.form_submit_button("Mark as Paid"):
+                            mark_payout_paid(p["id"], auth_user["id"], ref)
+                            st.success("Marked as paid.")
+                            st.rerun()
 
 # =====================================================
 # HOME DASHBOARD

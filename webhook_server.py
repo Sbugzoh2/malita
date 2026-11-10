@@ -31,6 +31,7 @@ from fastapi.responses import PlainTextResponse
 
 from backend.db import init_db, get_session, Subscription, WebhookEvent
 from backend.payfast import verify_itn_signature, verify_with_payfast
+from backend.tutoring import mark_session_paid, TutoringError
 
 app = FastAPI(title="Malita PayFast Webhook")
 
@@ -71,12 +72,26 @@ async def payfast_notify(request: Request):
     if not verify_with_payfast(post_data):
         return PlainTextResponse("could not verify with payfast", status_code=400)
 
+    payment_status = post_data.get("payment_status", "")
+
+    # custom_str1/custom_str2 carry different things depending on what was
+    # checked out - a subscription (custom_str1 = our numeric user_id) or a
+    # one-off tutoring session payment (custom_str1 = the literal marker
+    # "tutoring_session", custom_str2 = the session request's id). See
+    # backend/tutoring.py's match_tutor_to_request for where this is set.
+    if post_data.get("custom_str1") == "tutoring_session":
+        if payment_status == "COMPLETE":
+            try:
+                mark_session_paid(post_data.get("m_payment_id", ""))
+            except TutoringError as e:
+                return PlainTextResponse(str(e), status_code=404)
+        return PlainTextResponse("OK", status_code=200)
+
     # custom_str1 / custom_str2 are fields WE set when building the checkout
     # link in app.py, carrying our own user_id and target tier through the
     # round trip so we know whose subscription to update.
     user_id = post_data.get("custom_str1")
     tier = post_data.get("custom_str2", "learner")
-    payment_status = post_data.get("payment_status", "")
     token = post_data.get("token")  # recurring billing token, if applicable
     frequency = post_data.get("frequency", "3")
 

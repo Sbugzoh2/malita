@@ -16,6 +16,8 @@ import PastPaperViewerScreen from "../screens/PastPaperViewerScreen";
 import LearnerProfileScreen from "../screens/LearnerProfileScreen";
 import CollabScreen from "../screens/CollabScreen";
 import CollabQuestionDetailScreen from "../screens/CollabQuestionDetailScreen";
+import RequestTutorScreen from "../screens/RequestTutorScreen";
+import MyTutoringRequestsScreen from "../screens/MyTutoringRequestsScreen";
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
@@ -61,6 +63,12 @@ function AppNavigator() {
       <AppStack.Screen name="LearnerProfile" component={LearnerProfileScreen} options={{ title: "Learner Profile" }} />
       <AppStack.Screen name="Collab" component={CollabScreen} options={{ title: "Collaboration Forum" }} />
       <AppStack.Screen name="CollabQuestionDetail" component={CollabQuestionDetailScreen} options={{ title: "Question" }} />
+      <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
+      <AppStack.Screen
+        name="MyTutoringRequests"
+        component={MyTutoringRequestsScreen}
+        options={{ title: "My Tutoring Requests" }}
+      />
     </AppStack.Navigator>
   );
 }
@@ -88,6 +96,7 @@ export default function RootNavigator() {
         config: {
           screens: {
             Subscription: "billing",
+            MyTutoringRequests: "tutoring",
           },
         },
       }}

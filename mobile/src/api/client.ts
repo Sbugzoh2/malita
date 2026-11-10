@@ -245,6 +245,50 @@ export function deleteAccount(token: string) {
   );
 }
 
+// 1-on-1 tutoring, billed separately from the subscription - available
+// regardless of tier. v1 matching/payouts are manual (an admin matches a
+// tutor and sets the price) - see backend/tutoring.py.
+export type TutoringRequest = {
+  id: number;
+  subject: string;
+  topic: string | null;
+  preferred_times_note: string | null;
+  status: "requested" | "matched" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
+  tutor_id: number | null;
+  tutor_name: string | null;
+  duration_minutes: number | null;
+  price_zar: number | null;
+  scheduled_at: string | null;
+  created_at: string | null;
+  matched_at: string | null;
+  paid_at: string | null;
+};
+
+export function requestTutoringSession(
+  token: string,
+  params: { subject: string; topic?: string; preferred_times_note?: string }
+) {
+  return request<{ id: number; status: string }>("/tutoring/requests", {
+    method: "POST",
+    body: {
+      subject: params.subject,
+      topic: params.topic ?? "",
+      preferred_times_note: params.preferred_times_note ?? "",
+    },
+    token,
+  });
+}
+
+export function fetchMyTutoringRequests(token: string) {
+  return request<{ requests: TutoringRequest[] }>("/tutoring/requests/mine", { token });
+}
+
+// Linking.openURL can't attach an Authorization header, so (same pattern
+// as pastPaperDownloadUrl) the token rides along as a query param instead.
+export function tutoringCheckoutUrl(token: string, requestId: number) {
+  return `${API_BASE_URL}/tutoring/requests/${requestId}/checkout-page?token=${encodeURIComponent(token)}`;
+}
+
 export type PracticeSolutionStep = { explain: string; latex: string };
 
 export type PracticeQuestion = {

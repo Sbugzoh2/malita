@@ -33,7 +33,7 @@ from io import BytesIO
 
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
@@ -41,7 +41,7 @@ from PIL import Image
 
 LEGAL_DIR = Path(__file__).resolve().parent / "static" / "legal"
 
-from backend.db import init_db, SA_PROVINCES, get_session, Subscription, GooglePlayChoiceEvent
+from backend.db import init_db, SA_PROVINCES, get_session, Subscription, GooglePlayChoiceEvent, TutoringSessionRequest
 from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
@@ -68,6 +68,13 @@ from backend.solver import (
     steps_contain_error,
 )
 from backend.payfast import build_checkout_payload, build_checkout_page_html
+from backend.tutoring import (
+    TutoringError, apply_as_tutor, list_tutor_applications, approve_tutor,
+    reject_tutor, list_approved_tutors, request_tutoring_session,
+    list_learner_requests, list_open_requests, match_tutor_to_request,
+    cancel_session, complete_session, list_pending_payouts, mark_payout_paid,
+    get_tutor_document_url,
+)
 from backend.practice import practice_data, check_practice_answer, MATHEMATICS_TOPICS, PHYSICAL_SCIENCES_TOPICS
 from backend.past_papers import list_past_papers, get_past_paper_file
 from backend.llm_tutor import solve_with_llm, solve_full_paper
@@ -208,6 +215,38 @@ class GoogleChoiceRequest(BaseModel):
 
 class DowngradeRequest(BaseModel):
     tier: str
+
+
+class TutorSubjectInput(BaseModel):
+    subject: str
+    matric_percentage: float
+    topics: str | None = None
+    hourly_rate_zar: float | None = None
+
+
+class TutoringRequestRequest(BaseModel):
+    subject: str
+    topic: str = ""
+    preferred_times_note: str = ""
+
+
+class TutorRejectRequest(BaseModel):
+    reason: str = ""
+
+
+class TutorMatchRequest(BaseModel):
+    tutor_id: int
+    price_zar: float
+    duration_minutes: int
+    scheduled_at: str | None = None  # ISO 8601, optional
+
+
+class SessionCancelRequest(BaseModel):
+    reason: str = ""
+
+
+class PayoutMarkPaidRequest(BaseModel):
+    payment_reference: str = ""
 
 
 def _auth_user(authorization: str | None):
@@ -520,17 +559,25 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
 
 
 @app.get("/billing/return", response_class=HTMLResponse)
-def billing_return(status: str = "upgraded"):
+def billing_return(status: str = "upgraded", target: str = "billing"):
     """Bridge page for PayFast's mobile return_url/cancel_url. PayFast
     requires a real http(s) URL and rejects a bare malita:// deep link
     outright ("invalid url format") - this page is what PayFast actually
     redirects the phone's browser to, and it then forwards the browser
     into the mobile app via that same deep link once it loads (the OS
     only resolves a custom-scheme navigation triggered from a real
-    webpage, not from PayFast's own server-side redirect chain)."""
+    webpage, not from PayFast's own server-side redirect chain).
+
+    `target` picks which deep-linked screen to return to (see
+    RootNavigator's linking config) - "billing" (default, the
+    Subscription screen) for a subscription checkout, "tutoring" (the My
+    Tutoring Requests screen) for a tutoring-session checkout. Not
+    validated against a fixed list since an unknown target just means
+    the OS's deep-link resolution silently falls through to the default
+    screen - no harm in a typo here, unlike a wrong value reaching PayFast."""
     if status not in ("upgraded", "cancelled"):
         status = "upgraded"
-    app_url = f"malita://billing?{status}=1"
+    app_url = f"malita://{target}?{status}=1"
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Returning to Malita…</title></head>
 <body onload='window.location.href = {json.dumps(app_url)};'>
@@ -955,3 +1002,242 @@ def privacy():
     """Public, unauthenticated - same hosting pattern as /terms, one
     canonical Privacy Policy both app.py and the mobile app link out to."""
     return (LEGAL_DIR / "privacy.html").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Tutoring marketplace (v1, manual matching + manual payouts - see
+# backend/tutoring.py's module docstring for why). Billed per-session,
+# separate from the subscription - a learner doesn't need a paid plan to
+# request a session.
+# ---------------------------------------------------------------------------
+
+@app.post("/tutoring/apply")
+async def tutoring_apply(
+    name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    phone: str = Form(""),
+    bio: str = Form(""),
+    id_number: str = Form(""),
+    id_verification_note: str = Form(""),
+    matric_certificate_note: str = Form(""),
+    bank_account_note: str = Form(""),
+    subjects: str = Form(...),
+    id_document: UploadFile | None = File(None),
+    matric_certificate: UploadFile | None = File(None),
+):
+    """Public, unauthenticated - a prospective tutor applying is not yet a
+    Malita user of any kind. Rejects immediately (no admin review needed)
+    if any subject's matric mark is below Malita's stated 65% minimum.
+
+    multipart/form-data, not JSON - id_document/matric_certificate are
+    optional file uploads (an ID photo and NSC certificate), and FastAPI
+    requires every other field to ride along as Form(...) rather than a
+    JSON body when any File(...) param is present. `subjects` is a
+    JSON-encoded string of [{"subject", "matric_percentage", "topics"?,
+    "hourly_rate_zar"?}, ...] for the same reason - multipart has no
+    native nested-list encoding."""
+    try:
+        subjects_raw = json.loads(subjects)
+        parsed_subjects = [TutorSubjectInput(**s) for s in subjects_raw]
+    except Exception:
+        raise HTTPException(status_code=400, detail="'subjects' must be a JSON-encoded list of subject objects.")
+
+    id_document_tuple = None
+    if id_document is not None:
+        id_document_tuple = (await id_document.read(), id_document.content_type or "application/octet-stream")
+    matric_document_tuple = None
+    if matric_certificate is not None:
+        matric_document_tuple = (
+            await matric_certificate.read(), matric_certificate.content_type or "application/octet-stream"
+        )
+
+    try:
+        return apply_as_tutor(
+            name=name, email=email, password=password,
+            phone=phone, bio=bio, id_number=id_number,
+            id_verification_note=id_verification_note,
+            matric_certificate_note=matric_certificate_note,
+            bank_account_note=bank_account_note,
+            subjects=[s.model_dump() for s in parsed_subjects],
+            id_document=id_document_tuple,
+            matric_certificate_document=matric_document_tuple,
+        )
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/admin/tutoring/applications/{tutor_id}/documents/{kind}")
+def admin_tutoring_document_url(tutor_id: int, kind: str, authorization: str = Header(None)):
+    """Returns a short-lived signed URL for an admin to view one uploaded
+    document. `kind` is "id" or "matric_certificate"."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return {"url": get_tutor_document_url(tutor_id, kind)}
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests")
+def tutoring_create_request(payload: TutoringRequestRequest, authorization: str = Header(None)):
+    """A learner asking for a tutor - works for any subscription tier,
+    including Free, since tutoring is billed separately."""
+    user = _auth_user(authorization)
+    try:
+        return request_tutoring_session(
+            user["id"], payload.subject, payload.topic, payload.preferred_times_note,
+        )
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/tutoring/requests/mine")
+def tutoring_my_requests(authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    return {"requests": list_learner_requests(user["id"])}
+
+
+@app.get("/tutoring/requests/{request_id}/checkout-page", response_class=HTMLResponse)
+def tutoring_checkout_page(request_id: int, authorization: str = Header(None), token: str = None):
+    """Once an admin has matched a tutor and set a price, the learner pays
+    here - same self-submitting-form pattern as /billing/checkout-page,
+    reused for a one-off (non-recurring) session payment."""
+    if token and not authorization:
+        authorization = f"Bearer {token}"
+    user = _auth_user(authorization)
+    my_requests = {r["id"]: r for r in list_learner_requests(user["id"])}
+    req = my_requests.get(request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Tutoring request not found.")
+    if req["status"] != "awaiting_payment":
+        raise HTTPException(status_code=400, detail=f"This request is '{req['status']}', not awaiting payment.")
+
+    # m_payment_id must be the exact value match_tutor_to_request already
+    # generated and stored on the request - webhook_server.py looks the
+    # session up by it, so it's read back rather than re-generated here.
+    with get_session() as db:
+        db_req = db.query(TutoringSessionRequest).get(request_id)
+        m_payment_id = db_req.m_payment_id
+
+    payload = build_checkout_payload(
+        m_payment_id=m_payment_id,
+        amount=req["price_zar"],
+        item_name=f"Malita Tutoring Session — {req['subject']}",
+        name_first=user["name"].split(" ")[0],
+        email_address=user["email"],
+        return_url=f"{API_BASE_URL}/billing/return?status=upgraded&target=tutoring",
+        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled&target=tutoring",
+        notify_url=APP_WEBHOOK_URL,
+        recurring=False,
+        custom_fields={"custom_str1": "tutoring_session", "custom_str2": str(req["id"])},
+    )
+    return build_checkout_page_html(payload)
+
+
+@app.get("/admin/tutoring/applications")
+def admin_tutoring_applications(status: str | None = None, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"applications": list_tutor_applications(status)}
+
+
+@app.post("/admin/tutoring/applications/{tutor_id}/approve")
+def admin_tutoring_approve(tutor_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        approve_tutor(tutor_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "approved"}
+
+
+@app.post("/admin/tutoring/applications/{tutor_id}/reject")
+def admin_tutoring_reject(tutor_id: int, payload: TutorRejectRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        reject_tutor(tutor_id, payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "rejected"}
+
+
+@app.get("/admin/tutoring/tutors")
+def admin_tutoring_tutors(subject: str | None = None, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"tutors": list_approved_tutors(subject)}
+
+
+@app.get("/admin/tutoring/requests/open")
+def admin_tutoring_open_requests(authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"requests": list_open_requests()}
+
+
+@app.post("/admin/tutoring/requests/{request_id}/match")
+def admin_tutoring_match(request_id: int, payload: TutorMatchRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    scheduled_at = dt.datetime.fromisoformat(payload.scheduled_at) if payload.scheduled_at else None
+    try:
+        return match_tutor_to_request(
+            request_id, payload.tutor_id, payload.price_zar, payload.duration_minutes,
+            scheduled_at=scheduled_at,
+        )
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/tutoring/requests/{request_id}/cancel")
+def admin_tutoring_cancel(request_id: int, payload: SessionCancelRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        cancel_session(request_id, payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "cancelled"}
+
+
+@app.post("/admin/tutoring/requests/{request_id}/complete")
+def admin_tutoring_complete(request_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        complete_session(request_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "completed"}
+
+
+@app.get("/admin/tutoring/payouts")
+def admin_tutoring_payouts(authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"payouts": list_pending_payouts()}
+
+
+@app.post("/admin/tutoring/payouts/{payout_id}/mark-paid")
+def admin_tutoring_mark_paid(payout_id: int, payload: PayoutMarkPaidRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        mark_payout_paid(payout_id, user["id"], payload.payment_reference)
+    except TutoringError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "paid"}

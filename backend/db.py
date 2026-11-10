@@ -18,7 +18,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean, DateTime, Date,
-    ForeignKey, UniqueConstraint, LargeBinary
+    ForeignKey, UniqueConstraint, LargeBinary, Float
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
@@ -299,6 +299,144 @@ class WebhookEvent(Base):
     processed = Column(Boolean, default=False)
 
 
+class TutorAccount(Base):
+    """A tutor who applied to offer paid 1-on-1 tutoring through Malita -
+    entirely separate from the learner `User` table since tutors are a
+    different kind of actor with their own login, vetting, and payout
+    details, not a subscription/tier.
+
+    V1 VETTING IS EXPLICITLY MANUAL, NOT AUTOMATED - a deliberate decision,
+    not a placeholder waiting to be filled in by accident:
+      - id_verification_note, matric_certificate_note, and
+        bank_account_note are free-text fields an admin reviews BY EYE
+        (e.g. a link to an ID photo / NSC certificate the tutor emailed
+        or uploaded somewhere external, or bank details for a manual EFT
+        payout) - there is NO file-upload storage built for this (that
+        needs a real infra decision - S3 or a persistent disk - a plain
+        local file write would get wiped on every redeploy) and NO
+        automated verification call to any third party.
+      - The self-reported matric_percentage on TutorSubject is NOT
+        independently confirmed against Umalusi/SAQA (the only
+        authoritative verifiers of an NSC certificate) in v1. Automating
+        that was researched and deliberately deferred: SAQA's own
+        2026-2028 tariff lists a R3,512 minimum per API submission, and
+        Umalusi has no public self-serve API at all - not worth the cost
+        before real tutor-applicant volume justifies it. When it is,
+        Umalusi/SAQA are the matric-verification path, Smile ID/
+        iiDENTIFii are the ID-verification path, and MIE is the
+        criminal-background-check path (MIE may also bundle qualification
+        verification, worth asking about in one conversation).
+    An admin manually cross-checks these notes before calling
+    approve_tutor() - nothing here calls out to a third party automatically."""
+    __tablename__ = "tutor_accounts"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), nullable=False)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    phone = Column(String(30), nullable=True)
+    id_number = Column(String(13), nullable=True)
+    id_verification_note = Column(String, nullable=True)
+    matric_certificate_note = Column(String, nullable=True)
+    # Storage paths (Supabase Storage, private bucket) for an actually
+    # uploaded document, set when the applicant attaches a file - distinct
+    # from the free-text *_note fields above, which still work as a
+    # fallback (e.g. a link to somewhere else) if storage isn't set up or
+    # the applicant didn't attach anything. See backend/storage.py.
+    id_document_path = Column(String, nullable=True)
+    matric_certificate_path = Column(String, nullable=True)
+    bank_account_note = Column(String, nullable=True)
+    bio = Column(String, nullable=True)
+    # pending_review | approved | rejected | suspended
+    status = Column(String(20), default="pending_review", nullable=False)
+    admin_notes = Column(String, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    subjects = relationship(
+        "TutorSubject", back_populates="tutor", cascade="all, delete-orphan"
+    )
+    sessions = relationship(
+        "TutoringSessionRequest", back_populates="tutor"
+    )
+
+
+class TutorSubject(Base):
+    """One subject a tutor is approved to teach, with the matric result
+    that qualifies them (Malita's stated minimum is 65%) and their asking
+    rate, used as a starting point when an admin sets a session's price."""
+    __tablename__ = "tutor_subjects"
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=False)
+    subject = Column(String(60), nullable=False)  # "Mathematics" | "Physical Sciences"
+    matric_percentage = Column(Float, nullable=False)
+    topics = Column(String, nullable=True)  # optional comma-separated topic focus
+    hourly_rate_zar = Column(Float, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    tutor = relationship("TutorAccount", back_populates="subjects")
+
+
+class TutoringSessionRequest(Base):
+    """A learner's request for a paid 1-on-1 tutoring session - billed
+    separately from the subscription, so available regardless of tier.
+    v1 matching is manual (an admin picks a tutor and sets the price/time)
+    rather than an automated marketplace algorithm - see backend/tutoring.py.
+
+    status flow: requested -> matched -> awaiting_payment -> confirmed
+    (the learner's payment cleared) -> completed, or cancelled at any point
+    before confirmed."""
+    __tablename__ = "tutoring_session_requests"
+
+    id = Column(Integer, primary_key=True)
+    learner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    subject = Column(String(60), nullable=False)
+    topic = Column(String(60), nullable=True)
+    preferred_times_note = Column(String, nullable=True)
+    status = Column(String(20), default="requested", nullable=False)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=True)
+    duration_minutes = Column(Integer, nullable=True)
+    price_zar = Column(Float, nullable=True)
+    # Snapshot of the platform's cut % at match time, so a later change to
+    # the global rate never retroactively changes an already-matched session.
+    platform_cut_percent = Column(Float, nullable=True)
+    m_payment_id = Column(String(64), nullable=True, unique=True)
+    scheduled_at = Column(DateTime, nullable=True)
+    admin_notes = Column(String, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    matched_at = Column(DateTime, nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+
+    learner = relationship("User")
+    tutor = relationship("TutorAccount", back_populates="sessions")
+    payout = relationship(
+        "TutoringPayout", back_populates="session", uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+
+class TutoringPayout(Base):
+    """What's owed to a tutor for one completed, paid session - v1 payouts
+    are manual EFT, so this is a tracking ledger for admins, not an
+    automated transfer. One row per session."""
+    __tablename__ = "tutoring_payouts"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("tutoring_session_requests.id"), unique=True, nullable=False)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=False)
+    amount_zar = Column(Float, nullable=False)
+    status = Column(String(20), default="pending", nullable=False)  # pending | paid
+    payment_reference = Column(String(120), nullable=True)
+    paid_by_admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    paid_at = Column(DateTime, nullable=True)
+
+    session = relationship("TutoringSessionRequest", back_populates="payout")
+
+
 def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
     """Add one column to an already-existing table if it's missing.
 
@@ -353,6 +491,9 @@ def init_db():
     _ensure_column("subscriptions", "google_purchase_token", "VARCHAR(500)")
     _ensure_column("subscriptions", "google_product_id", "VARCHAR(100)")
     _ensure_column("subscriptions", "pending_tier", "VARCHAR(20)")
+    _ensure_column("tutor_accounts", "matric_certificate_note", "VARCHAR")
+    _ensure_column("tutor_accounts", "id_document_path", "VARCHAR")
+    _ensure_column("tutor_accounts", "matric_certificate_path", "VARCHAR")
     _migrate_removed_tier("super_premium", "premium")
 
 

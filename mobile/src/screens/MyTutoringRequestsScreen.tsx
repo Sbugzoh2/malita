@@ -16,15 +16,6 @@ function formatDate(iso: string | null): string {
   }
 }
 
-const STATUS_LABEL: Record<TutoringRequest["status"], string> = {
-  requested: "Waiting to be matched with a tutor",
-  matched: "Matched — awaiting price confirmation",
-  awaiting_payment: "Matched! Pay to confirm your session",
-  confirmed: "Confirmed ✅",
-  completed: "Completed",
-  cancelled: "Cancelled",
-};
-
 const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   requested: colors.textSecondary,
   matched: colors.primary,
@@ -81,7 +72,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardSubject}>{r.subject}{r.topic ? ` · ${r.topic}` : ""}</Text>
               <Text style={[styles.cardStatus, { color: STATUS_COLOR[r.status] }]}>
-                {STATUS_LABEL[r.status]}
+                {r.status_label}
               </Text>
             </View>
 

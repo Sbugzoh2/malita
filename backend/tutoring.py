@@ -67,6 +67,27 @@ MIN_MATRIC_PERCENTAGE = 65.0
 # retroactively alters an already-priced session.
 DEFAULT_PLATFORM_CUT_PERCENT = 20.0
 
+# Human-readable labels for the raw status strings stored in the DB -
+# computed once here (list_tutor_applications/_serialize_request both
+# attach a "*_label" field) so every client (web admin, mobile admin,
+# anything built later) shows the same text instead of each one
+# re-deriving its own Title-Case guess from the snake_case value.
+TUTOR_STATUS_LABELS = {
+    "pending_review": "Pending Review",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "suspended": "Suspended",
+}
+
+SESSION_STATUS_LABELS = {
+    "requested": "Waiting to be matched with a tutor",
+    "matched": "Matched — awaiting price confirmation",
+    "awaiting_payment": "Matched! Awaiting payment",
+    "confirmed": "Confirmed",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+}
+
 
 class TutoringError(Exception):
     pass
@@ -187,7 +208,9 @@ def list_tutor_applications(status: str | None = None) -> list[dict]:
                 "has_id_document": bool(t.id_document_path),
                 "has_matric_certificate_document": bool(t.matric_certificate_path),
                 "bank_account_note": t.bank_account_note,
-                "status": t.status, "admin_notes": t.admin_notes,
+                "status": t.status,
+                "status_label": TUTOR_STATUS_LABELS.get(t.status, t.status),
+                "admin_notes": t.admin_notes,
                 "created_at": t.created_at, "reviewed_at": t.reviewed_at,
                 "subjects": [
                     {
@@ -307,7 +330,9 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
     return {
         "id": r.id, "learner_user_id": r.learner_user_id, "subject": r.subject,
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
-        "status": r.status, "tutor_id": r.tutor_id,
+        "status": r.status,
+        "status_label": SESSION_STATUS_LABELS.get(r.status, r.status),
+        "tutor_id": r.tutor_id,
         "tutor_name": r.tutor.name if r.tutor else None,
         "duration_minutes": r.duration_minutes, "price_zar": r.price_zar,
         "scheduled_at": r.scheduled_at, "created_at": r.created_at,

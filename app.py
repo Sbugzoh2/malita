@@ -60,6 +60,7 @@ from backend.tutoring import (
     TutoringError, list_tutor_applications, approve_tutor, reject_tutor,
     list_approved_tutors, list_open_requests, match_tutor_to_request,
     list_pending_payouts, mark_payout_paid, get_tutor_document_url,
+    TUTOR_STATUS_LABELS,
 )
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -1859,14 +1860,15 @@ elif mode == "🛠️ Tutoring Admin":
         # ---- Tutor applications ----
         with tab_apps:
             status_filter = st.selectbox(
-                "Status", ["pending_review", "approved", "rejected", "suspended"],
+                "Status", list(TUTOR_STATUS_LABELS.keys()),
+                format_func=lambda s: TUTOR_STATUS_LABELS.get(s, s),
                 key="tutor_app_status_filter",
             )
             apps = list_tutor_applications(status_filter)
             if not apps:
-                st.caption(f"No applications with status '{status_filter}'.")
+                st.caption(f"No applications with status '{TUTOR_STATUS_LABELS.get(status_filter, status_filter)}'.")
             for a in apps:
-                with st.expander(f"{a['name']} — {a['email']} ({a['status']})"):
+                with st.expander(f"{a['name']} — {a['email']} ({a['status_label']})"):
                     st.write(f"**Phone:** {a['phone'] or '—'}")
                     st.write(f"**Bio:** {a['bio'] or '—'}")
                     st.write(f"**ID number:** {a['id_number'] or '—'}")

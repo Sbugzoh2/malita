@@ -60,9 +60,18 @@ const TILES: Tile[] = [
   },
 ];
 
+const ADMIN_TILE: Tile = {
+  key: "TutoringAdmin",
+  icon: "🛠️",
+  title: "Tutoring Admin",
+  desc: "Review tutor applications, match requests, and process payouts.",
+  color: "#4a3aa7",
+};
+
 export default function HomeScreen({ navigation }: any) {
   const { me, logout } = useAuth();
   const firstName = me?.user.name.split(" ")[0] ?? "";
+  const tiles = me?.is_admin ? [...TILES, ADMIN_TILE] : TILES;
 
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -91,7 +100,7 @@ export default function HomeScreen({ navigation }: any) {
 
         <Text style={styles.pick}>Pick where you'd like to start.</Text>
 
-        {TILES.map((tile) => (
+        {tiles.map((tile) => (
           <Pressable
             key={tile.key}
             style={[styles.tile, tile.disabled && styles.tileDisabled]}

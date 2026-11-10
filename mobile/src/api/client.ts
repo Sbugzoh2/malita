@@ -254,6 +254,7 @@ export type TutoringRequest = {
   topic: string | null;
   preferred_times_note: string | null;
   status: "requested" | "matched" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
+  status_label: string;
   tutor_id: number | null;
   tutor_name: string | null;
   duration_minutes: number | null;
@@ -287,6 +288,111 @@ export function fetchMyTutoringRequests(token: string) {
 // as pastPaperDownloadUrl) the token rides along as a query param instead.
 export function tutoringCheckoutUrl(token: string, requestId: number) {
   return `${API_BASE_URL}/tutoring/requests/${requestId}/checkout-page?token=${encodeURIComponent(token)}`;
+}
+
+// --- Tutoring admin (mirrors app.py's "Tutoring Admin" screen) ---
+// Every function here requires an admin account - the API itself enforces
+// this (403 otherwise), this is just the client side of the same 3 tabs
+// the web admin screen has: applications, matching, payouts.
+
+export type TutorApplication = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  bio: string | null;
+  id_number: string | null;
+  id_verification_note: string | null;
+  matric_certificate_note: string | null;
+  has_id_document: boolean;
+  has_matric_certificate_document: boolean;
+  bank_account_note: string | null;
+  status: "pending_review" | "approved" | "rejected" | "suspended";
+  status_label: string;
+  admin_notes: string | null;
+  created_at: string | null;
+  reviewed_at: string | null;
+  subjects: {
+    subject: string;
+    matric_percentage: number;
+    topics: string | null;
+    hourly_rate_zar: number | null;
+    is_active: boolean;
+  }[];
+};
+
+export function fetchTutorApplications(token: string, status?: TutorApplication["status"]) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request<{ applications: TutorApplication[] }>(`/admin/tutoring/applications${qs}`, { token });
+}
+
+export function approveTutorApplication(token: string, tutorId: number) {
+  return request<{ status: string }>(`/admin/tutoring/applications/${tutorId}/approve`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function rejectTutorApplication(token: string, tutorId: number, reason: string) {
+  return request<{ status: string }>(`/admin/tutoring/applications/${tutorId}/reject`, {
+    method: "POST",
+    body: { reason },
+    token,
+  });
+}
+
+export function fetchTutorDocumentUrl(token: string, tutorId: number, kind: "id" | "matric_certificate") {
+  return request<{ url: string }>(`/admin/tutoring/applications/${tutorId}/documents/${kind}`, { token });
+}
+
+export type ApprovedTutor = {
+  id: number;
+  name: string;
+  email: string;
+  subjects: { subject: string; matric_percentage: number; topics: string | null; hourly_rate_zar: number | null }[];
+};
+
+export function fetchApprovedTutors(token: string, subject: string) {
+  return request<{ tutors: ApprovedTutor[] }>(`/admin/tutoring/tutors?subject=${encodeURIComponent(subject)}`, {
+    token,
+  });
+}
+
+export function fetchOpenTutoringRequestsAdmin(token: string) {
+  return request<{ requests: TutoringRequest[] }>("/admin/tutoring/requests/open", { token });
+}
+
+export function matchTutorToRequestAdmin(
+  token: string,
+  requestId: number,
+  params: { tutor_id: number; price_zar: number; duration_minutes: number; scheduled_at?: string | null }
+) {
+  return request<{ id: number; status: string; m_payment_id: string }>(
+    `/admin/tutoring/requests/${requestId}/match`,
+    { method: "POST", body: params, token }
+  );
+}
+
+export type TutoringPayout = {
+  id: number;
+  session_id: number;
+  tutor_id: number;
+  tutor_name: string | null;
+  tutor_bank_note: string | null;
+  amount_zar: number;
+  created_at: string | null;
+};
+
+export function fetchPendingPayoutsAdmin(token: string) {
+  return request<{ payouts: TutoringPayout[] }>("/admin/tutoring/payouts", { token });
+}
+
+export function markPayoutPaidAdmin(token: string, payoutId: number, paymentReference: string) {
+  return request<{ status: string }>(`/admin/tutoring/payouts/${payoutId}/mark-paid`, {
+    method: "POST",
+    body: { payment_reference: paymentReference },
+    token,
+  });
 }
 
 export type PracticeSolutionStep = { explain: string; latex: string };

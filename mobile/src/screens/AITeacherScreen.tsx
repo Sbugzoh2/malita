@@ -13,6 +13,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors, SUBJECTS, Subject } from "../theme";
 import { ApiError, fetchAITeacherLesson, LessonStep } from "../api/client";
 import { StepView } from "./AITutorScreen";
+import Dropdown from "../components/Dropdown";
 
 export default function AITeacherScreen({ navigation }: any) {
   const { token, me } = useAuth();
@@ -98,18 +99,12 @@ export default function AITeacherScreen({ navigation }: any) {
         <>
           {!lesson && (
             <>
-              <Text style={styles.label}>Subject</Text>
-              <View style={styles.row}>
-                {SUBJECTS.map((s) => (
-                  <Pressable
-                    key={s}
-                    style={[styles.chip, subject === s && styles.chipActive]}
-                    onPress={() => setSubject(s)}
-                  >
-                    <Text style={[styles.chipText, subject === s && styles.chipTextActive]}>{s}</Text>
-                  </Pressable>
-                ))}
-              </View>
+              <Dropdown
+                label="Subject"
+                options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+                value={subject}
+                onChange={(v) => setSubject(v as Subject)}
+              />
 
               <Text style={styles.label}>What would you like a lesson on?</Text>
               <TextInput

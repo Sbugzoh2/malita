@@ -25,6 +25,7 @@ import {
   SolvedPdfQuestion,
 } from "../api/client";
 import LatexView from "../latex/LatexView";
+import Dropdown from "../components/Dropdown";
 
 type Method = "text" | "photo" | "pdf";
 
@@ -125,62 +126,38 @@ function TextSolver() {
 
   return (
     <>
-      <Text style={styles.label}>Subject</Text>
-      <View style={styles.row}>
-        {SUBJECTS.map((s) => (
-          <Pressable
-            key={s}
-            style={[styles.chip, subject === s && styles.chipActive]}
-            onPress={() => selectSubject(s)}
-          >
-            <Text textBreakStrategy="simple" style={[styles.chipText, subject === s && styles.chipTextActive]}>
-              {s}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Dropdown
+        label="Subject"
+        options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+        value={subject}
+        onChange={(v) => selectSubject(v as Subject)}
+      />
 
-      <Text style={styles.label}>Paper</Text>
-      <View style={styles.row}>
-        {paperOptions.map((p) => (
-          <Pressable
-            key={p}
-            style={[styles.chip, paper === p && styles.chipActive]}
-            onPress={() => selectPaper(p)}
-          >
-            <Text textBreakStrategy="simple" style={[styles.chipText, paper === p && styles.chipTextActive]}>
-              {p}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Dropdown
+        label="Paper"
+        options={paperOptions.map((p) => ({ label: p, value: p }))}
+        value={paper}
+        onChange={(p) => selectPaper(p)}
+      />
 
-      <Text style={styles.label}>Topic</Text>
-      <View style={styles.row}>
-        {PAPER_TOPICS_BY_SUBJECT[subject][paper].map((t) => {
+      <Dropdown
+        label="Topic"
+        options={PAPER_TOPICS_BY_SUBJECT[subject][paper].map((t) => {
           const solvable = SOLVABLE_TOPICS.has(t);
-          return (
-            <Pressable
-              key={t}
-              style={[
-                styles.chip,
-                topic === t && { backgroundColor: topicColors[t] ?? colors.primary, borderColor: "transparent" },
-                !solvable && styles.chipDisabled,
-              ]}
-              onPress={() => {
-                setTopic(t);
-                setSteps(null);
-                setError(null);
-              }}
-            >
-              <Text textBreakStrategy="simple" style={[styles.chipText, topic === t && styles.chipTextActive]}>
-                {t}
-                {!solvable ? " (web only)" : ""}
-              </Text>
-            </Pressable>
-          );
+          return {
+            label: solvable ? t : `${t} (web only)`,
+            value: t,
+            color: topicColors[t],
+            muted: !solvable,
+          };
         })}
-      </View>
+        value={topic}
+        onChange={(t) => {
+          setTopic(t);
+          setSteps(null);
+          setError(null);
+        }}
+      />
 
       {physicalSciencesLocked ? (
         <View style={styles.lockedBanner}>

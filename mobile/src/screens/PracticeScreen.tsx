@@ -19,6 +19,7 @@ import {
   PracticeQuestion,
 } from "../api/client";
 import LatexView from "../latex/LatexView";
+import Dropdown from "../components/Dropdown";
 
 export default function PracticeScreen({ navigation }: any) {
   const { token } = useAuth();
@@ -116,66 +117,37 @@ export default function PracticeScreen({ navigation }: any) {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <Text style={styles.label}>Subject</Text>
-      <View style={styles.row}>
-        {SUBJECTS.map((s) => (
-          <Pressable
-            key={s}
-            style={[styles.chip, subject === s && styles.chipActive]}
-            onPress={() => setSubject(s)}
-          >
-            <Text textBreakStrategy="simple" style={[styles.chipText, subject === s && styles.chipTextActive]}>
-              {s}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Dropdown
+        label="Subject"
+        options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+        value={subject}
+        onChange={(v) => setSubject(v as Subject)}
+      />
 
       {!topicsByPaper ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : (
         <>
-          <Text style={styles.label}>Paper</Text>
-          <View style={styles.row}>
-            {Object.keys(topicsByPaper).map((p) => (
-              <Pressable
-                key={p}
-                style={[styles.chip, paper === p && styles.chipActive]}
-                onPress={() => {
-                  setPaper(p);
-                  setTopic(topicsByPaper[p][0]);
-                }}
-              >
-                <Text
-                  textBreakStrategy="simple"
-                  style={[styles.chipText, paper === p && styles.chipTextActive]}
-                >
-                  {p}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          <Dropdown
+            label="Paper"
+            options={Object.keys(topicsByPaper).map((p) => ({ label: p, value: p }))}
+            value={paper}
+            onChange={(p) => {
+              setPaper(p);
+              setTopic(topicsByPaper[p][0]);
+            }}
+          />
 
-          <Text style={styles.label}>Topic</Text>
-          <View style={styles.row}>
-            {(paper ? topicsByPaper[paper] : []).map((t) => (
-              <Pressable
-                key={t}
-                style={[
-                  styles.chip,
-                  topic === t && { backgroundColor: topicColors[t] ?? colors.primary, borderColor: "transparent" },
-                ]}
-                onPress={() => setTopic(t)}
-              >
-                <Text
-                  textBreakStrategy="simple"
-                  style={[styles.chipText, topic === t && styles.chipTextActive]}
-                >
-                  {t}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          <Dropdown
+            label="Topic"
+            options={(paper ? topicsByPaper[paper] : []).map((t) => ({
+              label: t,
+              value: t,
+              color: topicColors[t],
+            }))}
+            value={topic}
+            onChange={(t) => setTopic(t)}
+          />
 
           {!questions ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />

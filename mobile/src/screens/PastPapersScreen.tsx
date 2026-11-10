@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linki
 import { useAuth } from "../context/AuthContext";
 import { colors, SUBJECTS, Subject } from "../theme";
 import { ApiError, fetchPastPapers, pastPaperDownloadUrl, PastPaper } from "../api/client";
+import Dropdown from "../components/Dropdown";
 
 // Same chronological order as app.py's EXAM_SERIES_OPTIONS, so a year's
 // documents always group the same way on both platforms.
@@ -63,17 +64,12 @@ export default function PastPapersScreen({ navigation }: any) {
       <Text style={styles.subtitle}>Browse real past exam papers, organised by year.</Text>
 
       {!locked && (
-        <View style={styles.row}>
-          {SUBJECTS.map((s) => (
-            <Pressable
-              key={s}
-              style={[styles.chip, subject === s && styles.chipActive]}
-              onPress={() => setSubject(s)}
-            >
-              <Text style={[styles.chipText, subject === s && styles.chipTextActive]}>{s}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Dropdown
+          label="Subject"
+          options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+          value={subject}
+          onChange={(v) => setSubject(v as Subject)}
+        />
       )}
 
       {locked ? (

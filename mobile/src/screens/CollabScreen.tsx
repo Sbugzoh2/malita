@@ -20,6 +20,7 @@ import {
   CollabReport,
 } from "../api/client";
 import MixedMathText from "../latex/MixedMathText";
+import Dropdown from "../components/Dropdown";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Unknown date";
@@ -197,18 +198,12 @@ export default function CollabScreen({ navigation }: any) {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <Text style={styles.label}>Subject</Text>
-      <View style={styles.row}>
-        {SUBJECTS.map((s) => (
-          <Pressable
-            key={s}
-            style={[styles.chip, subject === s && styles.chipActive]}
-            onPress={() => setSubject(s)}
-          >
-            <Text style={[styles.chipText, subject === s && styles.chipTextActive]}>{s}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <Dropdown
+        label="Subject"
+        options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+        value={subject}
+        onChange={(v) => setSubject(v as Subject)}
+      />
 
       <Pressable style={styles.askToggle} onPress={() => setShowAsk(!showAsk)}>
         <Text style={styles.askToggleText}>{showAsk ? "▾" : "▸"} ➕ Ask a question</Text>

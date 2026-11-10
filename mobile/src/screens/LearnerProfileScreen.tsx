@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors, topicColors, SUBJECTS, Subject } from "../theme";
 import { fetchLearnerProfile, LearnerProfile } from "../api/client";
 import LatexView from "../latex/LatexView";
+import Dropdown from "../components/Dropdown";
 
 const DEFAULT_TOPIC_COLOR = colors.primary;
 
@@ -56,18 +57,12 @@ export default function LearnerProfileScreen({ navigation }: any) {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <Text style={styles.label}>Subject</Text>
-      <View style={styles.row}>
-        {SUBJECTS.map((s) => (
-          <Pressable
-            key={s}
-            style={[styles.chip, subject === s && styles.chipActive]}
-            onPress={() => setSubject(s)}
-          >
-            <Text style={[styles.chipText, subject === s && styles.chipTextActive]}>{s}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <Dropdown
+        label="Subject"
+        options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+        value={subject}
+        onChange={(v) => setSubject(v as Subject)}
+      />
 
       {!profile ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 32 }} />

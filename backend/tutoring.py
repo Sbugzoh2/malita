@@ -474,23 +474,39 @@ def delete_institution(institution_id: int) -> dict:
 
 # ---------------------------------------------------------------------------
 # A starter higher-ed catalog, for an admin to seed in one click (see
-# seed_default_higher_ed_catalog) instead of typing in 26 institutions and
-# hundreds of modules by hand. IMPORTANT - what this is and isn't:
+# seed_default_higher_ed_catalog) instead of typing in dozens of
+# institutions and hundreds of modules by hand. IMPORTANT - what this is
+# and isn't:
 #   - DEFAULT_SA_UNIVERSITIES is South Africa's actual, stable list of 26
-#     public universities - that part is factual.
-#   - The qualifications/modules below are a GENERIC, broadly-applicable
-#     starter set (the same common first/second/third-year subject names
-#     most SA science/commerce/arts/education degrees share), NOT each
-#     university's real, official curriculum pulled from DHET or the
-#     institution itself - no such authoritative source was used. They
-#     exist so the catalog is immediately usable; an admin is expected to
-#     refine/add to them over time via the normal add_institution/
-#     add_qualification/add_module functions above, same as any
-#     admin-entered row.
-#   - TVET and private colleges are deliberately NOT included - that list
-#     is far larger, less stable (frequent mergers/renames), and admins
-#     can add any of those the same one-at-a-time way if/when a tutor or
-#     learner from one actually signs up.
+#     public universities - high confidence, this part is factual.
+#   - DEFAULT_SA_TVET_COLLEGES is a best-effort list of the public TVET
+#     colleges - LOWER confidence than the universities list. TVET
+#     colleges merge/rename more often and no authoritative source was
+#     checked against, so a name here may be stale or slightly off - an
+#     admin should treat this list as a starting point to correct (via
+#     delete_institution/add_institution) rather than as verified fact,
+#     the same way a mismatched name on a university's qualifications
+#     would be.
+#   - Every qualification/module below is a GENERIC, broadly-applicable
+#     starter set, NOT each institution's real, official curriculum
+#     pulled from DHET or the institution itself - no such authoritative
+#     source was used. For universities: the same common first/second/
+#     third-year subject names most SA science/commerce/arts/education
+#     degrees share, plus a generic Honours/Master's/PhD track. For TVET
+#     colleges: only the NCV's nationally-standardized FUNDAMENTAL
+#     subjects (Life Orientation, Communication, Mathematics, Computer
+#     Literacy) at each of its 3 levels - deliberately NOT the
+#     field-specific vocational subjects (e.g. a specific engineering or
+#     hospitality stream), since those vary by college/campus and this
+#     module has no reliable source to generate them accurately from.
+#     All of it exists so the catalog is immediately usable; an admin is
+#     expected to refine/add to it over time via the normal
+#     add_institution/add_qualification/add_module functions above, same
+#     as any admin-entered row.
+#   - Private colleges are deliberately NOT included - that list is far
+#     larger and even less stable than TVET colleges, and admins can add
+#     any of those the same one-at-a-time way if/when a tutor or learner
+#     from one actually signs up.
 # ---------------------------------------------------------------------------
 DEFAULT_SA_UNIVERSITIES = [
     "University of Cape Town", "University of the Witwatersrand", "Stellenbosch University",
@@ -502,6 +518,39 @@ DEFAULT_SA_UNIVERSITIES = [
     "Durban University of Technology", "Mangosuthu University of Technology", "Vaal University of Technology",
     "Central University of Technology", "University of Zululand", "University of Venda",
     "Walter Sisulu University", "Nelson Mandela University",
+]
+
+# Best-effort list of South Africa's public TVET colleges - see the big
+# comment above DEFAULT_SA_UNIVERSITIES for the (lower) confidence level
+# here versus the universities list.
+DEFAULT_SA_TVET_COLLEGES = [
+    # Eastern Cape
+    "Buffalo City TVET College", "East Cape Midlands TVET College", "Ikhala TVET College",
+    "Ingwe TVET College", "King Hintsa TVET College", "King Sabata Dalindyebo TVET College",
+    "Lovedale TVET College", "Port Elizabeth TVET College",
+    # Free State
+    "Flavius Mareka TVET College", "Goldfields TVET College", "Maluti TVET College",
+    "Motheo TVET College",
+    # Gauteng
+    "Central Johannesburg TVET College", "Ekurhuleni East TVET College",
+    "Ekurhuleni West TVET College", "Sedibeng TVET College", "South West Gauteng TVET College",
+    "Tshwane North TVET College", "Tshwane South TVET College", "Western TVET College",
+    # KwaZulu-Natal
+    "Coastal KZN TVET College", "Elangeni TVET College", "Esayidi TVET College",
+    "Majuba TVET College", "Mnambithi TVET College", "Mthashana TVET College",
+    "Thekwini TVET College", "Umfolozi TVET College", "Umgungundlovu TVET College",
+    # Limpopo
+    "Capricorn TVET College", "Lephalale TVET College", "Letaba TVET College",
+    "Sekhukhune TVET College", "Vhembe TVET College",
+    # Mpumalanga
+    "Ehlanzeni TVET College", "Gert Sibande TVET College", "Nkangala TVET College",
+    # North West
+    "Orbit TVET College", "Taletso TVET College", "Vuselela TVET College",
+    # Northern Cape
+    "Northern Cape Rural TVET College", "Northern Cape Urban TVET College",
+    # Western Cape
+    "Boland TVET College", "College of Cape Town", "False Bay TVET College",
+    "Northlink TVET College", "South Cape TVET College", "West Coast TVET College",
 ]
 
 # Universities of Technology get a Diploma/BEngTech track (see below)
@@ -553,6 +602,47 @@ _COMMON_QUALIFICATION_MODULES: dict[str, list[tuple[str, int]]] = {
         ("Work-Integrated Learning (Teaching Practice)", 4),
     ],
 }
+# Postgraduate tracks - applied to every university alongside the
+# Bachelor's above, same generic-starter-set spirit (see this section's
+# opening comment). year_level 4 = Honours, year_level 5 = the single
+# "Postgraduate (Masters/Doctoral)" bucket this catalog's year-level
+# scale tops out at (see YEAR_LEVEL_LABELS in db.py) - Master's and PhD
+# are kept as separate qualification NAMES even though they share that
+# one year_level, so both still show up as distinct, pickable options.
+_POSTGRAD_QUALIFICATION_MODULES: dict[str, list[tuple[str, int]]] = {
+    "Bachelor of Science Honours (BScHons)": [
+        ("Research Methodology", 4), ("Advanced Topics in Mathematics", 4),
+        ("Advanced Topics in Physics", 4), ("Honours Research Project", 4),
+    ],
+    "Master of Science (MSc)": [
+        ("Advanced Research Methodology", 5), ("MSc Dissertation", 5), ("Advanced Seminar", 5),
+    ],
+    "Bachelor of Commerce Honours (BComHons)": [
+        ("Research Methodology", 4), ("Advanced Financial Management", 4),
+        ("Advanced Econometrics", 4), ("Honours Research Project", 4),
+    ],
+    "Master of Commerce (MCom)": [
+        ("Advanced Research Methodology", 5), ("MCom Dissertation", 5), ("Advanced Seminar", 5),
+    ],
+    "Bachelor of Arts Honours (BAHons)": [
+        ("Research Methodology", 4), ("Advanced Seminar in the Discipline", 4),
+        ("Honours Research Essay", 4),
+    ],
+    "Master of Arts (MA)": [
+        ("Advanced Research Methodology", 5), ("MA Dissertation", 5), ("Advanced Seminar", 5),
+    ],
+    "Bachelor of Education Honours (BEdHons)": [
+        ("Advanced Curriculum Studies", 4), ("Research Methodology in Education", 4),
+        ("Honours Research Project", 4),
+    ],
+    "Master of Education (MEd)": [
+        ("Advanced Research Methodology", 5), ("MEd Dissertation", 5), ("Advanced Seminar in Education", 5),
+    ],
+    "Doctor of Philosophy (PhD)": [
+        ("Doctoral Thesis Research", 5), ("Advanced Research Methodology", 5),
+        ("Academic Writing & Publishing", 5),
+    ],
+}
 _BENG_MODULES: list[tuple[str, int]] = [
     ("Engineering Mathematics 1A", 1), ("Engineering Mechanics (Statics)", 1),
     ("Introduction to Programming for Engineers", 1),
@@ -566,15 +656,32 @@ _BENGTECH_MODULES: list[tuple[str, int]] = [
     ("Engineering Design Project", 3), ("Industrial Practice (WIL)", 3),
 ]
 
+# Every TVET college gets just this one qualification - its nationally
+# standardized NCV FUNDAMENTAL subjects only (see the big comment above
+# DEFAULT_SA_UNIVERSITIES for why field-specific vocational subjects
+# aren't included), at each of the NCV's 3 levels (mapped onto this
+# catalog's year_level 1/2/3).
+_NCV_QUALIFICATION_NAME = "National Certificate (Vocational) (NCV)"
+_NCV_MODULES: list[tuple[str, int]] = [
+    ("Life Orientation (NCV Level 2)", 1), ("Communication in English (NCV Level 2)", 1),
+    ("Mathematics (NCV Level 2)", 1),
+    ("Life Orientation (NCV Level 3)", 2), ("Communication in English (NCV Level 3)", 2),
+    ("Mathematics (NCV Level 3)", 2), ("Computer Literacy (NCV Level 3)", 2),
+    ("Life Orientation (NCV Level 4)", 3), ("Communication in English (NCV Level 4)", 3),
+    ("Mathematics (NCV Level 4)", 3), ("Computer Literacy (NCV Level 4)", 3),
+]
+
 
 def seed_default_higher_ed_catalog() -> dict:
     """One-click starter data for an otherwise-empty higher-ed catalog -
     see the big comment above DEFAULT_SA_UNIVERSITIES for exactly what
-    this is (South Africa's real 26 public universities) and isn't (each
-    one's actual official curriculum). Idempotent: safe to run more than
-    once - anything whose name already exists (by the same uniqueness
-    rule add_institution/add_qualification/add_module already enforce)
-    is skipped, not duplicated.
+    this is (South Africa's 26 public universities plus its public TVET
+    colleges) and isn't (each one's actual official curriculum, or a
+    guaranteed-current TVET college name - see that comment's confidence
+    caveat). Idempotent: safe to run more than once - anything whose name
+    already exists (by the same uniqueness rule add_institution/
+    add_qualification/add_module already enforce) is skipped, not
+    duplicated.
 
     Batched into a handful of ROUND TRIPS rather than one existence-
     check-then-insert pair per row (an earlier version checked/inserted
@@ -587,16 +694,17 @@ def seed_default_higher_ed_catalog() -> dict:
     into one (or a couple, for the biggest table) actual INSERT
     statements each - about 8 round trips total for the whole catalog,
     regardless of its size, versus 1,500+ before."""
+    all_default_institutions = DEFAULT_SA_UNIVERSITIES + DEFAULT_SA_TVET_COLLEGES
     created = {"institutions": 0, "qualifications": 0, "modules": 0}
     skipped = {"institutions": 0, "qualifications": 0, "modules": 0}
     with get_session() as db:
         # --- institutions ---
         existing_insts = {
             i.name: i for i in
-            db.query(Institution).filter(Institution.name.in_(DEFAULT_SA_UNIVERSITIES)).all()
+            db.query(Institution).filter(Institution.name.in_(all_default_institutions)).all()
         }
-        new_inst_names = [n for n in DEFAULT_SA_UNIVERSITIES if n not in existing_insts]
-        skipped["institutions"] = len(DEFAULT_SA_UNIVERSITIES) - len(new_inst_names)
+        new_inst_names = [n for n in all_default_institutions if n not in existing_insts]
+        skipped["institutions"] = len(all_default_institutions) - len(new_inst_names)
         created["institutions"] = len(new_inst_names)
         if new_inst_names:
             db.execute(sa.insert(Institution), [{"name": n} for n in new_inst_names])
@@ -604,7 +712,7 @@ def seed_default_higher_ed_catalog() -> dict:
         # including the ones SQLAlchemy just assigned above.
         inst_by_name = {
             i.name: i for i in
-            db.query(Institution).filter(Institution.name.in_(DEFAULT_SA_UNIVERSITIES)).all()
+            db.query(Institution).filter(Institution.name.in_(all_default_institutions)).all()
         }
 
         # --- qualifications ---
@@ -612,12 +720,15 @@ def seed_default_higher_ed_catalog() -> dict:
         for uni_name in DEFAULT_SA_UNIVERSITIES:
             inst = inst_by_name[uni_name]
             quals_for_this_uni = dict(_COMMON_QUALIFICATION_MODULES)
+            quals_for_this_uni.update(_POSTGRAD_QUALIFICATION_MODULES)
             if uni_name in _BENG_UNIVERSITIES:
                 quals_for_this_uni["Bachelor of Engineering (BEng)"] = _BENG_MODULES
             if uni_name in _UNIVERSITIES_OF_TECHNOLOGY:
                 quals_for_this_uni["Bachelor of Engineering Technology (BEngTech)"] = _BENGTECH_MODULES
             for qual_name, modules in quals_for_this_uni.items():
                 desired_quals.append((inst, qual_name, modules))
+        for college_name in DEFAULT_SA_TVET_COLLEGES:
+            desired_quals.append((inst_by_name[college_name], _NCV_QUALIFICATION_NAME, _NCV_MODULES))
 
         all_inst_ids = [i.id for i in inst_by_name.values()]
         existing_quals = {
@@ -687,24 +798,44 @@ def apply_as_tutor(
     for higher-ed - see TutorAccount), so a tutor can be approved for one
     segment while the other is still pending or gets rejected.
 
+    PARTIAL QUALIFICATION, not all-or-nothing: an applicant can pass one
+    segment (or part of one) while failing another, and the application
+    still goes through for whatever DOES qualify - it's never silently
+    all rejected just because one subject/module/segment didn't meet the
+    bar. Concretely:
+      - HIGH SCHOOL: each entry in `subjects` is checked against
+        MIN_MATRIC_PERCENTAGE independently - e.g. Mathematics at 60%
+        (below the 65% bar) is excluded, Physical Sciences at 68% (above
+        it) still goes in for review, in the SAME submission. Only if
+        every submitted subject fails is the high-school segment dropped
+        entirely.
+      - HIGHER-ED: higher_ed_average is a single number for the whole
+        qualification, so it can't be split per-module - if it's below
+        MIN_HIGHER_ED_AVERAGE, the whole higher-ed segment is excluded.
+        If the average passes, each module in higher_ed_module_ids is
+        still checked independently against the "at least one year
+        ahead" rule (or allowed unconditionally if
+        higher_ed_qualification_complete) - an ineligible module is
+        excluded, not fatal to the others.
+      - If EVERY segment the applicant asked for ends up excluded (e.g.
+        "Both" but no subject clears 65% AND the higher-ed average is
+        too low), only then does this raise - there has to be something
+        left to actually review.
+    The return dict's excluded_subjects/excluded_higher_ed_reason/
+    excluded_modules report exactly what was left out and why, so the
+    caller can tell the applicant clearly instead of them wondering why
+    a session they expected isn't showing up for review.
+
     HIGH SCHOOL (wants_high_school=True): `subjects` is required, a list of
     {"subject": str, "matric_percentage": float, "topics": str (optional),
-    "hourly_rate_zar": float (optional)}. Every subject applied for must
-    meet MIN_MATRIC_PERCENTAGE - this is Malita's own stated bar, checked
-    here against the applicant's SELF-REPORTED number (not independently
-    confirmed against Umalusi/SAQA - see this module's docstring), so a
-    clearly-ineligible application is rejected immediately with a clear
-    reason instead of sitting in the review queue.
+    "hourly_rate_zar": float (optional)}. Checked against the applicant's
+    SELF-REPORTED number (not independently confirmed against
+    Umalusi/SAQA - see this module's docstring).
 
     HIGHER-ED (wants_higher_ed=True): higher_ed_institution_id/
     qualification_id/year_of_study are required, plus higher_ed_average
-    (must meet MIN_HIGHER_ED_AVERAGE, same self-reported-not-independently-
-    verified spirit as matric_percentage) and at least one entry in
-    higher_ed_module_ids - each validated to be at least one year behind
-    the tutor's own year_of_study (or allowed unconditionally if
-    higher_ed_qualification_complete), per Malita's "must be at least one
-    year ahead to tutor a module" policy - a first-year student can never
-    be linked to a first-year module.
+    (same self-reported-not-independently-verified spirit as
+    matric_percentage) and at least one entry in higher_ed_module_ids.
 
     id_document / matric_certificate_document / cv_document are each an
     optional (file_bytes, content_type) tuple - if given, the file is
@@ -732,51 +863,86 @@ def apply_as_tutor(
     if not wants_high_school and not wants_higher_ed:
         raise TutoringError("Please choose high school, university/college, or both.")
 
-    if wants_high_school:
-        if not subjects:
-            raise TutoringError("Please apply for at least one subject.")
-        for s in subjects:
-            pct = s.get("matric_percentage")
-            if pct is None or pct < MIN_MATRIC_PERCENTAGE:
-                raise TutoringError(
-                    f"A matric mark of at least {MIN_MATRIC_PERCENTAGE:.0f}% in {s.get('subject', 'that subject')} "
-                    f"is required to apply to tutor it."
-                )
-
+    if wants_high_school and not subjects:
+        raise TutoringError("Please apply for at least one subject.")
     if wants_higher_ed:
         if not higher_ed_institution_id or not higher_ed_qualification_id:
             raise TutoringError("Please select your institution and qualification.")
         if not higher_ed_year_of_study or not (1 <= higher_ed_year_of_study <= max(YEAR_LEVEL_LABELS)):
             raise TutoringError("Please select your year of study.")
-        if higher_ed_average is None or higher_ed_average < MIN_HIGHER_ED_AVERAGE:
-            raise TutoringError(
-                f"A semester/final average of at least {MIN_HIGHER_ED_AVERAGE:.0f}% "
-                f"is required to apply to tutor university/college modules."
-            )
+        if higher_ed_average is None:
+            raise TutoringError("Please enter your semester/final average.")
         if not higher_ed_module_ids:
             raise TutoringError("Please select at least one module you're able to tutor.")
+
+    # Per-subject/per-module qualification is checked independently below
+    # (see this function's docstring) - a failing one is EXCLUDED, not
+    # fatal to the whole application, unless literally nothing is left.
+    qualifying_subjects: list[dict] = []
+    excluded_subjects: list[dict] = []
+    if wants_high_school:
+        for s in subjects:
+            pct = s.get("matric_percentage")
+            if pct is None or pct < MIN_MATRIC_PERCENTAGE:
+                excluded_subjects.append({
+                    "subject": s.get("subject", "that subject"), "matric_percentage": pct,
+                    "reason": f"A matric mark of at least {MIN_MATRIC_PERCENTAGE:.0f}% is required.",
+                })
+            else:
+                qualifying_subjects.append(s)
 
     with get_session() as db:
         existing = db.query(TutorAccount).filter(TutorAccount.email == email).first()
         if existing:
             raise TutoringError("A tutor application with this email already exists.")
 
-        higher_ed_modules: list = []
+        qualifying_modules: list = []
+        excluded_modules: list[dict] = []
+        higher_ed_excluded_reason: str | None = None
         if wants_higher_ed:
+            if higher_ed_average < MIN_HIGHER_ED_AVERAGE:
+                higher_ed_excluded_reason = (
+                    f"A semester/final average of at least {MIN_HIGHER_ED_AVERAGE:.0f}% "
+                    f"is required to apply to tutor university/college modules."
+                )
             qual = db.query(Qualification).get(higher_ed_qualification_id)
-            if not qual or qual.institution_id != higher_ed_institution_id:
-                raise TutoringError("That qualification doesn't belong to the selected institution.")
-            for module_id in higher_ed_module_ids:
-                mod = db.query(Module).get(module_id)
-                if not mod:
-                    raise TutoringError("One of the selected modules no longer exists.")
-                if not higher_ed_qualification_complete and mod.year_level >= higher_ed_year_of_study:
-                    raise TutoringError(
-                        f"You can't tutor \"{mod.name}\" ({YEAR_LEVEL_LABELS.get(mod.year_level)}) "
-                        f"as a {YEAR_LEVEL_LABELS.get(higher_ed_year_of_study, higher_ed_year_of_study)} "
-                        f"student - you must be at least one year ahead of a module to tutor it."
-                    )
-                higher_ed_modules.append(mod)
+            if higher_ed_excluded_reason is None and (not qual or qual.institution_id != higher_ed_institution_id):
+                higher_ed_excluded_reason = "That qualification doesn't belong to the selected institution."
+            if higher_ed_excluded_reason is None:
+                for module_id in higher_ed_module_ids:
+                    mod = db.query(Module).get(module_id)
+                    if not mod:
+                        excluded_modules.append({
+                            "name": f"module #{module_id}", "year_level": None,
+                            "reason": "This module no longer exists in the catalog.",
+                        })
+                    elif not higher_ed_qualification_complete and mod.year_level >= higher_ed_year_of_study:
+                        excluded_modules.append({
+                            "name": mod.name, "year_level": mod.year_level,
+                            "reason": (
+                                f"You must be at least one year ahead of \"{mod.name}\" "
+                                f"({YEAR_LEVEL_LABELS.get(mod.year_level)}) to tutor it."
+                            ),
+                        })
+                    else:
+                        qualifying_modules.append(mod)
+                if not qualifying_modules and higher_ed_excluded_reason is None:
+                    higher_ed_excluded_reason = "None of the selected modules were eligible to tutor."
+
+        effective_wants_high_school = wants_high_school and bool(qualifying_subjects)
+        effective_wants_higher_ed = wants_higher_ed and higher_ed_excluded_reason is None and bool(qualifying_modules)
+
+        if not effective_wants_high_school and not effective_wants_higher_ed:
+            reasons = []
+            if wants_high_school:
+                reasons.append(f"no subject met the {MIN_MATRIC_PERCENTAGE:.0f}% matric minimum")
+            if wants_higher_ed:
+                reasons.append(higher_ed_excluded_reason or "no module was eligible")
+            raise TutoringError("Your application doesn't qualify yet: " + "; ".join(reasons) + ".")
+
+        wants_high_school = effective_wants_high_school
+        wants_higher_ed = effective_wants_higher_ed
+        higher_ed_modules = qualifying_modules
 
         id_document_path = None
         matric_certificate_path = None
@@ -855,7 +1021,7 @@ def apply_as_tutor(
         db.flush()  # assigns tutor.id before we attach subjects/modules
 
         if wants_high_school:
-            for s in subjects:
+            for s in qualifying_subjects:
                 db.add(TutorSubject(
                     tutor_id=tutor.id,
                     subject=s["subject"],
@@ -868,7 +1034,12 @@ def apply_as_tutor(
             for mod in higher_ed_modules:
                 db.add(TutorHigherEdModule(tutor_id=tutor.id, module_id=mod.id))
 
-        return {"id": tutor.id, "status": tutor.status, "higher_ed_status": tutor.higher_ed_status}
+        return {
+            "id": tutor.id, "status": tutor.status, "higher_ed_status": tutor.higher_ed_status,
+            "excluded_subjects": excluded_subjects,
+            "excluded_higher_ed_reason": higher_ed_excluded_reason if wants_higher_ed is False else None,
+            "excluded_modules": excluded_modules,
+        }
 
 
 def list_tutor_applications(status: str | None = None) -> list[dict]:

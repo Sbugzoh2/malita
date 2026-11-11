@@ -90,6 +90,7 @@ export default function TutorApplyScreen({ navigation }: any) {
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [exclusionNotes, setExclusionNotes] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -238,7 +239,7 @@ export default function TutorApplyScreen({ navigation }: any) {
 
     setSubmitting(true);
     try {
-      await applyAsTutor({
+      const result = await applyAsTutor({
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password,
@@ -268,6 +269,17 @@ export default function TutorApplyScreen({ navigation }: any) {
         higher_ed_transcript: wantsHigherEd ? transcriptDocument : null,
         higher_ed_qualification_certificate: wantsHigherEd ? qualificationCertificate : null,
       });
+      const notes: string[] = [];
+      for (const s of result.excluded_subjects) {
+        notes.push(`${s.subject} (${s.matric_percentage ?? "?"}%) wasn't included - ${s.reason}`);
+      }
+      if (result.excluded_higher_ed_reason) {
+        notes.push(`University/college modules weren't included - ${result.excluded_higher_ed_reason}`);
+      }
+      for (const m of result.excluded_modules) {
+        notes.push(`"${m.name}" wasn't included - ${m.reason}`);
+      }
+      setExclusionNotes(notes);
       setSuccess(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not submit your application. Please try again.");
@@ -283,6 +295,14 @@ export default function TutorApplyScreen({ navigation }: any) {
         <Text style={styles.successBody}>
           We'll email you once an admin has reviewed your application. You can log in anytime to check its status.
         </Text>
+        {exclusionNotes.length > 0 && (
+          <View style={styles.exclusionBox}>
+            <Text style={styles.exclusionTitle}>A few things weren't included in this submission:</Text>
+            {exclusionNotes.map((note, i) => (
+              <Text key={i} style={styles.exclusionNote}>• {note}</Text>
+            ))}
+          </View>
+        )}
         <Pressable style={styles.button} onPress={() => navigation.goBack()}>
           <Text style={styles.buttonText}>Go to Tutor Login</Text>
         </Pressable>
@@ -603,4 +623,13 @@ const styles = StyleSheet.create({
   successContainer: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
   successTitle: { fontSize: 22, fontWeight: "700", color: colors.text, marginBottom: 12, textAlign: "center" },
   successBody: { fontSize: 14, color: colors.textSecondary, textAlign: "center", marginBottom: 24, lineHeight: 20 },
+  exclusionBox: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 24,
+    width: "100%",
+  },
+  exclusionTitle: { fontSize: 13, fontWeight: "700", color: colors.text, marginBottom: 8 },
+  exclusionNote: { fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 18 },
 });

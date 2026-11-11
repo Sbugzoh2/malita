@@ -1366,11 +1366,13 @@ async def tutoring_apply(
     """Public, unauthenticated - a prospective tutor applying is not yet a
     Malita user of any kind. Covers one or BOTH segments in one submission
     (wants_high_school / wants_higher_ed) - see apply_as_tutor's docstring
-    for the independent-per-segment vetting this sets up. Rejects
-    immediately (no admin review needed) if a high-school subject's matric
-    mark, or the higher-ed average, is below Malita's stated 65% minimum,
-    or if a selected higher-ed module isn't at least one year behind the
-    applicant's own year of study.
+    for the independent-per-segment vetting this sets up, and for why a
+    subject/module/segment that doesn't meet Malita's 65% minimum (or the
+    "at least one year ahead" rule) is excluded rather than failing the
+    whole application - the response's excluded_subjects/
+    excluded_higher_ed_reason/excluded_modules report exactly what, if
+    anything, was left out and why. Only raises outright if nothing
+    submitted qualifies at all.
 
     multipart/form-data, not JSON - id_document/matric_certificate/cv are
     optional file uploads (an ID photo, NSC certificate, and a one-page

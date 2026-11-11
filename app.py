@@ -2110,9 +2110,12 @@ elif mode == "🛠️ Tutoring Admin":
                 st.warning(
                     "Adds South Africa's 26 public universities with a generic "
                     "BSc/BCom/BA/BEd (+ BEng/BEngTech where applicable) qualification "
-                    "and module set - a starting point to edit/extend, not each "
-                    "university's actual official curriculum. Safe to run again later; "
-                    "existing entries are never duplicated."
+                    "and module set, plus an Honours/Master's/PhD track for each, AND its "
+                    "public TVET colleges with just the NCV's standard fundamental subjects "
+                    "- a starting point to edit/extend, not each institution's actual official "
+                    "curriculum (and the TVET college names are lower-confidence than the "
+                    "universities - double-check these). Safe to run again later; existing "
+                    "entries are never duplicated."
                 )
                 col_confirm, col_cancel = st.columns(2)
                 if col_confirm.button("Seed It", key="confirm_seed_catalog_btn"):

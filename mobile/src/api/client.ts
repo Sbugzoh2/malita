@@ -604,7 +604,18 @@ export type TutorApplyParams = {
 // matric marks / higher-ed average must meet Malita's 65% minimum, and a
 // higher-ed module must be at least one year behind the applicant's own
 // year of study.
-export async function applyAsTutor(params: TutorApplyParams): Promise<{ id: number; status: string; higher_ed_status: string | null }> {
+export type TutorApplyResult = {
+  id: number;
+  status: string;
+  higher_ed_status: string | null;
+  // Qualification is checked per subject/module, not all-or-nothing - see
+  // apply_as_tutor's docstring. Empty/null fields mean nothing was excluded.
+  excluded_subjects: { subject: string; matric_percentage: number | null; reason: string }[];
+  excluded_higher_ed_reason: string | null;
+  excluded_modules: { name: string; year_level: number | null; reason: string }[];
+};
+
+export async function applyAsTutor(params: TutorApplyParams): Promise<TutorApplyResult> {
   const formData = new FormData();
   const textFields: Record<string, string> = {
     name: params.name,

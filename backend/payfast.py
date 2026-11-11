@@ -39,7 +39,7 @@ import requests
 PAYFAST_MERCHANT_ID = os.environ.get("PAYFAST_MERCHANT_ID", "14006256")
 PAYFAST_MERCHANT_KEY = os.environ.get("PAYFAST_MERCHANT_KEY", "m5ne6hlhz1wak")
 PAYFAST_PASSPHRASE = os.environ.get("PAYFAST_PASSPHRASE", "MtnJse212535942Ukzn_Sb")  # required for recurring billing
-PAYFAST_SANDBOX = os.environ.get("PAYFAST_SANDBOX", "false").lower() == "false"
+PAYFAST_SANDBOX = os.environ.get("PAYFAST_SANDBOX", "true").lower() == "true"
 
 PAYFAST_HOST = "sandbox.payfast.co.za" if PAYFAST_SANDBOX else "www.payfast.co.za"
 PAYFAST_PROCESS_URL = f"https://{PAYFAST_HOST}/eng/process"

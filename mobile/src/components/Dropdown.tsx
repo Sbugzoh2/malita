@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, Pressable, Modal, FlatList, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../theme";
 
 export type DropdownOption = { label: string; value: string; color?: string; muted?: boolean };
@@ -17,6 +18,13 @@ type Props = {
 export default function Dropdown({ label, options, value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
+  // Without this, a flat paddingBottom sits flush with a gesture-nav
+  // phone's home-indicator strip - a tap meant for the last option (or
+  // the sheet itself, on some devices) can register as the system's
+  // back/home swipe instead, closing the app rather than picking an
+  // option (reported by a tester on the Institution/Qualification
+  // pickers specifically, but this affects every Dropdown instance).
+  const insets = useSafeAreaInsets();
 
   return (
     <View>
@@ -31,7 +39,10 @@ export default function Dropdown({ label, options, value, onChange }: Props) {
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+          <View
+            style={[styles.sheet, { paddingBottom: 24 + insets.bottom }]}
+            onStartShouldSetResponder={() => true}
+          >
             <Text style={styles.sheetTitle}>{label}</Text>
             <FlatList
               data={options}

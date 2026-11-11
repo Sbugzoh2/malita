@@ -47,6 +47,31 @@ const STATUS_COLOR: Record<string, string> = {
   suspended: colors.error,
 };
 
+type SessionGroup = "active" | "completed" | "cancelled" | "lapsed";
+
+// Keeps cancelled/lapsed sessions out of the same list as upcoming ones -
+// previously everything rendered in one flat list regardless of status.
+function groupForStatus(status: string): SessionGroup {
+  if (status === "cancelled") return "cancelled";
+  if (status === "lapsed") return "lapsed";
+  if (status === "completed") return "completed";
+  return "active";
+}
+
+const SESSION_GROUP_TABS: { key: SessionGroup; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "completed", label: "Completed" },
+  { key: "cancelled", label: "Cancelled" },
+  { key: "lapsed", label: "Lapsed" },
+];
+
+const SESSION_GROUP_EMPTY_LABEL: Record<SessionGroup, string> = {
+  active: "No active or upcoming sessions.",
+  completed: "No completed sessions yet.",
+  cancelled: "No cancelled sessions.",
+  lapsed: "No lapsed sessions.",
+};
+
 function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <View style={styles.starRow}>
@@ -80,6 +105,7 @@ export default function TutorHomeScreen() {
   const [cancelReason, setCancelReason] = useState("");
   const [recordingDraft, setRecordingDraft] = useState<Record<number, string>>({});
   const [submittingRecordingId, setSubmittingRecordingId] = useState<number | null>(null);
+  const [sessionGroup, setSessionGroup] = useState<SessionGroup>("active");
 
   const load = useCallback(() => {
     if (!token) return;
@@ -343,7 +369,29 @@ export default function TutorHomeScreen() {
             ) : profile.sessions.length === 0 ? (
               <Text style={styles.empty}>No sessions yet - accept an open request to get started.</Text>
             ) : (
-              profile.sessions.map((sess) => (
+              <>
+                <View style={styles.sectionRow}>
+                  {SESSION_GROUP_TABS.map((tab) => {
+                    const count = profile.sessions.filter((s) => groupForStatus(s.status) === tab.key).length;
+                    return (
+                      <Pressable
+                        key={tab.key}
+                        style={[styles.sectionChip, sessionGroup === tab.key && styles.sectionChipActive]}
+                        onPress={() => setSessionGroup(tab.key)}
+                      >
+                        <Text style={[styles.sectionChipText, sessionGroup === tab.key && styles.sectionChipTextActive]}>
+                          {tab.label}{count ? ` (${count})` : ""}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {profile.sessions.filter((s) => groupForStatus(s.status) === sessionGroup).length === 0 ? (
+                  <Text style={styles.empty}>{SESSION_GROUP_EMPTY_LABEL[sessionGroup]}</Text>
+                ) : (
+                  profile.sessions
+                    .filter((s) => groupForStatus(s.status) === sessionGroup)
+                    .map((sess) => (
                 <View key={sess.id} style={styles.card}>
                   <Text style={styles.cardTitle}>
                     {sess.subject}
@@ -521,7 +569,9 @@ export default function TutorHomeScreen() {
                     </Text>
                   )}
                 </View>
-              ))
+                    ))
+                )}
+              </>
             )
           ) : !payouts ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />

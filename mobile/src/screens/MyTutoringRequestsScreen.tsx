@@ -39,6 +39,32 @@ const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   lapsed: colors.error,
 };
 
+type SessionGroup = "active" | "completed" | "cancelled" | "lapsed";
+
+// Keeps cancelled/lapsed sessions out of the same list as upcoming ones -
+// previously everything rendered in one flat list regardless of status,
+// which a tester flagged as confusing ("don't mix these two").
+function groupForStatus(status: TutoringRequest["status"]): SessionGroup {
+  if (status === "cancelled") return "cancelled";
+  if (status === "lapsed") return "lapsed";
+  if (status === "completed") return "completed";
+  return "active"; // requested, time_proposed, admin_proposed, awaiting_payment, confirmed
+}
+
+const GROUP_TABS: { key: SessionGroup; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "completed", label: "Completed" },
+  { key: "cancelled", label: "Cancelled" },
+  { key: "lapsed", label: "Lapsed" },
+];
+
+const GROUP_EMPTY_LABEL: Record<SessionGroup, string> = {
+  active: "No active requests or upcoming sessions.",
+  completed: "No completed sessions yet.",
+  cancelled: "No cancelled sessions.",
+  lapsed: "No lapsed sessions.",
+};
+
 function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <View style={styles.starRow}>
@@ -63,6 +89,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const [cancelingId, setCancelingId] = useState<number | null>(null);
   const [cancelReasonId, setCancelReasonId] = useState<number | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [group, setGroup] = useState<SessionGroup>("active");
 
   const load = useCallback(() => {
     if (!token) return;
@@ -170,12 +197,33 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      {requests && requests.length > 0 && (
+        <View style={styles.groupTabRow}>
+          {GROUP_TABS.map((tab) => {
+            const count = requests.filter((r) => groupForStatus(r.status) === tab.key).length;
+            return (
+              <Pressable
+                key={tab.key}
+                style={[styles.groupTab, group === tab.key && styles.groupTabActive]}
+                onPress={() => setGroup(tab.key)}
+              >
+                <Text style={[styles.groupTabText, group === tab.key && styles.groupTabTextActive]}>
+                  {tab.label}{count ? ` (${count})` : ""}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       {!requests ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : requests.length === 0 ? (
         <Text style={styles.empty}>You haven't requested a tutor yet.</Text>
+      ) : requests.filter((r) => groupForStatus(r.status) === group).length === 0 ? (
+        <Text style={styles.empty}>{GROUP_EMPTY_LABEL[group]}</Text>
       ) : (
-        requests.map((r) => (
+        requests.filter((r) => groupForStatus(r.status) === group).map((r) => (
           <View key={r.id} style={styles.card}>
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardSubject}>{r.subject}{r.topic ? ` · ${r.topic}` : ""}</Text>
@@ -370,6 +418,18 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: "700", color: colors.text, marginBottom: 16 },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 24 },
+  groupTabRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
+  groupTab: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: "#fff",
+  },
+  groupTabActive: { backgroundColor: colors.primary, borderColor: "transparent" },
+  groupTabText: { color: colors.text, fontSize: 13, fontWeight: "600" },
+  groupTabTextActive: { color: "#fff" },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 16,

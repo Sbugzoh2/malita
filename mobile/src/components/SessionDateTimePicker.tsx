@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, Pressable, Modal, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../theme";
 import Dropdown from "./Dropdown";
 
@@ -53,6 +54,10 @@ type Props = {
 // would force a full rebuild; this ships via EAS Update like Dropdown.
 export default function SessionDateTimePicker({ label, value, onChange, minDate }: Props) {
   const [open, setOpen] = useState(false);
+  // Same fix as Dropdown.tsx - a flat paddingBottom sits flush with a
+  // gesture-nav phone's home-indicator strip, so a tap near the bottom of
+  // this sheet can register as the system's back/home swipe instead.
+  const insets = useSafeAreaInsets();
   const floor = startOfDay(minDate ?? new Date());
   const initialBase = value ? new Date(value.year, value.month, value.day) : floor;
   const [viewMonth, setViewMonth] = useState(new Date(initialBase.getFullYear(), initialBase.getMonth(), 1));
@@ -86,7 +91,10 @@ export default function SessionDateTimePicker({ label, value, onChange, minDate 
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+          <View
+            style={[styles.sheet, { paddingBottom: 24 + insets.bottom }]}
+            onStartShouldSetResponder={() => true}
+          >
             <View style={styles.monthRow}>
               <Pressable onPress={() => setViewMonth(new Date(year, month - 1, 1))} style={styles.monthNavBtn}>
                 <Text style={styles.monthNav}>‹</Text>

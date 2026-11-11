@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Text,
   TextInput,
@@ -12,7 +12,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { colors, SUBJECTS, Subject } from "../theme";
 import {
-  ApiError, requestTutoringSession,
+  ApiError, requestTutoringSession, editTutoringRequest, TutoringRequest,
   Institution, Qualification, CatalogModule,
   fetchInstitutions, fetchQualifications, fetchModules,
 } from "../api/client";
@@ -20,28 +20,59 @@ import Dropdown from "../components/Dropdown";
 import SessionDateTimePicker, {
   SessionDateTimeValue,
   sessionDateTimeToIso,
+  isoToSessionDateTime,
 } from "../components/SessionDateTimePicker";
 
 const MIN_DURATION_MINUTES = 60;
 
-export default function RequestTutorScreen({ navigation }: any) {
+export default function RequestTutorScreen({ navigation, route }: any) {
   const { token, me } = useAuth();
   const isHigherEd = me?.user.account_type === "higher_ed";
 
-  const [subject, setSubject] = useState<Subject>("Mathematics");
+  // Editing an existing not-yet-accepted request (navigated here from
+  // MyTutoringRequestsScreen's "Edit" button) instead of creating a new one.
+  const editRequest: TutoringRequest | undefined = route?.params?.editRequest;
+  const isEdit = !!editRequest;
+  // A learner picking a specific tutor from the Browse Tutors directory
+  // instead of broadcasting a request - route.params.directoryPrefill
+  // carries the chosen tutor's subject/institution/qualification/module
+  // so this screen can land straight on it.
+  const directoryPrefill = route?.params?.directoryPrefill;
+  const preferredTutorId: number | undefined =
+    route?.params?.preferredTutorId ?? editRequest?.preferred_tutor_id ?? undefined;
+
+  const [subject, setSubject] = useState<Subject>(
+    (editRequest?.subject as Subject) || (directoryPrefill?.subject as Subject) || "Mathematics"
+  );
 
   const [institutions, setInstitutions] = useState<Institution[]>([]);
-  const [institutionId, setInstitutionId] = useState<number | null>(null);
+  const [institutionId, setInstitutionId] = useState<number | null>(
+    editRequest?.institution_id ?? directoryPrefill?.institutionId ?? null
+  );
   const [qualifications, setQualifications] = useState<Qualification[]>([]);
   const [qualificationId, setQualificationId] = useState<number | null>(null);
   const [modules, setModules] = useState<CatalogModule[]>([]);
   const [moduleId, setModuleId] = useState<number | null>(null);
 
-  const [price, setPrice] = useState("");
-  const [duration, setDuration] = useState("60");
-  const [dateTime, setDateTime] = useState<SessionDateTimeValue>(null);
-  const [topic, setTopic] = useState("");
-  const [notes, setNotes] = useState("");
+  // Cascading dropdowns normally reset their children whenever the parent
+  // changes. When pre-filling an edit or a directory pick, we want the
+  // fetched qualification and module lists to land on the target values
+  // instead - these refs carry that one-time target through the
+  // fetch-then-reset sequence, then clear themselves once applied.
+  const pendingQualificationId = useRef<number | null>(
+    editRequest?.qualification_id ?? directoryPrefill?.qualificationId ?? null
+  );
+  const pendingModuleId = useRef<number | null>(
+    editRequest?.module_id ?? directoryPrefill?.moduleId ?? null
+  );
+
+  const [price, setPrice] = useState(editRequest ? String(editRequest.price_zar ?? "") : "");
+  const [duration, setDuration] = useState(editRequest ? String(editRequest.duration_minutes ?? 60) : "60");
+  const [dateTime, setDateTime] = useState<SessionDateTimeValue>(
+    editRequest?.scheduled_at ? isoToSessionDateTime(editRequest.scheduled_at) : null
+  );
+  const [topic, setTopic] = useState(editRequest?.topic ?? "");
+  const [notes, setNotes] = useState(editRequest?.preferred_times_note ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,32 +81,54 @@ export default function RequestTutorScreen({ navigation }: any) {
     fetchInstitutions()
       .then((res) => {
         setInstitutions(res.institutions);
-        if (me?.user.higher_ed_institution_id) setInstitutionId(me.user.higher_ed_institution_id);
+        if (!institutionId && me?.user.higher_ed_institution_id) {
+          setInstitutionId(me.user.higher_ed_institution_id);
+        }
       })
       .catch(() => setError("Could not load the list of institutions."));
   }, [isHigherEd]);
 
   useEffect(() => {
-    setQualificationId(null);
-    setModules([]);
-    setModuleId(null);
     if (!institutionId) {
       setQualifications([]);
+      setQualificationId(null);
+      setModules([]);
+      setModuleId(null);
       return;
     }
     fetchQualifications(institutionId)
-      .then((res) => setQualifications(res.qualifications))
+      .then((res) => {
+        setQualifications(res.qualifications);
+        const target = pendingQualificationId.current;
+        pendingQualificationId.current = null;
+        if (target && res.qualifications.some((q) => q.id === target)) {
+          setQualificationId(target);
+        } else {
+          setQualificationId(null);
+          setModules([]);
+          setModuleId(null);
+        }
+      })
       .catch(() => setError("Could not load qualifications for that institution."));
   }, [institutionId]);
 
   useEffect(() => {
-    setModuleId(null);
     if (!qualificationId) {
       setModules([]);
+      setModuleId(null);
       return;
     }
     fetchModules(qualificationId)
-      .then((res) => setModules(res.modules))
+      .then((res) => {
+        setModules(res.modules);
+        const target = pendingModuleId.current;
+        pendingModuleId.current = null;
+        if (target && res.modules.some((m) => m.id === target)) {
+          setModuleId(target);
+        } else {
+          setModuleId(null);
+        }
+      })
       .catch(() => setError("Could not load modules for that qualification."));
   }, [qualificationId]);
 
@@ -102,7 +155,7 @@ export default function RequestTutorScreen({ navigation }: any) {
     setSubmitting(true);
     setError(null);
     try {
-      await requestTutoringSession(token, {
+      const params = {
         subject: isHigherEd ? undefined : subject,
         module_id: isHigherEd ? moduleId! : undefined,
         price_zar: priceVal,
@@ -110,7 +163,13 @@ export default function RequestTutorScreen({ navigation }: any) {
         duration_minutes: durationVal,
         topic: topic.trim(),
         preferred_times_note: notes.trim(),
-      });
+        preferred_tutor_id: preferredTutorId,
+      };
+      if (isEdit) {
+        await editTutoringRequest(token, editRequest!.id, params);
+      } else {
+        await requestTutoringSession(token, params);
+      }
       navigation.replace("MyTutoringRequests");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not submit your request. Please try again.");
@@ -122,14 +181,23 @@ export default function RequestTutorScreen({ navigation }: any) {
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
-          <Text style={styles.backLinkText}>‹ Back to Home</Text>
+        <Pressable
+          style={styles.backLink}
+          onPress={() => navigation.navigate(isEdit ? "MyTutoringRequests" : "Home")}
+        >
+          <Text style={styles.backLinkText}>‹ Back to {isEdit ? "My Requests" : "Home"}</Text>
         </Pressable>
-        <Text style={styles.title}>🙋 Request a Tutor</Text>
+        <Text style={styles.title}>{isEdit ? "✏️ Edit Request" : "🙋 Request a Tutor"}</Text>
         <Text style={styles.subtitle}>
-          Get matched with a real tutor for a 1-on-1 session. Billed separately per session — no
-          subscription required.
+          {isEdit
+            ? "Update your request's details below. This is only possible while no tutor has accepted it yet."
+            : "Get matched with a real tutor for a 1-on-1 session. Billed separately per session — no subscription required."}
         </Text>
+        {!isEdit && preferredTutorId && directoryPrefill?.tutorName ? (
+          <Text style={styles.directoryNote}>
+            Requesting {directoryPrefill.tutorName} directly - they'll be the only tutor who sees this request.
+          </Text>
+        ) : null}
 
         <Pressable style={styles.myRequestsLink} onPress={() => navigation.navigate("MyTutoringRequests")}>
           <Text style={styles.myRequestsLinkText}>View my existing requests ›</Text>
@@ -209,13 +277,17 @@ export default function RequestTutorScreen({ navigation }: any) {
           onPress={handleSubmit}
           disabled={submitting}
         >
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitButtonText}>Submit Request</Text>}
+          {submitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitButtonText}>{isEdit ? "Save Changes" : "Submit Request"}</Text>
+          )}
         </Pressable>
 
         <Text style={styles.note}>
-          Your request goes straight to tutors who teach this {isHigherEd ? "module" : "subject"} - once one
-          accepts your price and time (or proposes a different time for you to approve), you'll be asked to
-          pay securely before the session is confirmed.
+          {isEdit
+            ? "Changes take effect immediately. A new time must still be at least 24 hours away, unless you and the tutor already agreed otherwise."
+            : `Your request goes straight to tutors who teach this ${isHigherEd ? "module" : "subject"} - once one accepts your price and time (or proposes a different time for you to approve), you'll be asked to pay securely before the session is confirmed.`}
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -224,11 +296,14 @@ export default function RequestTutorScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  // Generous bottom padding so the submit button and closing note sit
+  // well clear of the device's own bottom nav bar/gesture area.
+  container: { padding: 20, paddingBottom: 64, backgroundColor: colors.background, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
+  directoryNote: { fontSize: 13, color: colors.primary, fontWeight: "600", marginTop: 10 },
   myRequestsLink: { marginTop: 14, alignSelf: "flex-start" },
   myRequestsLinkText: { color: colors.primary, fontWeight: "600", fontSize: 13 },
   label: { fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginTop: 14, marginBottom: 6 },

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
+import { Alert, View, Text, Pressable, TextInput, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
@@ -15,6 +15,8 @@ import {
   proposeNewTime,
   confirmTutoringSessionAsTutor,
   respondToAdminMatch,
+  cancelTutoringSessionAsTutor,
+  submitSessionRecording,
 } from "../api/client";
 import SessionDateTimePicker, {
   SessionDateTimeValue,
@@ -73,6 +75,11 @@ export default function TutorHomeScreen() {
   const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [respondingAdminMatchId, setRespondingAdminMatchId] = useState<number | null>(null);
+  const [cancelingId, setCancelingId] = useState<number | null>(null);
+  const [cancelReasonId, setCancelReasonId] = useState<number | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [recordingDraft, setRecordingDraft] = useState<Record<number, string>>({});
+  const [submittingRecordingId, setSubmittingRecordingId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -155,6 +162,52 @@ export default function TutorHomeScreen() {
     } finally {
       setConfirmingId(null);
     }
+  }
+
+  async function handleCancel(requestId: number) {
+    if (!token) return;
+    setCancelingId(requestId);
+    setError(null);
+    try {
+      await cancelTutoringSessionAsTutor(token, requestId, cancelReason.trim());
+      setCancelReasonId(null);
+      setCancelReason("");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not cancel this session.");
+    } finally {
+      setCancelingId(null);
+    }
+  }
+
+  async function handleSubmitRecording(requestId: number) {
+    if (!token) return;
+    const link = (recordingDraft[requestId] || "").trim();
+    if (!link) {
+      setError("Please paste in the recording link.");
+      return;
+    }
+    setSubmittingRecordingId(requestId);
+    setError(null);
+    try {
+      await submitSessionRecording(token, requestId, link);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not submit the recording link.");
+    } finally {
+      setSubmittingRecordingId(null);
+    }
+  }
+
+  function confirmCancel(requestId: number) {
+    Alert.alert(
+      "Cancel this session?",
+      "The learner will be notified. This can't be undone.",
+      [
+        { text: "Never mind", style: "cancel" },
+        { text: "Cancel Session", style: "destructive", onPress: () => handleCancel(requestId) },
+      ]
+    );
   }
 
   // Refreshes every time this screen regains focus, so a new match or a
@@ -328,6 +381,35 @@ export default function TutorHomeScreen() {
                     </Pressable>
                   ) : null}
 
+                  {(sess.status === "confirmed" || sess.status === "completed") && (
+                    sess.recording_link ? (
+                      <Text style={styles.cardMeta}>✓ Recording shared with Malita.</Text>
+                    ) : (
+                      <View style={styles.cancelBox}>
+                        <Text style={styles.confirmLabel}>
+                          Please record this session (Meet's own "Record meeting" button) and share the link:
+                        </Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Paste the recording link (e.g. Google Drive)"
+                          value={recordingDraft[sess.id] || ""}
+                          onChangeText={(v) => setRecordingDraft((prev) => ({ ...prev, [sess.id]: v }))}
+                        />
+                        <Pressable
+                          style={styles.acceptButton}
+                          onPress={() => handleSubmitRecording(sess.id)}
+                          disabled={submittingRecordingId === sess.id}
+                        >
+                          {submittingRecordingId === sess.id ? (
+                            <ActivityIndicator color="#fff" />
+                          ) : (
+                            <Text style={styles.acceptButtonText}>Submit Recording Link</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    )
+                  )}
+
                   {sess.status === "admin_proposed" && (
                     <View style={styles.proposalButtonRow}>
                       <Pressable
@@ -386,6 +468,57 @@ export default function TutorHomeScreen() {
                   )}
                   {sess.status === "completed" && sess.tutor_rating != null && (
                     <Text style={styles.cardMeta}>You rated this session {sess.tutor_rating}/5 ⭐</Text>
+                  )}
+
+                  {(sess.status === "awaiting_payment" || sess.status === "confirmed") && (
+                    cancelReasonId === sess.id ? (
+                      <View style={styles.cancelBox}>
+                        <Text style={styles.label}>Reason (optional)</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="e.g. I'm no longer available at this time"
+                          value={cancelReason}
+                          onChangeText={setCancelReason}
+                        />
+                        <View style={styles.proposalButtonRow}>
+                          <Pressable
+                            style={[styles.acceptButton, styles.proposalDeclineButton]}
+                            onPress={() => { setCancelReasonId(null); setCancelReason(""); }}
+                          >
+                            <Text style={styles.proposalDeclineButtonText}>Never mind</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[styles.acceptButton, styles.proposalApproveButton, styles.dangerButton]}
+                            onPress={() => confirmCancel(sess.id)}
+                            disabled={cancelingId === sess.id}
+                          >
+                            {cancelingId === sess.id ? (
+                              <ActivityIndicator color="#fff" />
+                            ) : (
+                              <Text style={styles.acceptButtonText}>Confirm Cancel</Text>
+                            )}
+                          </Pressable>
+                        </View>
+                        <Text style={styles.payoutNote}>
+                          Not available within 24 hours of the session - contact support for anything that close.
+                        </Text>
+                      </View>
+                    ) : (
+                      <Pressable style={styles.proposeLinkButton} onPress={() => setCancelReasonId(sess.id)}>
+                        <Text style={styles.dangerLinkText}>Cancel this session</Text>
+                      </Pressable>
+                    )
+                  )}
+                  {sess.status === "cancelled" && (
+                    <Text style={styles.cardMeta}>
+                      Cancelled by {sess.cancelled_by ?? "—"}
+                      {sess.cancellation_reason ? `: ${sess.cancellation_reason}` : "."}
+                    </Text>
+                  )}
+                  {sess.status === "lapsed" && (
+                    <Text style={styles.cardMeta}>
+                      Lapsed - the learner didn't pay within 24 hours of being matched. They'll need to submit a new request.
+                    </Text>
                   )}
                 </View>
               ))
@@ -486,6 +619,9 @@ const styles = StyleSheet.create({
   proposeLinkButton: { marginTop: 10, alignItems: "center" },
   proposeLinkText: { color: colors.primary, fontWeight: "600", fontSize: 13 },
   confirmBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+  cancelBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+  dangerButton: { backgroundColor: colors.error },
+  dangerLinkText: { color: colors.error, fontWeight: "600", fontSize: 13 },
   confirmLabel: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 8 },
   starRow: { flexDirection: "row", gap: 6 },
   star: { fontSize: 26 },

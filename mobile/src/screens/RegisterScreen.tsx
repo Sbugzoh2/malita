@@ -258,7 +258,10 @@ export default function RegisterScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  container: { flexGrow: 1, padding: 24, paddingBottom: 40, justifyContent: "center" },
+  // Generous bottom padding so the last field/button sits well clear of
+  // the device's own bottom nav bar/gesture area - too close risks an
+  // accidental system back/home gesture instead of the intended tap.
+  container: { flexGrow: 1, padding: 24, paddingBottom: 64, justifyContent: "center" },
   title: { fontSize: 22, fontWeight: "700", textAlign: "center", color: colors.text, marginBottom: 20 },
   card: {
     backgroundColor: colors.surface,
@@ -309,7 +312,7 @@ const styles = StyleSheet.create({
   // own bottom nav bar/gesture area - too close caused accidental
   // system back/home taps instead of navigating to Login (same issue
   // HomeScreen's Log Out button had).
-  linkButton: { marginTop: 16, marginBottom: 24, alignItems: "center" },
+  linkButton: { marginTop: 16, marginBottom: 32, alignItems: "center" },
   link: { color: colors.primary, fontWeight: "600" },
   error: { color: colors.error, marginTop: 12 },
   legalNote: { fontSize: 12, color: colors.textSecondary, marginTop: 14, lineHeight: 17 },

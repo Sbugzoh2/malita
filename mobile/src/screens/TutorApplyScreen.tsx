@@ -33,17 +33,18 @@ async function pickDocument(): Promise<PickedDoc> {
 }
 
 function DocumentField({
-  label, value, onPick,
+  label, value, onPick, required = true,
 }: {
   label: string;
   value: PickedDoc;
   onPick: (v: PickedDoc) => void;
+  required?: boolean;
 }) {
   return (
     <View>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label}>{label}{required ? " *" : " (optional)"}</Text>
       <Pressable style={styles.docButton} onPress={async () => onPick(await pickDocument())}>
-        <Text style={styles.docButtonText}>{value ? `📄 ${value.name}` : "Choose file (optional)"}</Text>
+        <Text style={styles.docButtonText}>{value ? `📄 ${value.name}` : "Choose file"}</Text>
       </Pressable>
     </View>
   );
@@ -84,6 +85,8 @@ export default function TutorApplyScreen({ navigation }: any) {
   const [idDocument, setIdDocument] = useState<PickedDoc>(null);
   const [matricCertificate, setMatricCertificate] = useState<PickedDoc>(null);
   const [cv, setCv] = useState<PickedDoc>(null);
+  const [transcriptDocument, setTranscriptDocument] = useState<PickedDoc>(null);
+  const [qualificationCertificate, setQualificationCertificate] = useState<PickedDoc>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -154,6 +157,9 @@ export default function TutorApplyScreen({ navigation }: any) {
       setError("Please choose high school, university/college, or both.");
       return;
     }
+    if (!name.trim()) { setError("Please enter your full name."); return; }
+    if (!email.trim()) { setError("Please enter your email."); return; }
+    if (!phone.trim()) { setError("Please enter your phone number."); return; }
     if (password.length < 8) {
       setError("Password must be at least 8 characters long.");
       return;
@@ -162,9 +168,18 @@ export default function TutorApplyScreen({ navigation }: any) {
       setError("Passwords don't match.");
       return;
     }
+    if (!bio.trim()) { setError("Please enter a short bio."); return; }
+    if (!idNumber.trim()) { setError("Please enter your ID number."); return; }
+    if (!availabilityNote.trim()) { setError("Please enter your availability."); return; }
+    if (!bankAccountNote.trim()) { setError("Please enter your bank account details."); return; }
+    if (!idDocument) { setError("Please upload your ID document."); return; }
+    if (!cv) { setError("Please upload your CV."); return; }
 
     const chosenSubjects = SUBJECTS.filter((s) => subjectRows[s].selected);
-    if (wantsHighSchool && chosenSubjects.length === 0) {
+    // Selecting "Both" with no high-school subject chosen isn't an error -
+    // the profile just defaults to a university/college-only application.
+    const isBothMode = wantsHighSchool && wantsHigherEd;
+    if (wantsHighSchool && !isBothMode && chosenSubjects.length === 0) {
       setError("Please select at least one subject.");
       return;
     }
@@ -174,6 +189,19 @@ export default function TutorApplyScreen({ navigation }: any) {
         setError(`Please enter your matric mark for ${s}.`);
         return;
       }
+      if (!subjectRows[s].topics.trim()) {
+        setError(`Please enter the topics you specialize in for ${s}.`);
+        return;
+      }
+      if (!subjectRows[s].rate.trim()) {
+        setError(`Please enter your asking rate for ${s}.`);
+        return;
+      }
+    }
+    const effectiveWantsHighSchool = chosenSubjects.length > 0;
+    if (effectiveWantsHighSchool && !matricCertificate) {
+      setError("Please upload your matric certificate.");
+      return;
     }
 
     if (wantsHigherEd) {
@@ -190,8 +218,20 @@ export default function TutorApplyScreen({ navigation }: any) {
         setError("Please enter your semester/final average.");
         return;
       }
+      if (!transcriptNote.trim()) {
+        setError("Please enter a transcript note.");
+        return;
+      }
       if (selectedModuleIds.size === 0) {
         setError("Please select at least one module you're able to tutor.");
+        return;
+      }
+      if (!transcriptDocument) {
+        setError("Please upload your academic transcript.");
+        return;
+      }
+      if (qualificationComplete && !qualificationCertificate) {
+        setError("Please upload your qualification certificate / proof of completion.");
         return;
       }
     }
@@ -207,7 +247,7 @@ export default function TutorApplyScreen({ navigation }: any) {
         id_number: idNumber.trim(),
         availability_note: availabilityNote.trim(),
         bank_account_note: bankAccountNote.trim(),
-        wants_high_school: wantsHighSchool,
+        wants_high_school: effectiveWantsHighSchool,
         wants_higher_ed: wantsHigherEd,
         subjects: chosenSubjects.map((s) => ({
           subject: s,
@@ -223,8 +263,10 @@ export default function TutorApplyScreen({ navigation }: any) {
         higher_ed_transcript_note: wantsHigherEd ? transcriptNote.trim() : undefined,
         higher_ed_module_ids: wantsHigherEd ? Array.from(selectedModuleIds) : undefined,
         id_document: idDocument,
-        matric_certificate: matricCertificate,
+        matric_certificate: effectiveWantsHighSchool ? matricCertificate : null,
         cv,
+        higher_ed_transcript: wantsHigherEd ? transcriptDocument : null,
+        higher_ed_qualification_certificate: wantsHigherEd ? qualificationCertificate : null,
       });
       setSuccess(true);
     } catch (e) {
@@ -241,7 +283,7 @@ export default function TutorApplyScreen({ navigation }: any) {
         <Text style={styles.successBody}>
           We'll email you once an admin has reviewed your application. You can log in anytime to check its status.
         </Text>
-        <Pressable style={styles.button} onPress={() => navigation.navigate("TutorLogin")}>
+        <Pressable style={styles.button} onPress={() => navigation.goBack()}>
           <Text style={styles.buttonText}>Go to Tutor Login</Text>
         </Pressable>
       </View>
@@ -295,7 +337,7 @@ export default function TutorApplyScreen({ navigation }: any) {
             keyboardType="email-address"
           />
 
-          <Text style={styles.label}>Phone (optional)</Text>
+          <Text style={styles.label}>Phone</Text>
           <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
 
           <Text style={styles.label}>Password</Text>
@@ -304,7 +346,7 @@ export default function TutorApplyScreen({ navigation }: any) {
           <Text style={styles.label}>Confirm password</Text>
           <TextInput style={styles.input} value={passwordConfirm} onChangeText={setPasswordConfirm} secureTextEntry />
 
-          <Text style={styles.label}>Short bio (optional)</Text>
+          <Text style={styles.label}>Short bio</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             value={bio}
@@ -313,10 +355,10 @@ export default function TutorApplyScreen({ navigation }: any) {
             placeholder="A couple of sentences about your teaching experience"
           />
 
-          <Text style={styles.label}>ID number (optional)</Text>
+          <Text style={styles.label}>ID number</Text>
           <TextInput style={styles.input} value={idNumber} onChangeText={setIdNumber} maxLength={13} keyboardType="number-pad" />
 
-          <Text style={styles.label}>Availability (optional)</Text>
+          <Text style={styles.label}>Availability</Text>
           <TextInput
             style={styles.input}
             value={availabilityNote}
@@ -324,17 +366,25 @@ export default function TutorApplyScreen({ navigation }: any) {
             placeholder="e.g. Weekdays after 16:00, Saturday mornings"
           />
 
-          <Text style={styles.label}>Bank account details (optional, for payouts)</Text>
+          <Text style={styles.label}>Bank account details (for payouts)</Text>
           <TextInput style={[styles.input, styles.textArea]} value={bankAccountNote} onChangeText={setBankAccountNote} multiline />
 
           <DocumentField label="ID document" value={idDocument} onPick={setIdDocument} />
-          <DocumentField label="Matric certificate" value={matricCertificate} onPick={setMatricCertificate} />
+          <DocumentField
+            label="Matric certificate"
+            value={matricCertificate}
+            onPick={setMatricCertificate}
+            required={SUBJECTS.some((s) => subjectRows[s].selected)}
+          />
           <DocumentField label="CV" value={cv} onPick={setCv} />
         </View>
 
         {wantsHighSchool && (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>High School Subjects</Text>
+            <Text style={styles.helperText}>
+              Malita currently only offers high-school tutoring in: {SUBJECTS.join(", ")}.
+            </Text>
             {SUBJECTS.map((s) => (
               <View key={s} style={styles.subjectBlock}>
                 <Pressable style={styles.checkboxRow} onPress={() => toggleSubject(s)}>
@@ -352,13 +402,13 @@ export default function TutorApplyScreen({ navigation }: any) {
                       onChangeText={(v) => updateSubjectField(s, "matric", v)}
                       keyboardType="numeric"
                     />
-                    <Text style={styles.label}>Topics you specialize in (optional)</Text>
+                    <Text style={styles.label}>Topics you specialize in</Text>
                     <TextInput
                       style={styles.input}
                       value={subjectRows[s].topics}
                       onChangeText={(v) => updateSubjectField(s, "topics", v)}
                     />
-                    <Text style={styles.label}>Asking rate (R/hr, optional)</Text>
+                    <Text style={styles.label}>Asking rate (R/hr)</Text>
                     <TextInput
                       style={styles.input}
                       value={subjectRows[s].rate}
@@ -382,11 +432,16 @@ export default function TutorApplyScreen({ navigation }: any) {
               onChange={(v) => setInstitutionId(parseInt(v, 10))}
             />
             <Dropdown
-              label="Qualification"
+              label="Highest completed qualification, or the one you're currently studying towards"
               options={qualifications.map((q) => ({ label: q.name, value: String(q.id) }))}
               value={qualificationId != null ? String(qualificationId) : null}
               onChange={(v) => setQualificationId(parseInt(v, 10))}
             />
+            {institutionId && qualifications.length === 0 ? (
+              <Text style={styles.helperText}>
+                No qualifications listed yet for this institution - ask an admin to add it to the catalog.
+              </Text>
+            ) : null}
             <Dropdown
               label="Your year of study"
               options={Object.entries(YEAR_LEVEL_LABELS).map(([k, v]) => ({ label: v, value: k }))}
@@ -403,14 +458,23 @@ export default function TutorApplyScreen({ navigation }: any) {
             <Text style={styles.label}>Semester / final average (%)</Text>
             <TextInput style={styles.input} value={average} onChangeText={setAverage} keyboardType="numeric" />
 
-            <Text style={styles.label}>Transcript note (optional)</Text>
+            <Text style={styles.label}>Transcript note</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
               value={transcriptNote}
               onChangeText={setTranscriptNote}
               multiline
-              placeholder="e.g. a link to where you've uploaded your transcript"
+              placeholder="e.g. anything we should know when reviewing your transcript"
             />
+
+            <DocumentField label="Academic transcript" value={transcriptDocument} onPick={setTranscriptDocument} />
+            {qualificationComplete && (
+              <DocumentField
+                label="Qualification certificate / proof of completion"
+                value={qualificationCertificate}
+                onPick={setQualificationCertificate}
+              />
+            )}
 
             <Text style={styles.label}>
               Modules you're able to tutor {yearOfStudy ? `(at least one year behind ${YEAR_LEVEL_LABELS[yearOfStudy]})` : ""}
@@ -443,7 +507,7 @@ export default function TutorApplyScreen({ navigation }: any) {
           {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Submit Application</Text>}
         </Pressable>
 
-        <Pressable onPress={() => navigation.navigate("TutorLogin")} style={styles.linkButton}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.linkButton}>
           <Text style={styles.link}>Already applied? Log in</Text>
         </Pressable>
       </ScrollView>
@@ -453,7 +517,10 @@ export default function TutorApplyScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  container: { flexGrow: 1, padding: 24, paddingBottom: 40 },
+  // Generous bottom padding so the last field/button sits well clear of
+  // the device's own bottom nav bar/gesture area - too close risks an
+  // accidental system back/home gesture instead of the intended tap.
+  container: { flexGrow: 1, padding: 24, paddingBottom: 64 },
   title: { fontSize: 24, fontWeight: "700", textAlign: "center", color: colors.text },
   subtitle: { fontSize: 13, textAlign: "center", color: colors.textSecondary, marginTop: 6, marginBottom: 20 },
   card: {
@@ -531,7 +598,7 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  linkButton: { marginTop: 16, marginBottom: 24, alignItems: "center" },
+  linkButton: { marginTop: 16, marginBottom: 32, alignItems: "center" },
   link: { color: colors.primary, fontWeight: "600" },
   successContainer: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
   successTitle: { fontSize: 22, fontWeight: "700", color: colors.text, marginBottom: 12, textAlign: "center" },

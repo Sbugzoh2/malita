@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, TextInput } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, TextInput, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
@@ -9,6 +9,8 @@ import {
   tutoringCheckoutUrl,
   confirmTutoringSessionAsLearner,
   respondToTimeProposal,
+  withdrawTutoringRequest,
+  cancelTutoringSessionAsLearner,
   TutoringRequest,
 } from "../api/client";
 
@@ -34,6 +36,7 @@ const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   confirmed: colors.primary,
   completed: colors.success,
   cancelled: colors.error,
+  lapsed: colors.error,
 };
 
 function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
@@ -56,6 +59,10 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [respondingId, setRespondingId] = useState<number | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<number | null>(null);
+  const [cancelingId, setCancelingId] = useState<number | null>(null);
+  const [cancelReasonId, setCancelReasonId] = useState<number | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   const load = useCallback(() => {
     if (!token) return;
@@ -110,6 +117,47 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
       setError(e instanceof ApiError ? e.message : "Could not record your response.");
     } finally {
       setRespondingId(null);
+    }
+  }
+
+  function confirmWithdraw(requestId: number) {
+    Alert.alert(
+      "Withdraw this request?",
+      "This can't be undone - you'd need to submit a new request if you change your mind.",
+      [
+        { text: "Never mind", style: "cancel" },
+        { text: "Withdraw", style: "destructive", onPress: () => handleWithdraw(requestId) },
+      ]
+    );
+  }
+
+  async function handleWithdraw(requestId: number) {
+    if (!token) return;
+    setWithdrawingId(requestId);
+    setError(null);
+    try {
+      await withdrawTutoringRequest(token, requestId);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not withdraw this request.");
+    } finally {
+      setWithdrawingId(null);
+    }
+  }
+
+  async function handleCancel(requestId: number) {
+    if (!token) return;
+    setCancelingId(requestId);
+    setError(null);
+    try {
+      await cancelTutoringSessionAsLearner(token, requestId, cancelReason.trim());
+      setCancelReasonId(null);
+      setCancelReason("");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not cancel this session.");
+    } finally {
+      setCancelingId(null);
     }
   }
 
@@ -185,10 +233,91 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
               </View>
             )}
 
+            {(r.status === "requested" || r.status === "time_proposed") && (
+              <View style={styles.actionButtonRow}>
+                {r.status === "requested" && (
+                  <Pressable
+                    style={[styles.secondaryButton, styles.actionButtonFlex]}
+                    onPress={() => navigation.navigate("RequestTutor", { editRequest: r })}
+                  >
+                    <Text style={styles.secondaryButtonText}>Edit</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={[styles.dangerButton, styles.actionButtonFlex]}
+                  onPress={() => confirmWithdraw(r.id)}
+                  disabled={withdrawingId === r.id}
+                >
+                  {withdrawingId === r.id ? (
+                    <ActivityIndicator color={colors.error} />
+                  ) : (
+                    <Text style={styles.dangerButtonText}>Withdraw</Text>
+                  )}
+                </Pressable>
+              </View>
+            )}
+
             {r.status === "awaiting_payment" && (
-              <Pressable style={styles.payButton} onPress={() => handlePay(r.id)}>
-                <Text style={styles.payButtonText}>Pay Now</Text>
-              </Pressable>
+              <>
+                <Pressable style={styles.payButton} onPress={() => handlePay(r.id)}>
+                  <Text style={styles.payButtonText}>Pay Now</Text>
+                </Pressable>
+                <Text style={styles.helperText}>
+                  Pay within 24 hours of being matched, or this request lapses and you'll need to submit a new one.
+                </Text>
+              </>
+            )}
+
+            {(r.status === "awaiting_payment" || r.status === "confirmed") && (
+              <View style={styles.cancelSection}>
+                {cancelReasonId === r.id ? (
+                  <View style={styles.cancelBox}>
+                    <TextInput
+                      style={styles.commentInput}
+                      placeholder="Reason (optional)"
+                      value={cancelReason}
+                      onChangeText={setCancelReason}
+                    />
+                    <View style={styles.proposalButtonRow}>
+                      <Pressable
+                        style={[styles.dangerButton, styles.actionButtonFlex]}
+                        onPress={() => handleCancel(r.id)}
+                        disabled={cancelingId === r.id}
+                      >
+                        {cancelingId === r.id ? (
+                          <ActivityIndicator color={colors.error} />
+                        ) : (
+                          <Text style={styles.dangerButtonText}>Confirm Cancel</Text>
+                        )}
+                      </Pressable>
+                      <Pressable
+                        style={[styles.secondaryButton, styles.actionButtonFlex]}
+                        onPress={() => { setCancelReasonId(null); setCancelReason(""); }}
+                      >
+                        <Text style={styles.secondaryButtonText}>Never mind</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable style={styles.dangerLinkButton} onPress={() => setCancelReasonId(r.id)}>
+                    <Text style={styles.dangerButtonText}>Cancel this session</Text>
+                  </Pressable>
+                )}
+                <Text style={styles.helperText}>
+                  Cancelling isn't available within 24 hours of the session.
+                </Text>
+              </View>
+            )}
+
+            {r.status === "cancelled" && (
+              <Text style={styles.cardMeta}>
+                Cancelled by {r.cancelled_by ?? "—"}{r.cancellation_reason ? `: ${r.cancellation_reason}` : "."}
+              </Text>
+            )}
+            {r.status === "lapsed" && (
+              <Text style={styles.cardMeta}>
+                This match lapsed because payment wasn't completed in time - submit a new request if you still need a tutor.
+              </Text>
             )}
 
             {r.status === "confirmed" && !r.learner_confirmed && (
@@ -294,6 +423,30 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   proposalDeclineButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
+  actionButtonRow: { flexDirection: "row", gap: 10, marginTop: 12 },
+  actionButtonFlex: { flex: 1, marginTop: 0 },
+  secondaryButton: {
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#fff",
+  },
+  secondaryButtonText: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  dangerButton: {
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.error,
+    backgroundColor: "#fff",
+  },
+  dangerButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
+  dangerLinkButton: { marginTop: 12, alignItems: "center" },
+  cancelSection: { marginTop: 4 },
+  cancelBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+  helperText: { fontSize: 11, color: colors.textSecondary, marginTop: 6, fontStyle: "italic" },
   newRequestButton: {
     borderRadius: 999,
     paddingVertical: 14,

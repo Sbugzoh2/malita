@@ -31,11 +31,25 @@ import {
   fetchTutorProfile,
   AdminTutoringSession,
   fetchAllTutoringSessionsAdmin,
+  TutorHigherEdApplication,
+  fetchTutorHigherEdApplications,
+  approveTutorHigherEdApplication,
+  rejectTutorHigherEdApplication,
+  Institution,
+  Qualification,
+  CatalogModule,
+  fetchInstitutions,
+  fetchQualifications,
+  fetchModules,
+  addInstitutionAdmin,
+  addQualificationAdmin,
+  addModuleAdmin,
+  YEAR_LEVEL_LABELS,
   API_BASE_URL,
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
 
-type Section = "applications" | "match" | "sessions" | "tutors" | "payouts";
+type Section = "applications" | "higherEdApplications" | "catalog" | "match" | "sessions" | "tutors" | "payouts";
 
 const STATUS_OPTIONS: { label: string; value: TutorApplication["status"] }[] = [
   { label: "Pending Review", value: "pending_review" },
@@ -65,6 +79,8 @@ export default function TutoringAdminScreen({ navigation }: any) {
       <View style={styles.sectionRow}>
         {([
           { key: "applications", label: "Applications" },
+          { key: "higherEdApplications", label: "Higher-Ed Applications" },
+          { key: "catalog", label: "Higher-Ed Catalog" },
           { key: "match", label: "Match Requests" },
           { key: "sessions", label: "All Sessions" },
           { key: "tutors", label: "Tutors" },
@@ -83,6 +99,8 @@ export default function TutoringAdminScreen({ navigation }: any) {
       </View>
 
       {token && section === "applications" && <ApplicationsSection token={token} />}
+      {token && section === "higherEdApplications" && <HigherEdApplicationsSection token={token} />}
+      {token && section === "catalog" && <CatalogSection token={token} />}
       {token && section === "match" && <MatchSection token={token} />}
       {token && section === "sessions" && <SessionsSection token={token} />}
       {token && section === "tutors" && <TutorsSection token={token} />}
@@ -263,6 +281,397 @@ function ApplicationsSection({ token }: { token: string }) {
           );
         })
       )}
+    </View>
+  );
+}
+
+const HIGHER_ED_STATUS_OPTIONS: { label: string; value: TutorHigherEdApplication["higher_ed_status"] }[] = [
+  { label: "Pending Review", value: "pending_review" },
+  { label: "Approved", value: "approved" },
+  { label: "Rejected", value: "rejected" },
+  { label: "Suspended", value: "suspended" },
+];
+
+function HigherEdApplicationsSection({ token }: { token: string }) {
+  const [status, setStatus] = useState<TutorHigherEdApplication["higher_ed_status"]>("pending_review");
+  const [apps, setApps] = useState<TutorHigherEdApplication[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [docUrls, setDocUrls] = useState<Record<string, string>>({});
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    fetchTutorHigherEdApplications(token, status)
+      .then((res) => setApps(res.applications))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load applications."));
+  }, [token, status]);
+
+  useEffect(() => {
+    setApps(null);
+    load();
+  }, [load]);
+
+  async function handleApprove(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await approveTutorHigherEdApplication(token, id);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not approve.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleReject(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await rejectTutorHigherEdApplication(token, id, rejectReason);
+      setRejectingId(null);
+      setRejectReason("");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not reject.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleGetDocUrl(
+    tutorId: number,
+    kind: "id" | "cv" | "higher_ed_transcript" | "higher_ed_qualification_certificate"
+  ) {
+    try {
+      const res = await fetchTutorDocumentUrl(token, tutorId, kind);
+      setDocUrls((prev) => ({ ...prev, [`${tutorId}_${kind}`]: res.url }));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not get document link.");
+    }
+  }
+
+  return (
+    <View>
+      <Dropdown
+        label="Status"
+        options={HIGHER_ED_STATUS_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
+        value={status}
+        onChange={(v) => setStatus(v as TutorHigherEdApplication["higher_ed_status"])}
+      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!apps ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      ) : apps.length === 0 ? (
+        <Text style={styles.empty}>No applications with this status.</Text>
+      ) : (
+        apps.map((a) => {
+          const expanded = expandedId === a.id;
+          return (
+            <View key={a.id} style={styles.card}>
+              <Pressable onPress={() => setExpandedId(expanded ? null : a.id)}>
+                <Text style={styles.cardTitle}>
+                  {a.name} — {a.email}
+                </Text>
+                <Text style={styles.cardSubtitle}>{a.higher_ed_status_label}</Text>
+              </Pressable>
+              {expanded && (
+                <View style={styles.cardDetail}>
+                  <Text style={styles.detailLine}>Phone: {a.phone || "—"}</Text>
+                  <Text style={styles.detailLine}>Institution: {a.higher_ed_institution || "—"}</Text>
+                  <Text style={styles.detailLine}>Qualification: {a.higher_ed_qualification || "—"}</Text>
+                  <Text style={styles.detailLine}>Year of study: {a.higher_ed_year_of_study_label || "—"}</Text>
+                  {a.higher_ed_qualification_complete ? (
+                    <Text style={styles.detailLine}>Qualification already completed.</Text>
+                  ) : null}
+                  <Text style={styles.detailLine}>
+                    Semester/final average: {a.higher_ed_average != null ? `${a.higher_ed_average}%` : "—"}
+                  </Text>
+                  <Text style={styles.detailLine}>Transcript note: {a.higher_ed_transcript_note || "—"}</Text>
+                  <Text style={styles.detailLine}>Bio: {a.bio || "—"}</Text>
+                  <Text style={styles.detailLine}>Availability: {a.availability_note || "—"}</Text>
+                  <Text style={styles.detailLine}>Bank details: {a.bank_account_note || "—"}</Text>
+                  {a.wants_high_school ? (
+                    <Text style={styles.detailLine}>This tutor also applied for high-school tutoring.</Text>
+                  ) : null}
+
+                  {([
+                    ["id", "ID document", a.has_id_document] as const,
+                    ["cv", "CV", a.has_cv_document] as const,
+                    ["higher_ed_transcript", "Academic transcript", a.has_higher_ed_transcript_document] as const,
+                    [
+                      "higher_ed_qualification_certificate",
+                      "Qualification certificate",
+                      a.has_higher_ed_qualification_certificate_document,
+                    ] as const,
+                  ]).map(([kind, label, hasDoc]) =>
+                    hasDoc ? (
+                      docUrls[`${a.id}_${kind}`] ? (
+                        <Pressable
+                          key={kind}
+                          style={styles.docButton}
+                          onPress={() => Linking.openURL(docUrls[`${a.id}_${kind}`])}
+                        >
+                          <Text style={styles.docButtonText}>Open {label}</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable key={kind} style={styles.docButton} onPress={() => handleGetDocUrl(a.id, kind)}>
+                          <Text style={styles.docButtonText}>🔗 Get {label} link</Text>
+                        </Pressable>
+                      )
+                    ) : (
+                      <Text key={kind} style={styles.detailLine}>{label}: not uploaded</Text>
+                    )
+                  )}
+
+                  <Text style={styles.detailLabel}>Modules applied for:</Text>
+                  {a.modules.map((m) => (
+                    <Text key={m.id} style={styles.detailLine}>
+                      • {m.name} ({m.year_level_label})
+                    </Text>
+                  ))}
+
+                  {a.higher_ed_status === "pending_review" && (
+                    <>
+                      <View style={styles.actionRow}>
+                        <Pressable
+                          style={styles.approveButton}
+                          onPress={() => handleApprove(a.id)}
+                          disabled={busyId === a.id}
+                        >
+                          {busyId === a.id ? (
+                            <ActivityIndicator color="#fff" />
+                          ) : (
+                            <Text style={styles.approveButtonText}>✅ Approve</Text>
+                          )}
+                        </Pressable>
+                        <Pressable
+                          style={styles.rejectButton}
+                          onPress={() => setRejectingId(rejectingId === a.id ? null : a.id)}
+                        >
+                          <Text style={styles.rejectButtonText}>❌ Reject</Text>
+                        </Pressable>
+                      </View>
+                      {rejectingId === a.id && (
+                        <View style={styles.rejectBox}>
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Reason (optional)"
+                            value={rejectReason}
+                            onChangeText={setRejectReason}
+                          />
+                          <Pressable
+                            style={styles.approveButton}
+                            onPress={() => handleReject(a.id)}
+                            disabled={busyId === a.id}
+                          >
+                            <Text style={styles.approveButtonText}>Confirm Reject</Text>
+                          </Pressable>
+                        </View>
+                      )}
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
+function CatalogSection({ token }: { token: string }) {
+  const [institutions, setInstitutions] = useState<Institution[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [newInstitutionName, setNewInstitutionName] = useState("");
+
+  const [qualInstitutionId, setQualInstitutionId] = useState<number | null>(null);
+  const [qualifications, setQualifications] = useState<Qualification[]>([]);
+  const [newQualificationName, setNewQualificationName] = useState("");
+
+  const [modInstitutionId, setModInstitutionId] = useState<number | null>(null);
+  const [modQualifications, setModQualifications] = useState<Qualification[]>([]);
+  const [modQualificationId, setModQualificationId] = useState<number | null>(null);
+  const [modules, setModules] = useState<CatalogModule[]>([]);
+  const [newModuleName, setNewModuleName] = useState("");
+  const [newModuleYear, setNewModuleYear] = useState<number>(1);
+
+  const loadInstitutions = useCallback(() => {
+    fetchInstitutions()
+      .then((res) => setInstitutions(res.institutions))
+      .catch(() => setError("Could not load institutions."));
+  }, []);
+
+  useEffect(() => {
+    loadInstitutions();
+  }, [loadInstitutions]);
+
+  useEffect(() => {
+    if (!qualInstitutionId) {
+      setQualifications([]);
+      return;
+    }
+    fetchQualifications(qualInstitutionId)
+      .then((res) => setQualifications(res.qualifications))
+      .catch(() => setError("Could not load qualifications."));
+  }, [qualInstitutionId]);
+
+  useEffect(() => {
+    setModQualificationId(null);
+    if (!modInstitutionId) {
+      setModQualifications([]);
+      return;
+    }
+    fetchQualifications(modInstitutionId)
+      .then((res) => setModQualifications(res.qualifications))
+      .catch(() => setError("Could not load qualifications."));
+  }, [modInstitutionId]);
+
+  useEffect(() => {
+    if (!modQualificationId) {
+      setModules([]);
+      return;
+    }
+    fetchModules(modQualificationId)
+      .then((res) => setModules(res.modules))
+      .catch(() => setError("Could not load modules."));
+  }, [modQualificationId]);
+
+  async function handleAddInstitution() {
+    setError(null);
+    if (!newInstitutionName.trim()) {
+      setError("Please enter an institution name.");
+      return;
+    }
+    try {
+      await addInstitutionAdmin(token, newInstitutionName.trim());
+      setNewInstitutionName("");
+      loadInstitutions();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not add institution.");
+    }
+  }
+
+  async function handleAddQualification() {
+    setError(null);
+    if (!qualInstitutionId) {
+      setError("Please select an institution first.");
+      return;
+    }
+    if (!newQualificationName.trim()) {
+      setError("Please enter a qualification name.");
+      return;
+    }
+    try {
+      await addQualificationAdmin(token, qualInstitutionId, newQualificationName.trim());
+      setNewQualificationName("");
+      fetchQualifications(qualInstitutionId).then((res) => setQualifications(res.qualifications));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not add qualification.");
+    }
+  }
+
+  async function handleAddModule() {
+    setError(null);
+    if (!modQualificationId) {
+      setError("Please select an institution and qualification first.");
+      return;
+    }
+    if (!newModuleName.trim()) {
+      setError("Please enter a module name.");
+      return;
+    }
+    try {
+      await addModuleAdmin(token, modQualificationId, newModuleName.trim(), newModuleYear);
+      setNewModuleName("");
+      fetchModules(modQualificationId).then((res) => setModules(res.modules));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not add module.");
+    }
+  }
+
+  return (
+    <View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Text style={styles.sectionTitle}>Institutions</Text>
+      {institutions.map((i) => (
+        <Text key={i.id} style={styles.detailLine}>• {i.name}</Text>
+      ))}
+      <TextInput
+        style={styles.input}
+        placeholder="New institution name"
+        value={newInstitutionName}
+        onChangeText={setNewInstitutionName}
+      />
+      <Pressable style={styles.approveButton} onPress={handleAddInstitution}>
+        <Text style={styles.approveButtonText}>Add Institution</Text>
+      </Pressable>
+
+      <Text style={[styles.sectionTitle, styles.catalogSectionSpacing]}>Qualifications</Text>
+      <Dropdown
+        label="Institution"
+        options={institutions.map((i) => ({ label: i.name, value: String(i.id) }))}
+        value={qualInstitutionId != null ? String(qualInstitutionId) : null}
+        onChange={(v) => setQualInstitutionId(parseInt(v, 10))}
+      />
+      {qualifications.map((q) => (
+        <Text key={q.id} style={styles.detailLine}>• {q.name}</Text>
+      ))}
+      {qualInstitutionId ? (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="New qualification name"
+            value={newQualificationName}
+            onChangeText={setNewQualificationName}
+          />
+          <Pressable style={styles.approveButton} onPress={handleAddQualification}>
+            <Text style={styles.approveButtonText}>Add Qualification</Text>
+          </Pressable>
+        </>
+      ) : null}
+
+      <Text style={[styles.sectionTitle, styles.catalogSectionSpacing]}>Modules</Text>
+      <Dropdown
+        label="Institution"
+        options={institutions.map((i) => ({ label: i.name, value: String(i.id) }))}
+        value={modInstitutionId != null ? String(modInstitutionId) : null}
+        onChange={(v) => setModInstitutionId(parseInt(v, 10))}
+      />
+      {modInstitutionId ? (
+        <Dropdown
+          label="Qualification"
+          options={modQualifications.map((q) => ({ label: q.name, value: String(q.id) }))}
+          value={modQualificationId != null ? String(modQualificationId) : null}
+          onChange={(v) => setModQualificationId(parseInt(v, 10))}
+        />
+      ) : null}
+      {modules.map((m) => (
+        <Text key={m.id} style={styles.detailLine}>• {m.name} ({m.year_level_label})</Text>
+      ))}
+      {modQualificationId ? (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="New module name"
+            value={newModuleName}
+            onChangeText={setNewModuleName}
+          />
+          <Dropdown
+            label="Year level"
+            options={Object.entries(YEAR_LEVEL_LABELS).map(([k, v]) => ({ label: v, value: k }))}
+            value={String(newModuleYear)}
+            onChange={(v) => setNewModuleYear(parseInt(v, 10))}
+          />
+          <Pressable style={styles.approveButton} onPress={handleAddModule}>
+            <Text style={styles.approveButtonText}>Add Module</Text>
+          </Pressable>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -644,6 +1053,11 @@ function SessionsSection({ token }: { token: string }) {
                 <Text style={styles.cardLink}>🎥 Open Google Meet link</Text>
               </Pressable>
             ) : null}
+            {s.recording_link ? (
+              <Pressable onPress={() => Linking.openURL(s.recording_link!)}>
+                <Text style={styles.cardLink}>🎬 Open session recording</Text>
+              </Pressable>
+            ) : null}
             {s.learner_rating != null ? (
               <Text style={styles.detailLine}>Learner rated: {s.learner_rating}/5</Text>
             ) : null}
@@ -698,6 +1112,8 @@ const styles = StyleSheet.create({
   cardDetail: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   detailLine: { fontSize: 13, color: colors.text, marginTop: 4 },
   cardLink: { color: colors.primary, fontWeight: "700", fontSize: 13, marginTop: 8 },
+  sectionTitle: { fontSize: 15, fontWeight: "700", color: colors.text, marginBottom: 8 },
+  catalogSectionSpacing: { marginTop: 20 },
   detailLabel: { fontSize: 13, fontWeight: "700", color: colors.text, marginTop: 10 },
   docButton: { marginTop: 8, alignSelf: "flex-start" },
   docButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },

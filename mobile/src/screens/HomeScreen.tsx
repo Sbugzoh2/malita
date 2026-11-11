@@ -58,6 +58,13 @@ const TILES: Tile[] = [
     desc: "Book a 1-on-1 tutoring session. Billed separately, open to every plan.",
     color: "#e87ba4",
   },
+  {
+    key: "BrowseTutors",
+    icon: "🔎",
+    title: "Browse Tutors",
+    desc: "See tutors' subjects/modules, availability, and rates, and pick one directly.",
+    color: "#2fa88a",
+  },
 ];
 
 const ADMIN_TILE: Tile = {
@@ -71,7 +78,7 @@ const ADMIN_TILE: Tile = {
 // University/college accounts get ONLY the tutoring marketplace - every
 // other tile above (AI Tutor, past papers, subscription, etc.) is simply
 // never shown, same gating principle as app.py's web equivalent.
-const HIGHER_ED_TILES: Tile[] = TILES.filter((t) => t.key === "RequestTutor");
+const HIGHER_ED_TILES: Tile[] = TILES.filter((t) => t.key === "RequestTutor" || t.key === "BrowseTutors");
 
 export default function HomeScreen({ navigation }: any) {
   const { me, logout } = useAuth();

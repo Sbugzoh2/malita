@@ -105,6 +105,7 @@ SESSION_STATUS_LABELS = {
     "confirmed": "Paid — confirm once the session happens",
     "completed": "Completed",
     "cancelled": "Cancelled",
+    "lapsed": "Lapsed — payment wasn't made in time",
 }
 
 # A session must be at least this long, and no two of the same person's
@@ -113,6 +114,41 @@ SESSION_STATUS_LABELS = {
 # at every point a time is set or proposed.
 MIN_SESSION_DURATION_MINUTES = 60
 SCHEDULING_BUFFER_MINUTES = 15
+# The LEARNER's own initial request must be at least this far in the
+# future - enforced only in request_tutoring_session, NOT in
+# propose_new_time/respond_to_time_proposal/match_tutor_to_request/
+# tutor_respond_to_admin_match, since those already represent the
+# learner and tutor mutually agreeing on a different time (Malita's
+# stated "unless otherwise agreed" exception).
+MIN_REQUEST_LEAD_HOURS = 24
+# How long a learner has to pay after a tutor accepts/is matched before
+# the request automatically lapses - see _expire_lapsed_payments.
+PAYMENT_DEADLINE_HOURS = 24
+# Neither party can cancel an already-accepted (awaiting_payment or
+# confirmed) session within this many hours of when it's due to happen -
+# see cancel_accepted_session.
+CANCELLATION_CUTOFF_HOURS = 24
+# How long before a CONFIRMED (paid) session's start time to send the
+# "coming up" reminders - see send_due_reminders. Each fires once, guarded
+# by its own reminder_*_sent_at column.
+SESSION_REMINDER_HOURS_BEFORE = 24
+SESSION_REMINDER_MINUTES_BEFORE = 15
+# How long before an unpaid match's PAYMENT_DEADLINE_HOURS deadline to
+# warn the learner it's about to lapse.
+PAYMENT_LAPSE_REMINDER_HOURS_BEFORE = 2
+# There's no API that can force-start a recording on a regular (non-
+# Google-Workspace) Meet call - see backend/google_calendar.py's docstring
+# for why this project uses a personal Gmail account, not Workspace. So
+# "every session auto-recorded" is, in practice, every tutor asked to
+# click Meet's own one-click "Record" button and then submit the
+# resulting link afterward (see submit_session_recording) - this note is
+# included in every tutor-facing match/reminder email.
+RECORDING_REMINDER_NOTE = (
+    "Reminder: please record this session (click \"Record meeting\" inside "
+    "Google Meet once you're in the call) and share the recording link with "
+    "us from the Tutor app afterward - Malita keeps a recording of every "
+    "session on file."
+)
 
 
 def _format_sast(d: dt.datetime | None) -> str:
@@ -385,6 +421,8 @@ def apply_as_tutor(
     id_document: tuple[bytes, str] | None = None,
     matric_certificate_document: tuple[bytes, str] | None = None,
     cv_document: tuple[bytes, str] | None = None,
+    higher_ed_transcript_document: tuple[bytes, str] | None = None,
+    higher_ed_qualification_certificate_document: tuple[bytes, str] | None = None,
 ) -> dict:
     """A prospective tutor's application, covering one or BOTH segments
     (wants_high_school / wants_higher_ed) in one submission - each has its
@@ -510,6 +548,24 @@ def apply_as_tutor(
                 )
             except _storage.StorageError as e:
                 raise TutoringError(str(e))
+        higher_ed_transcript_path = None
+        if higher_ed_transcript_document:
+            file_bytes, content_type = higher_ed_transcript_document
+            try:
+                higher_ed_transcript_path = _storage.upload_tutor_document(
+                    file_bytes, content_type, applicant_email=email, kind="higher_ed_transcript",
+                )
+            except _storage.StorageError as e:
+                raise TutoringError(str(e))
+        higher_ed_qualification_certificate_path = None
+        if higher_ed_qualification_certificate_document:
+            file_bytes, content_type = higher_ed_qualification_certificate_document
+            try:
+                higher_ed_qualification_certificate_path = _storage.upload_tutor_document(
+                    file_bytes, content_type, applicant_email=email, kind="higher_ed_qualification_certificate",
+                )
+            except _storage.StorageError as e:
+                raise TutoringError(str(e))
 
         tutor = TutorAccount(
             name=name, email=email, password_hash=_hash_password(password),
@@ -533,6 +589,10 @@ def apply_as_tutor(
             higher_ed_qualification_complete=higher_ed_qualification_complete if wants_higher_ed else False,
             higher_ed_average=higher_ed_average if wants_higher_ed else None,
             higher_ed_transcript_note=higher_ed_transcript_note.strip() or None if wants_higher_ed else None,
+            higher_ed_transcript_path=higher_ed_transcript_path if wants_higher_ed else None,
+            higher_ed_qualification_certificate_path=(
+                higher_ed_qualification_certificate_path if wants_higher_ed else None
+            ),
         )
         db.add(tutor)
         db.flush()  # assigns tutor.id before we attach subjects/modules
@@ -627,6 +687,8 @@ def list_tutor_higher_ed_applications(status: str | None = None) -> list[dict]:
                 "higher_ed_qualification_complete": t.higher_ed_qualification_complete,
                 "higher_ed_average": t.higher_ed_average,
                 "higher_ed_transcript_note": t.higher_ed_transcript_note,
+                "has_higher_ed_transcript_document": bool(t.higher_ed_transcript_path),
+                "has_higher_ed_qualification_certificate_document": bool(t.higher_ed_qualification_certificate_path),
                 "admin_notes": t.admin_notes,
                 "created_at": t.created_at, "higher_ed_reviewed_at": t.higher_ed_reviewed_at,
                 "modules": [
@@ -645,8 +707,11 @@ def list_tutor_higher_ed_applications(status: str | None = None) -> list[dict]:
 def get_tutor_document_url(tutor_id: int, kind: str) -> str:
     """A short-lived signed URL for an admin to view one of a tutor
     applicant's uploaded documents. `kind` is "id", "matric_certificate",
-    or "cv"."""
-    if kind not in ("id", "matric_certificate", "cv"):
+    "cv", "higher_ed_transcript", or "higher_ed_qualification_certificate"."""
+    if kind not in (
+        "id", "matric_certificate", "cv",
+        "higher_ed_transcript", "higher_ed_qualification_certificate",
+    ):
         raise TutoringError("Unknown document kind.")
     with get_session() as db:
         tutor = db.query(TutorAccount).get(tutor_id)
@@ -656,6 +721,8 @@ def get_tutor_document_url(tutor_id: int, kind: str) -> str:
             "id": tutor.id_document_path,
             "matric_certificate": tutor.matric_certificate_path,
             "cv": tutor.cv_document_path,
+            "higher_ed_transcript": tutor.higher_ed_transcript_path,
+            "higher_ed_qualification_certificate": tutor.higher_ed_qualification_certificate_path,
         }[kind]
     if not path:
         raise TutoringError("No document was uploaded for this field.")
@@ -747,20 +814,28 @@ def _notify_tutor_of_decision(email: str, name: str, *, approved: bool, reason: 
         logger.exception("Failed to notify tutor applicant %s of application decision", email)
 
 
-def list_approved_tutors(subject: str | None = None) -> list[dict]:
-    """Admin helper when matching a request - approved tutors, optionally
-    filtered to ones who applied for a given subject. Includes each
-    tutor's completed-session count, so an admin can see their track
-    record at a glance before re-matching them to a new request - an
-    approved tutor's record never goes away, the same way you'd keep
-    recalling a reliable employee for new work rather than starting over
-    with someone untested each time."""
+def list_approved_tutors(subject: str | None = None, module_id: int | None = None) -> list[dict]:
+    """Approved tutors, optionally filtered to ones who teach a given
+    high-school subject or higher-ed module. Used both as an admin
+    helper when matching a request, AND (see list_tutors_directory) as
+    the public-facing "Browse Tutors" directory - includes each tutor's
+    completed-session count, bio, availability, and asking rates, so a
+    learner can pick a specific tutor directly instead of broadcasting a
+    request. An approved tutor's record never goes away, the same way
+    you'd keep recalling a reliable employee for new work rather than
+    starting over with someone untested each time."""
     with get_session() as db:
         q = db.query(TutorAccount).filter(TutorAccount.status == "approved")
         out = []
         for t in q.all():
             subjects = [s for s in t.subjects if s.is_active]
             if subject and not any(s.subject == subject for s in subjects):
+                continue
+            higher_ed_modules = (
+                [m for m in t.higher_ed_modules if m.is_active]
+                if t.higher_ed_status == "approved" else []
+            )
+            if module_id and not any(m.module_id == module_id for m in higher_ed_modules):
                 continue
             sessions_completed = (
                 db.query(TutoringSessionRequest)
@@ -769,11 +844,30 @@ def list_approved_tutors(subject: str | None = None) -> list[dict]:
             )
             out.append({
                 "id": t.id, "name": t.name, "email": t.email,
+                "bio": t.bio, "availability_note": t.availability_note,
                 "sessions_completed": sessions_completed,
                 "subjects": [
                     {"subject": s.subject, "matric_percentage": s.matric_percentage,
                      "topics": s.topics, "hourly_rate_zar": s.hourly_rate_zar}
                     for s in subjects
+                ],
+                "higher_ed_modules": [
+                    {
+                        "id": m.module.id, "name": m.module.name,
+                        "year_level": m.module.year_level,
+                        "year_level_label": YEAR_LEVEL_LABELS.get(m.module.year_level),
+                        "qualification": m.module.qualification.name if m.module.qualification else None,
+                        "qualification_id": m.module.qualification_id,
+                        "institution": (
+                            m.module.qualification.institution.name
+                            if m.module.qualification and m.module.qualification.institution else None
+                        ),
+                        "institution_id": (
+                            m.module.qualification.institution_id
+                            if m.module.qualification else None
+                        ),
+                    }
+                    for m in higher_ed_modules
                 ],
             })
         return out
@@ -786,6 +880,7 @@ def get_tutor_profile(tutor_id: int) -> dict:
     re-matching them to a new request. An approved tutor's history
     persists here indefinitely, exactly like an employee's record,
     rather than being thrown away once a session ends."""
+    _expire_lapsed_payments()
     with get_session() as db:
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor:
@@ -850,46 +945,80 @@ def _check_schedule_conflict(
             )
 
 
-def request_tutoring_session(
-    learner_user_id: int, subject: str, price_zar: float, scheduled_at: dt.datetime,
-    duration_minutes: int = 60, topic: str = "", preferred_times_note: str = "",
-    module_id: int | None = None,
-) -> dict:
-    """A learner asking for a tutor, inDrive-style: the LEARNER sets the
-    price, exact date/time, and duration right here, and the request
-    then sits open for any approved tutor who teaches `subject` to
-    accept at that price/time (see list_open_requests_for_tutor/
-    accept_tutoring_request) - available regardless of subscription
-    tier, since tutoring is billed separately.
-
-    module_id (higher-ed requests only): a catalog Module, in which case
-    `subject` is expected to already be that module's own display name
-    (the caller - api_server.py - looks it up) and matching uses
-    TutorHigherEdModule instead of TutorSubject (see
-    list_open_requests_for_tutor). Leave None for a high-school request,
-    matched by `subject` against TutorSubject as before."""
+def _validate_request_fields(
+    db, *, learner_user_id: int, subject: str, price_zar: float,
+    scheduled_at: dt.datetime, duration_minutes: int, module_id: int | None,
+    preferred_tutor_id: int | None, exclude_request_id: int | None = None,
+) -> None:
+    """Shared validation for request_tutoring_session (new) and
+    edit_tutoring_request (in place) - raises TutoringError on any
+    problem, otherwise returns None."""
     if price_zar is None or price_zar <= 0:
         raise TutoringError("Please set a price greater than R0 for this session.")
     if not duration_minutes or duration_minutes < MIN_SESSION_DURATION_MINUTES:
         raise TutoringError(f"Sessions must be at least {MIN_SESSION_DURATION_MINUTES} minutes long.")
     if not scheduled_at:
         raise TutoringError("Please choose a date and time for this session.")
-    if scheduled_at <= dt.datetime.utcnow():
-        raise TutoringError("Please choose a date and time in the future.")
+    if scheduled_at < dt.datetime.utcnow() + dt.timedelta(hours=MIN_REQUEST_LEAD_HOURS):
+        raise TutoringError(f"Sessions must be requested at least {MIN_REQUEST_LEAD_HOURS} hours in advance.")
+    if module_id is not None and not db.query(Module).get(module_id):
+        raise TutoringError("That module no longer exists.")
+    if preferred_tutor_id is not None:
+        tutor = db.query(TutorAccount).get(preferred_tutor_id)
+        if not tutor:
+            raise TutoringError("That tutor no longer exists.")
+        subjects, module_ids = _tutor_eligible_subjects_and_modules(db, tutor)
+        eligible = (module_id in module_ids) if module_id is not None else (subject in subjects)
+        if not eligible:
+            raise TutoringError("That tutor doesn't teach this subject/module.")
+    _check_schedule_conflict(
+        db, kind="learner", person_id=learner_user_id,
+        scheduled_at=scheduled_at, duration_minutes=duration_minutes,
+        exclude_request_id=exclude_request_id,
+    )
+
+
+def request_tutoring_session(
+    learner_user_id: int, subject: str, price_zar: float, scheduled_at: dt.datetime,
+    duration_minutes: int = 60, topic: str = "", preferred_times_note: str = "",
+    module_id: int | None = None, preferred_tutor_id: int | None = None,
+) -> dict:
+    """A learner asking for a tutor, inDrive-style: the LEARNER sets the
+    price, exact date/time, and duration right here, and the request
+    then sits open for any approved tutor who teaches `subject` to
+    accept at that price/time (see list_open_requests_for_tutor/
+    accept_tutoring_request) - available regardless of subscription
+    tier, since tutoring is billed separately. Must be requested at
+    least MIN_REQUEST_LEAD_HOURS in advance (a tutor's own counter-
+    proposal isn't held to this - see propose_new_time).
+
+    module_id (higher-ed requests only): a catalog Module, in which case
+    `subject` is expected to already be that module's own display name
+    (the caller - api_server.py - looks it up) and matching uses
+    TutorHigherEdModule instead of TutorSubject (see
+    list_open_requests_for_tutor). Leave None for a high-school request,
+    matched by `subject` against TutorSubject as before.
+
+    preferred_tutor_id: set when the learner picked a specific tutor
+    from the directory (see list_approved_tutors) instead of
+    broadcasting - while still "requested", only this tutor sees it in
+    their open-requests queue (see list_open_requests_for_tutor), but
+    every subsequent step (accept, propose, notify, Meet link) is
+    otherwise identical to a broadcast request."""
     with get_session() as db:
         learner = db.query(User).get(learner_user_id)
         if not learner:
             raise TutoringError("Account not found.")
-        if module_id is not None and not db.query(Module).get(module_id):
-            raise TutoringError("That module no longer exists.")
-        _check_schedule_conflict(
-            db, kind="learner", person_id=learner_user_id,
+        _validate_request_fields(
+            db, learner_user_id=learner_user_id, subject=subject, price_zar=price_zar,
             scheduled_at=scheduled_at, duration_minutes=duration_minutes,
+            module_id=module_id, preferred_tutor_id=preferred_tutor_id,
         )
         req = TutoringSessionRequest(
             learner_user_id=learner_user_id,
             subject=subject,
             module_id=module_id,
+            preferred_tutor_id=preferred_tutor_id,
             topic=topic.strip() or None,
             preferred_times_note=preferred_times_note.strip() or None,
             price_zar=price_zar,
@@ -902,7 +1031,312 @@ def request_tutoring_session(
         return {"id": req.id, "status": req.status}
 
 
+def edit_tutoring_request(
+    request_id: int, learner_user_id: int, *, subject: str, price_zar: float,
+    scheduled_at: dt.datetime, duration_minutes: int = 60, topic: str = "",
+    preferred_times_note: str = "", module_id: int | None = None,
+    preferred_tutor_id: int | None = None,
+) -> dict:
+    """The learner editing their own request while it's still fully open
+    (status=="requested", not yet touched by any tutor) - re-runs the
+    exact same validation request_tutoring_session does (lead time,
+    conflict check excluding this row, preferred-tutor eligibility)
+    since any of these fields could have changed to something invalid."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.learner_user_id != learner_user_id:
+            raise TutoringError("Request not found.")
+        if req.status != "requested":
+            raise TutoringError(f"This request is '{req.status}' and can no longer be edited.")
+        _validate_request_fields(
+            db, learner_user_id=learner_user_id, subject=subject, price_zar=price_zar,
+            scheduled_at=scheduled_at, duration_minutes=duration_minutes,
+            module_id=module_id, preferred_tutor_id=preferred_tutor_id,
+            exclude_request_id=req.id,
+        )
+        req.subject = subject
+        req.module_id = module_id
+        req.preferred_tutor_id = preferred_tutor_id
+        req.topic = topic.strip() or None
+        req.preferred_times_note = preferred_times_note.strip() or None
+        req.price_zar = price_zar
+        req.duration_minutes = duration_minutes
+        req.scheduled_at = scheduled_at
+        return {"id": req.id, "status": req.status}
+
+
+def withdraw_tutoring_request(request_id: int, learner_user_id: int) -> dict:
+    """The learner withdrawing their own request before a tutor has
+    fully accepted it (status in "requested"/"time_proposed" - once
+    awaiting_payment or beyond, use cancel_accepted_session instead,
+    which enforces the 24-hour cutoff). If a tutor had proposed a time
+    (time_proposed), they're notified the request was withdrawn
+    entirely - distinct from respond_to_time_proposal's decline, which
+    just reopens it for them or anyone else to try again."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.learner_user_id != learner_user_id:
+            raise TutoringError("Request not found.")
+        if req.status not in ("requested", "time_proposed"):
+            raise TutoringError(
+                f"This request is '{req.status}' - once a tutor has accepted it, cancel it instead."
+            )
+        notify_tutor = None
+        if req.status == "time_proposed" and req.tutor_id:
+            tutor = db.query(TutorAccount).get(req.tutor_id)
+            if tutor:
+                notify_tutor = (tutor.name, tutor.email)
+        learner = db.query(User).get(learner_user_id)
+        learner_name = learner.name
+        subject, topic = req.subject, req.topic
+
+        req.status = "cancelled"
+        req.cancelled_at = dt.datetime.utcnow()
+        req.cancelled_by = "learner"
+        result = {"id": req.id, "status": req.status}
+
+    if notify_tutor:
+        _notify_request_withdrawn(
+            tutor_name=notify_tutor[0], tutor_email=notify_tutor[1],
+            learner_name=learner_name, subject=subject, topic=topic,
+        )
+    return result
+
+
+def _expire_lapsed_payments() -> None:
+    """Lazy check (same spirit as backend/auth.py's get_user_tier lazy
+    pending_tier downgrade - no cron job needed at this scale), run at
+    the top of every listing function below: any request still
+    "awaiting_payment" more than PAYMENT_DEADLINE_HOURS after being
+    matched automatically lapses. A lapsed request is a dead end - the
+    learner has to submit a fresh request, it's never silently reopened
+    for other tutors. Its own self-contained transaction, so every
+    caller can just call this first without threading a shared db
+    session through."""
+    to_notify = []
+    with get_session() as db:
+        cutoff = dt.datetime.utcnow() - dt.timedelta(hours=PAYMENT_DEADLINE_HOURS)
+        overdue = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                TutoringSessionRequest.status == "awaiting_payment",
+                TutoringSessionRequest.matched_at < cutoff,
+            )
+            .all()
+        )
+        for req in overdue:
+            req.status = "lapsed"
+            req.lapsed_at = dt.datetime.utcnow()
+            learner = db.query(User).get(req.learner_user_id)
+            tutor = db.query(TutorAccount).get(req.tutor_id)
+            if learner and tutor:
+                to_notify.append((learner.name, learner.email, tutor.name, tutor.email, req.subject, req.topic))
+
+    for learner_name, learner_email, tutor_name, tutor_email, subject, topic in to_notify:
+        _notify_payment_lapsed(
+            learner_name=learner_name, learner_email=learner_email,
+            tutor_name=tutor_name, tutor_email=tutor_email,
+            subject=subject, topic=topic,
+        )
+
+
+def _notify_payment_lapsed(
+    *, learner_name: str, learner_email: str, tutor_name: str, tutor_email: str,
+    subject: str, topic: str | None,
+) -> None:
+    """Best-effort - tells both sides a match lapsed because the learner
+    didn't pay within PAYMENT_DEADLINE_HOURS."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        send_email(
+            learner_email,
+            "Your tutoring session request has lapsed",
+            (
+                f"Hi {learner_name},\n\n"
+                f"Your match with {tutor_name} for {subject}{topic_str} has lapsed because "
+                f"payment wasn't completed within {PAYMENT_DEADLINE_HOURS} hours. "
+                "If you still need a tutor, please submit a new request.\n\n"
+                "— The Malita team"
+            ),
+        )
+        send_email(
+            tutor_email,
+            "A matched session has lapsed",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"Your match with {learner_name} for {subject}{topic_str} has lapsed because "
+                f"they didn't complete payment within {PAYMENT_DEADLINE_HOURS} hours. "
+                "No action needed on your end.\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify learner/tutor of a lapsed payment")
+
+
+def send_due_reminders() -> None:
+    """Time-triggered reminders that can't piggyback on the lazy-check
+    pattern used elsewhere in this module (_expire_lapsed_payments,
+    get_user_tier's pending_tier downgrade) - those only fire when
+    someone happens to load a listing, but a reminder has to go out at a
+    specific wall-clock moment whether or not anyone opens the app right
+    then. Meant to be polled roughly once a minute by a background loop
+    (see api_server.py's startup hook) rather than run lazily. Each of
+    the three reminders below fires exactly once per session/request,
+    guarded by its own `*_sent_at` column, so a dropped poll or a
+    slightly-late one just means a reminder goes out a little later -
+    never twice, and never silently skipped."""
+    now = dt.datetime.utcnow()
+    to_notify_upcoming = []
+    to_notify_lapsing = []
+    with get_session() as db:
+        due_24h = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                TutoringSessionRequest.status == "confirmed",
+                TutoringSessionRequest.scheduled_at != None,  # noqa: E711
+                TutoringSessionRequest.scheduled_at > now,
+                TutoringSessionRequest.scheduled_at <= now + dt.timedelta(hours=SESSION_REMINDER_HOURS_BEFORE),
+                TutoringSessionRequest.reminder_24h_sent_at.is_(None),
+            )
+            .all()
+        )
+        for req in due_24h:
+            req.reminder_24h_sent_at = now
+            learner = db.query(User).get(req.learner_user_id)
+            tutor = db.query(TutorAccount).get(req.tutor_id)
+            if learner and tutor:
+                to_notify_upcoming.append((
+                    learner.name, learner.email, tutor.name, tutor.email,
+                    req.subject, req.topic, req.scheduled_at, req.meet_link, "in about 24 hours",
+                ))
+
+        due_15m = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                TutoringSessionRequest.status == "confirmed",
+                TutoringSessionRequest.scheduled_at != None,  # noqa: E711
+                TutoringSessionRequest.scheduled_at > now,
+                TutoringSessionRequest.scheduled_at <= now + dt.timedelta(minutes=SESSION_REMINDER_MINUTES_BEFORE),
+                TutoringSessionRequest.reminder_15m_sent_at.is_(None),
+            )
+            .all()
+        )
+        for req in due_15m:
+            req.reminder_15m_sent_at = now
+            learner = db.query(User).get(req.learner_user_id)
+            tutor = db.query(TutorAccount).get(req.tutor_id)
+            if learner and tutor:
+                to_notify_upcoming.append((
+                    learner.name, learner.email, tutor.name, tutor.email,
+                    req.subject, req.topic, req.scheduled_at, req.meet_link, "in about 15 minutes",
+                ))
+
+        lapse_cutoff = now - dt.timedelta(
+            hours=PAYMENT_DEADLINE_HOURS - PAYMENT_LAPSE_REMINDER_HOURS_BEFORE
+        )
+        lapsing_soon = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                TutoringSessionRequest.status == "awaiting_payment",
+                TutoringSessionRequest.matched_at != None,  # noqa: E711
+                TutoringSessionRequest.matched_at <= lapse_cutoff,
+                TutoringSessionRequest.lapse_reminder_sent_at.is_(None),
+            )
+            .all()
+        )
+        for req in lapsing_soon:
+            req.lapse_reminder_sent_at = now
+            learner = db.query(User).get(req.learner_user_id)
+            tutor = db.query(TutorAccount).get(req.tutor_id)
+            if learner:
+                hours_left = max(
+                    0,
+                    round((req.matched_at + dt.timedelta(hours=PAYMENT_DEADLINE_HOURS) - now).total_seconds() / 3600),
+                )
+                to_notify_lapsing.append((
+                    learner.name, learner.email, tutor.name if tutor else "your tutor",
+                    req.subject, req.topic, hours_left,
+                ))
+
+    for learner_name, learner_email, tutor_name, tutor_email, subject, topic, scheduled_at, meet_link, when_label in to_notify_upcoming:
+        _notify_session_upcoming(
+            learner_name=learner_name, learner_email=learner_email,
+            tutor_name=tutor_name, tutor_email=tutor_email,
+            subject=subject, topic=topic, scheduled_at=scheduled_at,
+            meet_link=meet_link, when_label=when_label,
+        )
+    for learner_name, learner_email, tutor_name, subject, topic, hours_left in to_notify_lapsing:
+        _notify_payment_lapsing_soon(
+            learner_name=learner_name, learner_email=learner_email,
+            tutor_name=tutor_name,
+            subject=subject, topic=topic, hours_left=hours_left,
+        )
+
+
+def _notify_session_upcoming(
+    *, learner_name: str, learner_email: str, tutor_name: str, tutor_email: str,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None,
+    meet_link: str | None, when_label: str,
+) -> None:
+    """Best-effort - tells BOTH sides a confirmed session is coming up
+    (fired once at SESSION_REMINDER_HOURS_BEFORE and once again at
+    SESSION_REMINDER_MINUTES_BEFORE, see send_due_reminders)."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        link_note = f"\n\nJoin here: {meet_link}" if meet_link else ""
+        send_email(
+            learner_email,
+            f"Reminder: your tutoring session is {when_label}",
+            (
+                f"Hi {learner_name},\n\n"
+                f"Your {subject}{topic_str} session with {tutor_name} is {when_label}, "
+                f"scheduled for {when_str}.{link_note}\n\n"
+                "— The Malita team"
+            ),
+        )
+        send_email(
+            tutor_email,
+            f"Reminder: your tutoring session is {when_label}",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"Your {subject}{topic_str} session with {learner_name} is {when_label}, "
+                f"scheduled for {when_str}.{link_note}\n\n"
+                f"{RECORDING_REMINDER_NOTE}\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to send an upcoming-session reminder")
+
+
+def _notify_payment_lapsing_soon(
+    *, learner_name: str, learner_email: str, tutor_name: str,
+    subject: str, topic: str | None, hours_left: int,
+) -> None:
+    """Best-effort - warns the LEARNER only (they're the one who owes the
+    payment) that their match is about to lapse."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        hours_str = f"{hours_left} hour{'s' if hours_left != 1 else ''}"
+        send_email(
+            learner_email,
+            "Your tutoring session payment is due soon",
+            (
+                f"Hi {learner_name},\n\n"
+                f"Your match with {tutor_name} for {subject}{topic_str} will lapse in "
+                f"about {hours_str} unless you complete payment before then. Once it "
+                "lapses you'll need to submit a new request.\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to send a payment-lapsing-soon reminder to %s", learner_email)
+
+
 def list_learner_requests(learner_user_id: int) -> list[dict]:
+    _expire_lapsed_payments()
     with get_session() as db:
         reqs = (
             db.query(TutoringSessionRequest)
@@ -928,7 +1362,9 @@ def list_open_requests() -> list[dict]:
         return [_serialize_request(r) for r in reqs]
 
 
-def list_all_tutoring_sessions(upcoming_only: bool = False, completed_only: bool = False) -> list[dict]:
+def list_all_tutoring_sessions(
+    upcoming_only: bool = False, completed_only: bool = False, lapsed_only: bool = False,
+) -> list[dict]:
     """Admin visibility into every MATCHED session (one with a tutor
     assigned) - not the still-open/unmatched requests, which
     list_open_requests already covers. Includes both sides' names/emails
@@ -936,12 +1372,15 @@ def list_all_tutoring_sessions(upcoming_only: bool = False, completed_only: bool
     duration, price, status) for upcoming sessions (awaiting_payment,
     confirmed) and completed ones alike, without digging through each
     tutor's individual profile."""
+    _expire_lapsed_payments()
     with get_session() as db:
         q = db.query(TutoringSessionRequest).filter(TutoringSessionRequest.tutor_id.isnot(None))
         if upcoming_only:
             q = q.filter(TutoringSessionRequest.status.in_(("awaiting_payment", "confirmed")))
         elif completed_only:
             q = q.filter(TutoringSessionRequest.status == "completed")
+        elif lapsed_only:
+            q = q.filter(TutoringSessionRequest.status == "lapsed")
         reqs = q.order_by(TutoringSessionRequest.scheduled_at.asc()).all()
 
         result = []
@@ -985,6 +1424,7 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
     active to teach, and/or a higher-ed request for a module the tutor is
     approved to tutor - so a tutor never sees (or can accept) a request
     outside what they were vetted for on EITHER track."""
+    _expire_lapsed_payments()
     with get_session() as db:
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor:
@@ -1002,7 +1442,17 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
             filters.append(TutoringSessionRequest.module_id.in_(module_ids))
         reqs = (
             db.query(TutoringSessionRequest)
-            .filter(TutoringSessionRequest.status == "requested", sa.or_(*filters))
+            .filter(
+                TutoringSessionRequest.status == "requested",
+                sa.or_(*filters),
+                # A request directed at a specific tutor (see
+                # request_tutoring_session's preferred_tutor_id) is only
+                # ever visible to that one tutor, not broadcast to others.
+                sa.or_(
+                    TutoringSessionRequest.preferred_tutor_id.is_(None),
+                    TutoringSessionRequest.preferred_tutor_id == tutor_id,
+                ),
+            )
             .order_by(TutoringSessionRequest.created_at.asc())
             .all()
         )
@@ -1013,11 +1463,21 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
     return {
         "id": r.id, "learner_user_id": r.learner_user_id, "subject": r.subject,
         "module_id": r.module_id,
+        # Only set for a higher-ed request - lets the mobile edit flow
+        # pre-select the Institution/Qualification/Module cascade
+        # without a separate reverse-lookup endpoint.
+        "qualification_id": r.module.qualification_id if r.module else None,
+        "institution_id": (
+            r.module.qualification.institution_id
+            if r.module and r.module.qualification else None
+        ),
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
         "status": r.status,
         "status_label": SESSION_STATUS_LABELS.get(r.status, r.status),
         "tutor_id": r.tutor_id,
         "tutor_name": r.tutor.name if r.tutor else None,
+        "preferred_tutor_id": r.preferred_tutor_id,
+        "preferred_tutor_name": r.preferred_tutor.name if r.preferred_tutor else None,
         "duration_minutes": r.duration_minutes, "price_zar": r.price_zar,
         "platform_cut_percent": r.platform_cut_percent,
         "scheduled_at": r.scheduled_at, "proposed_scheduled_at": r.proposed_scheduled_at,
@@ -1028,6 +1488,11 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "learner_rating": r.learner_rating,
         "tutor_confirmed": r.tutor_confirmed_at is not None,
         "tutor_rating": r.tutor_rating,
+        "cancelled_by": r.cancelled_by,
+        "cancellation_reason": r.cancellation_reason,
+        "lapsed_at": r.lapsed_at,
+        "recording_link": r.recording_link,
+        "recording_shared_at": r.recording_shared_at,
     }
 
 
@@ -1366,6 +1831,30 @@ def _notify_admin_proposed_match(
         logger.exception("Failed to notify tutor %s of an admin-suggested match", tutor_email)
 
 
+def _notify_request_withdrawn(
+    *, tutor_name: str, tutor_email: str, learner_name: str,
+    subject: str, topic: str | None,
+) -> None:
+    """Best-effort - tells a tutor whose time proposal was pending that
+    the learner withdrew the request entirely (distinct from a plain
+    decline, which reopens it)."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        send_email(
+            tutor_email,
+            "A tutoring request was withdrawn",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"{learner_name} withdrew their request for {subject}{topic_str} "
+                "before responding to your proposed time - there's nothing further "
+                "to do on this one.\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify tutor %s of a withdrawn request", tutor_email)
+
+
 def _notify_proposal_declined(
     *, tutor_name: str, tutor_email: str, learner_name: str,
     subject: str, topic: str | None, proposed_scheduled_at: dt.datetime | None,
@@ -1453,6 +1942,7 @@ def _notify_match(
                 f"Scheduled: {when_str}\n"
                 f"{meet_line}\n"
                 "We'll confirm the session once the learner has paid.\n\n"
+                f"{RECORDING_REMINDER_NOTE}\n\n"
                 "— The Malita team"
             ),
         )
@@ -1477,6 +1967,12 @@ def mark_session_paid(m_payment_id: str) -> dict:
             raise TutoringError("Unknown tutoring session payment reference.")
         if req.status == "confirmed":
             return {"id": req.id, "status": req.status, "already_processed": True}
+        if req.status == "lapsed":
+            # Rare race: the learner's payment landed just after
+            # _expire_lapsed_payments marked this lapsed. The money
+            # already moved, so honor it rather than stranding a paying
+            # learner - better a late confirmation than a silent loss.
+            logger.warning("Session %s paid after lapsing - honoring the late payment.", req.id)
 
         req.status = "confirmed"
         req.paid_at = dt.datetime.utcnow()
@@ -1553,7 +2049,81 @@ def confirm_session_by_tutor(
         return {"id": req.id, "status": req.status}
 
 
+def submit_session_recording(request_id: int, tutor_id: int, recording_link: str) -> dict:
+    """The tutor submitting the link to their own manually-recorded Meet
+    session afterward (see RECORDING_REMINDER_NOTE - there's no API that
+    can force a recording on a non-Workspace Meet call, so this is a
+    tutor-submitted link, not an automated one). Emails every admin the
+    link plus the session's full details so it's kept on file. Allowed
+    any time after the session is confirmed/paid - not gated on the
+    scheduled time having passed, since that's the tutor's own call."""
+    recording_link = recording_link.strip()
+    if not recording_link:
+        raise TutoringError("Please paste in the recording link.")
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.tutor_id != tutor_id:
+            raise TutoringError("Session not found.")
+        if req.status not in ("confirmed", "completed"):
+            raise TutoringError(f"This session is '{req.status}', not yet paid/confirmed.")
+        req.recording_link = recording_link
+        req.recording_shared_at = dt.datetime.utcnow()
+        learner = db.query(User).get(req.learner_user_id)
+        tutor = db.query(TutorAccount).get(req.tutor_id)
+        details = {
+            "learner_name": learner.name if learner else "—",
+            "learner_email": learner.email if learner else "—",
+            "tutor_name": tutor.name if tutor else "—",
+            "tutor_email": tutor.email if tutor else "—",
+            "subject": req.subject, "topic": req.topic,
+            "scheduled_at": req.scheduled_at, "duration_minutes": req.duration_minutes,
+            "price_zar": req.price_zar, "recording_link": recording_link,
+        }
+        result = {"id": req.id, "status": req.status}
+    _notify_admins_of_recording(request_id=request_id, **details)
+    return result
+
+
+def _notify_admins_of_recording(
+    *, request_id: int, learner_name: str, learner_email: str,
+    tutor_name: str, tutor_email: str, subject: str, topic: str | None,
+    scheduled_at: dt.datetime | None, duration_minutes: int | None,
+    price_zar: float | None, recording_link: str,
+) -> None:
+    """Best-effort email to every admin - same pattern as
+    backend/collab.py's _notify_admins_of_report - with the full session
+    details alongside the recording link, so nothing has to be looked up
+    separately to file it away."""
+    try:
+        with get_session() as db:
+            admin_emails = [u.email for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admin_emails:
+            return
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        price_str = f"R{price_zar:.2f}" if price_zar is not None else "—"
+        duration_str = f"{duration_minutes} min" if duration_minutes is not None else "—"
+        body = (
+            f"A tutor shared the recording for session #{request_id}.\n\n"
+            f"Subject: {subject}{topic_str}\n"
+            f"Learner: {learner_name} ({learner_email})\n"
+            f"Tutor: {tutor_name} ({tutor_email})\n"
+            f"Scheduled: {when_str}\n"
+            f"Duration: {duration_str}\n"
+            f"Price: {price_str}\n\n"
+            f"Recording: {recording_link}\n"
+        )
+        for email in admin_emails:
+            send_email(email, f"Session recording: {subject}{topic_str}", body)
+    except Exception:
+        logger.exception("Failed to notify admins of session %s's recording", request_id)
+
+
 def cancel_session(request_id: int, reason: str = "") -> None:
+    """Admin override: cancels any not-yet-paid request regardless of how
+    close the scheduled time is - the learner/tutor-initiated path (see
+    cancel_accepted_session) is what enforces the 24-hour cutoff; this
+    one exists precisely for the cases that fall outside it."""
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
         if not req:
@@ -1562,7 +2132,107 @@ def cancel_session(request_id: int, reason: str = "") -> None:
             raise TutoringError("A paid or completed session can't be cancelled this way - contact support.")
         req.status = "cancelled"
         req.cancelled_at = dt.datetime.utcnow()
+        req.cancelled_by = "admin"
         req.admin_notes = reason.strip() or req.admin_notes
+
+
+def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason: str = "") -> dict:
+    """Either party cancelling an ALREADY-ACCEPTED session (awaiting_
+    payment or confirmed/paid) - not available within
+    CANCELLATION_CUTOFF_HOURS of the scheduled time, so a last-minute
+    cancellation always needs admin involvement (see cancel_session
+    above) rather than silently leaving the other side stranded. Use
+    withdraw_tutoring_request instead for a request a tutor hasn't fully
+    accepted yet (no time restriction, since nothing is committed yet).
+    Notifies BOTH sides - a cancelled PAID session's refund is handled
+    manually by an admin (no PayFast refund automation in v1, same
+    "deliberately manual" spirit as payouts), flagged in the learner's
+    notification.
+
+    `by` is "learner" or "tutor" - `person_id` must match whichever side
+    is cancelling (the learner's user id or the tutor's tutor_id)."""
+    if by not in ("learner", "tutor"):
+        raise TutoringError("Invalid cancellation request.")
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Session not found.")
+        if by == "learner" and req.learner_user_id != person_id:
+            raise TutoringError("Session not found.")
+        if by == "tutor" and req.tutor_id != person_id:
+            raise TutoringError("Session not found.")
+        if req.status not in ("awaiting_payment", "confirmed"):
+            raise TutoringError(f"This session is '{req.status}' and can't be cancelled this way.")
+        if not req.scheduled_at:
+            raise TutoringError("This session has no scheduled time.")
+        if dt.datetime.utcnow() > req.scheduled_at - dt.timedelta(hours=CANCELLATION_CUTOFF_HOURS):
+            raise TutoringError(
+                f"This session is less than {CANCELLATION_CUTOFF_HOURS} hours away - "
+                "contact support to cancel it."
+            )
+        was_paid = req.status == "confirmed"
+
+        req.status = "cancelled"
+        req.cancelled_at = dt.datetime.utcnow()
+        req.cancelled_by = by
+        req.cancellation_reason = reason.strip() or None
+        result = {"id": req.id, "status": req.status}
+
+        learner = db.query(User).get(req.learner_user_id)
+        tutor = db.query(TutorAccount).get(req.tutor_id)
+        learner_name, learner_email = learner.name, learner.email
+        tutor_name, tutor_email = tutor.name, tutor.email
+        subject, topic, scheduled_at = req.subject, req.topic, req.scheduled_at
+
+    _notify_session_cancelled(
+        learner_name=learner_name, learner_email=learner_email,
+        tutor_name=tutor_name, tutor_email=tutor_email,
+        subject=subject, topic=topic, scheduled_at=scheduled_at,
+        cancelled_by=by, reason=reason, was_paid=was_paid,
+    )
+    return result
+
+
+def _notify_session_cancelled(
+    *, learner_name: str, learner_email: str, tutor_name: str, tutor_email: str,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None,
+    cancelled_by: str, reason: str, was_paid: bool,
+) -> None:
+    """Best-effort - tells BOTH sides a session was cancelled, who
+    cancelled it, and (for an already-paid session) that a refund will
+    be arranged manually."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        who = "the learner" if cancelled_by == "learner" else "the tutor"
+        reason_str = f"\n\nReason given: {reason.strip()}" if reason.strip() else ""
+        refund_note = (
+            "\n\nSince this session was already paid for, Malita will arrange your "
+            "refund manually - we'll be in touch."
+            if was_paid else ""
+        )
+        send_email(
+            learner_email,
+            "Your tutoring session was cancelled",
+            (
+                f"Hi {learner_name},\n\n"
+                f"Your {subject}{topic_str} session scheduled for {when_str} was "
+                f"cancelled by {who}.{reason_str}{refund_note}\n\n"
+                "— The Malita team"
+            ),
+        )
+        send_email(
+            tutor_email,
+            "A tutoring session was cancelled",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"Your {subject}{topic_str} session with {learner_name} scheduled for "
+                f"{when_str} was cancelled by {who}.{reason_str}\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify learner/tutor of a cancelled session")
 
 
 def complete_session(request_id: int) -> None:

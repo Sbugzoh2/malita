@@ -214,7 +214,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  container: { flexGrow: 1, padding: 24, paddingBottom: 40, justifyContent: "center" },
+  // Generous bottom padding so the last link sits well clear of the
+  // device's own bottom nav bar/gesture area - too close risks an
+  // accidental system back/home gesture instead of the intended tap
+  // (reported: "Back to learner login" was too easy to mis-tap).
+  container: { flexGrow: 1, padding: 24, paddingBottom: 64, justifyContent: "center" },
   title: { fontSize: 28, fontWeight: "700", textAlign: "center", color: colors.text },
   subtitle: { fontSize: 14, textAlign: "center", color: colors.textSecondary, marginTop: 6, marginBottom: 24 },
   card: {
@@ -251,7 +255,7 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  linkButton: { marginTop: 16, alignItems: "center" },
+  linkButton: { marginTop: 16, marginBottom: 16, alignItems: "center" },
   link: { color: colors.primary, fontWeight: "600" },
   error: { color: colors.error, marginTop: 12 },
   info: { color: colors.primaryDark, marginTop: 12 },

@@ -86,6 +86,8 @@ from backend.tutoring import (
     list_institutions, add_institution, list_qualifications, add_qualification,
     list_modules, add_module,
     list_tutor_higher_ed_applications, approve_tutor_higher_ed, reject_tutor_higher_ed,
+    edit_tutoring_request, withdraw_tutoring_request, cancel_accepted_session,
+    send_due_reminders, submit_session_recording,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -121,6 +123,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Session reminders (24h-before, 15-min-before, payment-about-to-lapse -
+# see backend/tutoring.py's send_due_reminders) are time-triggered, not
+# user-action-triggered, so unlike this codebase's other lazy checks they
+# can't piggyback on a request. A simple in-process polling thread is
+# enough at this scale and needs no new infrastructure - render.yaml runs
+# this service as a single uvicorn process (no --workers), so exactly one
+# of these loops ever runs. If that ever changes to multiple workers/
+# processes, this would need moving to a proper single-instance scheduler
+# (e.g. a separate Render Cron Job hitting a protected endpoint) to avoid
+# sending every reminder N times.
+def _reminder_poll_loop():
+    import time
+    while True:
+        try:
+            send_due_reminders()
+        except Exception:
+            logging.getLogger("malita.tutoring").exception("Reminder poll failed")
+        time.sleep(60)
+
+
+@app.on_event("startup")
+def _start_reminder_poll_loop():
+    import threading
+    threading.Thread(target=_reminder_poll_loop, daemon=True).start()
 
 # All 10 AI Tutor topics are now ported - see README.md section 8 for
 # what's still Streamlit-only (OCR, PDF past papers, Practice Questions,
@@ -258,6 +285,9 @@ class TutoringRequestRequest(BaseModel):
     # A higher-ed catalog Module id - set this INSTEAD OF subject for a
     # university/college tutoring request.
     module_id: int | None = None
+    # Set when the learner picked a specific tutor from the directory
+    # (see GET /tutoring/tutors/directory) instead of broadcasting.
+    preferred_tutor_id: int | None = None
 
 
 class TutorRejectRequest(BaseModel):
@@ -284,6 +314,10 @@ class SessionConfirmRequest(BaseModel):
 
 class SessionCancelRequest(BaseModel):
     reason: str = ""
+
+
+class SessionRecordingRequest(BaseModel):
+    recording_link: str
 
 
 class PayoutMarkPaidRequest(BaseModel):
@@ -1242,6 +1276,33 @@ def tutor_confirm_session(request_id: int, payload: SessionConfirmRequest, autho
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/tutor/sessions/{request_id}/cancel")
+def tutor_cancel_accepted_session(
+    request_id: int, payload: SessionCancelRequest, authorization: str = Header(None)
+):
+    """The tutor cancelling an already-accepted session (see
+    cancel_accepted_session) - blocked within 24 hours of the scheduled
+    time."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return cancel_accepted_session(request_id, by="tutor", person_id=tutor["id"], reason=payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutor/sessions/{request_id}/recording")
+def tutor_submit_session_recording(
+    request_id: int, payload: SessionRecordingRequest, authorization: str = Header(None)
+):
+    """The tutor submitting their own manually-recorded Meet link after a
+    session - see submit_session_recording for why this isn't automated."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return submit_session_recording(request_id, tutor["id"], payload.recording_link)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/catalog/institutions")
 def catalog_institutions():
     """Public, unauthenticated - needed at registration and tutor-application
@@ -1285,6 +1346,8 @@ async def tutoring_apply(
     id_document: UploadFile | None = File(None),
     matric_certificate: UploadFile | None = File(None),
     cv: UploadFile | None = File(None),
+    higher_ed_transcript: UploadFile | None = File(None),
+    higher_ed_qualification_certificate: UploadFile | None = File(None),
 ):
     """Public, unauthenticated - a prospective tutor applying is not yet a
     Malita user of any kind. Covers one or BOTH segments in one submission
@@ -1325,6 +1388,17 @@ async def tutoring_apply(
     cv_document_tuple = None
     if cv is not None:
         cv_document_tuple = (await cv.read(), cv.content_type or "application/octet-stream")
+    transcript_document_tuple = None
+    if higher_ed_transcript is not None:
+        transcript_document_tuple = (
+            await higher_ed_transcript.read(), higher_ed_transcript.content_type or "application/octet-stream"
+        )
+    qualification_certificate_tuple = None
+    if higher_ed_qualification_certificate is not None:
+        qualification_certificate_tuple = (
+            await higher_ed_qualification_certificate.read(),
+            higher_ed_qualification_certificate.content_type or "application/octet-stream",
+        )
 
     try:
         return apply_as_tutor(
@@ -1346,6 +1420,8 @@ async def tutoring_apply(
             id_document=id_document_tuple,
             matric_certificate_document=matric_document_tuple,
             cv_document=cv_document_tuple,
+            higher_ed_transcript_document=transcript_document_tuple,
+            higher_ed_qualification_certificate_document=qualification_certificate_tuple,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1364,37 +1440,100 @@ def admin_tutoring_document_url(tutor_id: int, kind: str, authorization: str = H
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _resolve_tutoring_subject(module_id: int | None, subject: str) -> str:
+    """Shared by create and edit - a higher-ed request (module_id set)
+    looks up the module's own name server-side so `subject` always
+    reflects it, even if the client sent something else or nothing at
+    all; a high-school request just requires a non-empty subject."""
+    if module_id is not None:
+        with get_session() as db:
+            mod = db.query(Module).get(module_id)
+            if not mod:
+                raise HTTPException(status_code=400, detail="That module no longer exists.")
+            return mod.name
+    if not subject.strip():
+        raise HTTPException(status_code=400, detail="Please choose a subject.")
+    return subject
+
+
 @app.post("/tutoring/requests")
 def tutoring_create_request(payload: TutoringRequestRequest, authorization: str = Header(None)):
     """A learner asking for a tutor - works for any subscription tier,
-    including Free, since tutoring is billed separately. A higher-ed
-    request (module_id set) looks up the module's own name server-side
-    so `subject` always reflects it, even if the client sent something
-    else or nothing at all."""
+    including Free, since tutoring is billed separately."""
     user = _auth_user(authorization)
     try:
         scheduled_at = _parse_iso_datetime(payload.scheduled_at)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date/time format.")
-
-    subject = payload.subject
-    if payload.module_id is not None:
-        with get_session() as db:
-            mod = db.query(Module).get(payload.module_id)
-            if not mod:
-                raise HTTPException(status_code=400, detail="That module no longer exists.")
-            subject = mod.name
-    elif not subject.strip():
-        raise HTTPException(status_code=400, detail="Please choose a subject.")
+    subject = _resolve_tutoring_subject(payload.module_id, payload.subject)
 
     try:
         return request_tutoring_session(
             user["id"], subject, payload.price_zar, scheduled_at,
             payload.duration_minutes, payload.topic, payload.preferred_times_note,
-            module_id=payload.module_id,
+            module_id=payload.module_id, preferred_tutor_id=payload.preferred_tutor_id,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/tutoring/requests/{request_id}")
+def tutoring_edit_request(request_id: int, payload: TutoringRequestRequest, authorization: str = Header(None)):
+    """The learner editing their own request while it's still fully open
+    (see edit_tutoring_request) - same body shape as creating one."""
+    user = _auth_user(authorization)
+    try:
+        scheduled_at = _parse_iso_datetime(payload.scheduled_at)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date/time format.")
+    subject = _resolve_tutoring_subject(payload.module_id, payload.subject)
+
+    try:
+        return edit_tutoring_request(
+            request_id, user["id"], subject=subject, price_zar=payload.price_zar,
+            scheduled_at=scheduled_at, duration_minutes=payload.duration_minutes,
+            topic=payload.topic, preferred_times_note=payload.preferred_times_note,
+            module_id=payload.module_id, preferred_tutor_id=payload.preferred_tutor_id,
+        )
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/withdraw")
+def tutoring_withdraw_request(request_id: int, authorization: str = Header(None)):
+    """The learner withdrawing their own request before a tutor has
+    fully accepted it (see withdraw_tutoring_request)."""
+    user = _auth_user(authorization)
+    try:
+        return withdraw_tutoring_request(request_id, user["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/cancel")
+def tutoring_cancel_accepted_session(
+    request_id: int, payload: SessionCancelRequest, authorization: str = Header(None)
+):
+    """The learner cancelling an already-accepted session (see
+    cancel_accepted_session) - blocked within 24 hours of the scheduled
+    time."""
+    user = _auth_user(authorization)
+    try:
+        return cancel_accepted_session(request_id, by="learner", person_id=user["id"], reason=payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/tutoring/tutors/directory")
+def tutoring_tutors_directory(
+    subject: str | None = None, module_id: int | None = None, authorization: str = Header(None)
+):
+    """Public "Browse Tutors" directory a learner can pick a specific
+    tutor from instead of broadcasting a request - see
+    list_approved_tutors. Requires login (any tier) but not any
+    particular subscription."""
+    _auth_user(authorization)
+    return {"tutors": list_approved_tutors(subject, module_id)}
 
 
 @app.post("/tutoring/requests/{request_id}/respond-to-proposal")
@@ -1618,13 +1757,15 @@ def admin_tutoring_open_requests(authorization: str = Header(None)):
 @app.get("/admin/tutoring/sessions")
 def admin_tutoring_sessions(filter: str = "upcoming", authorization: str = Header(None)):
     """Every MATCHED session (both sides assigned) - 'upcoming' (awaiting
-    payment or confirmed), 'completed', or 'all'. Distinct from the
-    /requests/open list above, which is only still-unmatched requests."""
+    payment or confirmed), 'completed', 'lapsed', or 'all'. Distinct from
+    the /requests/open list above, which is only still-unmatched
+    requests."""
     user = _auth_user(authorization)
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
     return {"sessions": list_all_tutoring_sessions(
         upcoming_only=(filter == "upcoming"), completed_only=(filter == "completed"),
+        lapsed_only=(filter == "lapsed"),
     )}
 
 

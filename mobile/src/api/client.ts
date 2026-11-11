@@ -89,6 +89,30 @@ export function fetchModules(qualificationId: number) {
   );
 }
 
+// Admin-only catalog management - mirrors app.py's web "Higher-Ed
+// Catalog" admin tab, since an admin using only the mobile app would
+// otherwise have no way to populate institutions/qualifications/modules
+// for learners/tutors to select from.
+export function addInstitutionAdmin(token: string, name: string) {
+  return request<Institution>("/admin/catalog/institutions", { method: "POST", body: { name }, token });
+}
+
+export function addQualificationAdmin(token: string, institutionId: number, name: string) {
+  return request<Qualification>("/admin/catalog/qualifications", {
+    method: "POST",
+    body: { institution_id: institutionId, name },
+    token,
+  });
+}
+
+export function addModuleAdmin(token: string, qualificationId: number, name: string, yearLevel: number) {
+  return request<CatalogModule>("/admin/catalog/modules", {
+    method: "POST",
+    body: { qualification_id: qualificationId, name, year_level: yearLevel },
+    token,
+  });
+}
+
 export type MeResponse = {
   user: UserInfo;
   is_admin: boolean;
@@ -288,12 +312,22 @@ export function deleteAccount(token: string) {
 export type TutoringRequest = {
   id: number;
   subject: string;
+  module_id: number | null;
+  // Only set for a higher-ed (module-based) request - derived server-side
+  // so the edit flow can pre-select the Institution/Qualification/Module
+  // cascade without an extra lookup.
+  qualification_id: number | null;
+  institution_id: number | null;
   topic: string | null;
   preferred_times_note: string | null;
-  status: "requested" | "time_proposed" | "admin_proposed" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
+  status:
+    | "requested" | "time_proposed" | "admin_proposed" | "awaiting_payment"
+    | "confirmed" | "completed" | "cancelled" | "lapsed";
   status_label: string;
   tutor_id: number | null;
   tutor_name: string | null;
+  preferred_tutor_id: number | null;
+  preferred_tutor_name: string | null;
   duration_minutes: number | null;
   price_zar: number | null;
   platform_cut_percent: number | null;
@@ -307,36 +341,124 @@ export type TutoringRequest = {
   learner_rating: number | null;
   tutor_confirmed: boolean;
   tutor_rating: number | null;
+  cancelled_by: "learner" | "tutor" | "admin" | null;
+  cancellation_reason: string | null;
+  lapsed_at: string | null;
+  recording_link: string | null;
+  recording_shared_at: string | null;
 };
 
-export function requestTutoringSession(
-  token: string,
-  params: {
-    subject?: string;
-    price_zar: number;
-    scheduled_at: string; // ISO 8601, required
-    duration_minutes?: number;
-    topic?: string;
-    preferred_times_note?: string;
-    // A higher-ed catalog Module id - set this INSTEAD OF subject for a
-    // university/college tutoring request (the server looks up the
-    // module's own name).
-    module_id?: number;
-  }
-) {
+export type TutoringRequestParams = {
+  subject?: string;
+  price_zar: number;
+  scheduled_at: string; // ISO 8601, required, at least 24h ahead
+  duration_minutes?: number;
+  topic?: string;
+  preferred_times_note?: string;
+  // A higher-ed catalog Module id - set this INSTEAD OF subject for a
+  // university/college tutoring request (the server looks up the
+  // module's own name).
+  module_id?: number;
+  // Set when the learner picked a specific tutor from the directory
+  // (see fetchTutorsDirectory) instead of broadcasting the request.
+  preferred_tutor_id?: number;
+};
+
+function tutoringRequestBody(params: TutoringRequestParams) {
+  return {
+    subject: params.subject ?? "",
+    price_zar: params.price_zar,
+    scheduled_at: params.scheduled_at,
+    duration_minutes: params.duration_minutes ?? 60,
+    topic: params.topic ?? "",
+    preferred_times_note: params.preferred_times_note ?? "",
+    module_id: params.module_id,
+    preferred_tutor_id: params.preferred_tutor_id,
+  };
+}
+
+export function requestTutoringSession(token: string, params: TutoringRequestParams) {
   return request<{ id: number; status: string }>("/tutoring/requests", {
     method: "POST",
-    body: {
-      subject: params.subject ?? "",
-      price_zar: params.price_zar,
-      scheduled_at: params.scheduled_at,
-      duration_minutes: params.duration_minutes ?? 60,
-      topic: params.topic ?? "",
-      preferred_times_note: params.preferred_times_note ?? "",
-      module_id: params.module_id,
-    },
+    body: tutoringRequestBody(params),
     token,
   });
+}
+
+// The learner editing their own request while it's still fully open
+// (status=="requested") - same shape as creating one.
+export function editTutoringRequest(token: string, requestId: number, params: TutoringRequestParams) {
+  return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}`, {
+    method: "PUT",
+    body: tutoringRequestBody(params),
+    token,
+  });
+}
+
+// The learner withdrawing their own request before a tutor has fully
+// accepted it (status in "requested"/"time_proposed") - no 24h
+// restriction, since nothing is committed yet.
+export function withdrawTutoringRequest(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}/withdraw`, {
+    method: "POST",
+    token,
+  });
+}
+
+// Either party cancelling an ALREADY-ACCEPTED session (awaiting_payment
+// or confirmed) - blocked within 24 hours of the scheduled time.
+export function cancelTutoringSessionAsLearner(token: string, requestId: number, reason: string = "") {
+  return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}/cancel`, {
+    method: "POST",
+    body: { reason },
+    token,
+  });
+}
+
+export function cancelTutoringSessionAsTutor(token: string, requestId: number, reason: string = "") {
+  return request<{ id: number; status: string }>(`/tutor/sessions/${requestId}/cancel`, {
+    method: "POST",
+    body: { reason },
+    token,
+  });
+}
+
+// There's no API that can force a recording on a non-Google-Workspace
+// Meet call, so the tutor records manually (Meet's own "Record meeting"
+// button) and submits the resulting link here afterward - Malita emails
+// every admin the link plus the session's full details.
+export function submitSessionRecording(token: string, requestId: number, recordingLink: string) {
+  return request<{ id: number; status: string }>(`/tutor/sessions/${requestId}/recording`, {
+    method: "POST",
+    body: { recording_link: recordingLink },
+    token,
+  });
+}
+
+export type DirectoryTutor = {
+  id: number;
+  name: string;
+  email: string;
+  bio: string | null;
+  availability_note: string | null;
+  sessions_completed: number;
+  subjects: { subject: string; matric_percentage: number; topics: string | null; hourly_rate_zar: number | null }[];
+  higher_ed_modules: {
+    id: number; name: string; year_level: number; year_level_label: string;
+    qualification: string | null; qualification_id: number | null;
+    institution: string | null; institution_id: number | null;
+  }[];
+};
+
+// Public "Browse Tutors" directory - pick a specific tutor instead of
+// broadcasting a request (pass the resulting tutor's id as
+// preferred_tutor_id when calling requestTutoringSession).
+export function fetchTutorsDirectory(token: string, params: { subject?: string; module_id?: number } = {}) {
+  const qs = new URLSearchParams();
+  if (params.subject) qs.set("subject", params.subject);
+  if (params.module_id) qs.set("module_id", String(params.module_id));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return request<{ tutors: DirectoryTutor[] }>(`/tutoring/tutors/directory${suffix}`, { token });
 }
 
 export function respondToTimeProposal(token: string, requestId: number, accept: boolean) {
@@ -443,6 +565,8 @@ export type TutorApplyParams = {
   id_document?: { uri: string; name: string; type: string } | null;
   matric_certificate?: { uri: string; name: string; type: string } | null;
   cv?: { uri: string; name: string; type: string } | null;
+  higher_ed_transcript?: { uri: string; name: string; type: string } | null;
+  higher_ed_qualification_certificate?: { uri: string; name: string; type: string } | null;
 };
 
 // A prospective tutor's application - public, unauthenticated, multipart
@@ -495,6 +619,8 @@ export async function applyAsTutor(params: TutorApplyParams): Promise<{ id: numb
     ["id_document", params.id_document],
     ["matric_certificate", params.matric_certificate],
     ["cv", params.cv],
+    ["higher_ed_transcript", params.higher_ed_transcript],
+    ["higher_ed_qualification_certificate", params.higher_ed_qualification_certificate],
   ];
   for (const [field, file] of fileFields) {
     if (!file) continue;
@@ -620,8 +746,63 @@ export function rejectTutorApplication(token: string, tutorId: number, reason: s
   });
 }
 
-export function fetchTutorDocumentUrl(token: string, tutorId: number, kind: "id" | "matric_certificate" | "cv") {
+export function fetchTutorDocumentUrl(
+  token: string,
+  tutorId: number,
+  kind: "id" | "matric_certificate" | "cv" | "higher_ed_transcript" | "higher_ed_qualification_certificate"
+) {
   return request<{ url: string }>(`/admin/tutoring/applications/${tutorId}/documents/${kind}`, { token });
+}
+
+export type TutorHigherEdApplication = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  bio: string | null;
+  id_number: string | null;
+  id_verification_note: string | null;
+  has_id_document: boolean;
+  cv_note: string | null;
+  has_cv_document: boolean;
+  availability_note: string | null;
+  bank_account_note: string | null;
+  wants_high_school: boolean;
+  higher_ed_status: "pending_review" | "approved" | "rejected" | "suspended";
+  higher_ed_status_label: string;
+  higher_ed_institution: string | null;
+  higher_ed_qualification: string | null;
+  higher_ed_year_of_study: number | null;
+  higher_ed_year_of_study_label: string | null;
+  higher_ed_qualification_complete: boolean;
+  higher_ed_average: number | null;
+  higher_ed_transcript_note: string | null;
+  has_higher_ed_transcript_document: boolean;
+  has_higher_ed_qualification_certificate_document: boolean;
+  admin_notes: string | null;
+  created_at: string | null;
+  higher_ed_reviewed_at: string | null;
+  modules: { id: number; name: string; year_level: number; year_level_label: string; is_active: boolean }[];
+};
+
+export function fetchTutorHigherEdApplications(token: string, status?: TutorHigherEdApplication["higher_ed_status"]) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request<{ applications: TutorHigherEdApplication[] }>(`/admin/tutoring/applications/higher-ed${qs}`, { token });
+}
+
+export function approveTutorHigherEdApplication(token: string, tutorId: number) {
+  return request<{ status: string }>(`/admin/tutoring/applications/${tutorId}/higher-ed/approve`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function rejectTutorHigherEdApplication(token: string, tutorId: number, reason: string) {
+  return request<{ status: string }>(`/admin/tutoring/applications/${tutorId}/higher-ed/reject`, {
+    method: "POST",
+    body: { reason },
+    token,
+  });
 }
 
 export type ApprovedTutor = {
@@ -685,6 +866,7 @@ export type AdminTutoringSession = {
   price_zar: number | null;
   platform_cut_percent: number | null;
   meet_link: string | null;
+  recording_link: string | null;
   learner_rating: number | null;
   tutor_rating: number | null;
 };

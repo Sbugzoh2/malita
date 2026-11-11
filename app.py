@@ -2057,6 +2057,11 @@ elif mode == "🛠️ Tutoring Admin":
                         st.caption("Qualification already completed.")
                     st.write(f"**Semester/final average:** {a['higher_ed_average']}%")
                     st.write(f"**Transcript note:** {a['higher_ed_transcript_note'] or '—'}")
+                    st.caption(
+                        f"Transcript uploaded: {'yes' if a['has_higher_ed_transcript_document'] else 'no'} · "
+                        f"Qualification certificate uploaded: "
+                        f"{'yes' if a['has_higher_ed_qualification_certificate_document'] else 'no'}"
+                    )
                     st.write(f"**Bio:** {a['bio'] or '—'}")
                     st.write(f"**Availability:** {a['availability_note'] or '—'}")
                     st.write(f"**Bank details:** {a['bank_account_note'] or '—'}")
@@ -2233,6 +2238,8 @@ elif mode == "🛠️ Tutoring Admin":
                         st.caption(f"Malita's cut on this session: {s['platform_cut_percent']:.0f}%")
                     if s["meet_link"]:
                         st.write(f"**Google Meet:** {s['meet_link']}")
+                    if s["recording_link"]:
+                        st.write(f"**Recording:** {s['recording_link']}")
                     if s["learner_rating"] is not None:
                         st.write(f"Learner rated this session {s['learner_rating']}/5")
                     if s["tutor_rating"] is not None:

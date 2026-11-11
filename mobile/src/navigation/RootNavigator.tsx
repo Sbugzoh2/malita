@@ -22,6 +22,7 @@ import CollabScreen from "../screens/CollabScreen";
 import CollabQuestionDetailScreen from "../screens/CollabQuestionDetailScreen";
 import RequestTutorScreen from "../screens/RequestTutorScreen";
 import MyTutoringRequestsScreen from "../screens/MyTutoringRequestsScreen";
+import BrowseTutorsScreen from "../screens/BrowseTutorsScreen";
 import TutoringAdminScreen from "../screens/TutoringAdminScreen";
 
 const AuthStack = createNativeStackNavigator();
@@ -83,6 +84,7 @@ function AppNavigator() {
     >
       <AppStack.Screen name="Home" component={HomeScreen} options={{ title: "Malita" }} />
       <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
+      <AppStack.Screen name="BrowseTutors" component={BrowseTutorsScreen} options={{ title: "Browse Tutors" }} />
       <AppStack.Screen
         name="MyTutoringRequests"
         component={MyTutoringRequestsScreen}

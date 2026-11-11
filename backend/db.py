@@ -466,6 +466,13 @@ class TutorAccount(Base):
     # review-by-admin approach as matric_certificate_note.
     higher_ed_average = Column(Float, nullable=True)
     higher_ed_transcript_note = Column(String, nullable=True)
+    # Uploaded documents, same optional-upload-with-free-text-fallback
+    # pattern as id_document_path/matric_certificate_path above.
+    # higher_ed_transcript_path is the academic transcript; qualification_
+    # certificate_path is proof of completion, only relevant when
+    # higher_ed_qualification_complete is True.
+    higher_ed_transcript_path = Column(String, nullable=True)
+    higher_ed_qualification_certificate_path = Column(String, nullable=True)
     higher_ed_reviewed_at = Column(DateTime, nullable=True)
 
     subjects = relationship(
@@ -474,8 +481,13 @@ class TutorAccount(Base):
     higher_ed_modules = relationship(
         "TutorHigherEdModule", back_populates="tutor", cascade="all, delete-orphan"
     )
+    # Explicit foreign_keys needed on both sides of this relationship
+    # now that TutoringSessionRequest has a second FK to tutor_accounts
+    # (preferred_tutor_id) - SQLAlchemy can no longer infer which column
+    # this relationship is about.
     sessions = relationship(
-        "TutoringSessionRequest", back_populates="tutor"
+        "TutoringSessionRequest", back_populates="tutor",
+        foreign_keys="TutoringSessionRequest.tutor_id",
     )
 
 
@@ -536,16 +548,26 @@ class TutoringSessionRequest(Base):
     learner and the tutor have independently confirmed the session
     actually happened and rated each other - see learner_confirmed_at/
     tutor_confirmed_at below; this is also when the payout row is
-    created, not at payment time, so a no-show can't collect a payout),
-    or cancelled at any point before confirmed.
+    created, not at payment time, so a no-show can't collect a payout).
+    Two ways out besides completion: cancelled (either party withdrew a
+    not-yet-accepted request, or cancelled an accepted one outside the
+    24-hour cutoff - see backend/tutoring.py's withdraw_tutoring_request/
+    cancel_accepted_session - cancelled_by/cancellation_reason record
+    who and why), or lapsed (the learner never paid within
+    PAYMENT_DEADLINE_HOURS of being matched - see
+    backend/tutoring.py's _expire_lapsed_payments - a dead end requiring
+    a fresh request, not reopened for other tutors automatically).
 
     scheduled_at is REQUIRED at request time (the learner picks an exact
-    date/time, not a vague "preferred times" note) - see
-    backend/tutoring.py's request_tutoring_session, which also enforces
-    a minimum 60-minute duration and checks the learner isn't already
-    booked within 15 minutes of that slot. The same two checks (no
-    double-booking, 15-minute buffer) apply to a tutor accepting or
-    proposing a time."""
+    date/time, not a vague "preferred times" note) at least
+    MIN_REQUEST_LEAD_HOURS ahead - see backend/tutoring.py's
+    request_tutoring_session, which also enforces a minimum 60-minute
+    duration and checks the learner isn't already booked within 15
+    minutes of that slot. The same two checks (no double-booking,
+    15-minute buffer) apply to a tutor accepting or proposing a time,
+    though the lead-time minimum does NOT - a tutor's proposed
+    alternative (and the learner's approval of it) counts as the
+    "otherwise agreed" exception."""
     __tablename__ = "tutoring_session_requests"
 
     id = Column(Integer, primary_key=True)
@@ -569,6 +591,13 @@ class TutoringSessionRequest(Base):
     preferred_times_note = Column(String, nullable=True)
     status = Column(String(20), default="requested", nullable=False)
     tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=True)
+    # Set when the learner picked a specific tutor from the directory
+    # (see backend/tutoring.py's list_approved_tutors/request_tutoring_
+    # session) instead of broadcasting to every qualifying tutor - while
+    # set and status=="requested", only this tutor sees the request in
+    # their open-requests queue. Left in place (not cleared) once
+    # accepted, purely as a record of how the match happened.
+    preferred_tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=True)
     # Set by the LEARNER at request time (not by an admin at match time,
     # as in v1) - this is the price a tutor accepts or doesn't.
     duration_minutes = Column(Integer, nullable=True)
@@ -599,6 +628,26 @@ class TutoringSessionRequest(Base):
     paid_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     cancelled_at = Column(DateTime, nullable=True)
+    # Who initiated a cancellation ("learner" | "tutor" | "admin") and why
+    # - distinct from admin_notes, which is admin's own free-text
+    # commentary, not a party's stated reason for cancelling.
+    cancelled_by = Column(String(20), nullable=True)
+    cancellation_reason = Column(String, nullable=True)
+    # Set when _expire_lapsed_payments() auto-transitions an unpaid
+    # awaiting_payment request to "lapsed" after PAYMENT_DEADLINE_HOURS.
+    lapsed_at = Column(DateTime, nullable=True)
+    # Each set the moment its one-time reminder email goes out (see
+    # send_due_reminders() in backend/tutoring.py) - guards against
+    # re-sending the same reminder on every polling pass.
+    reminder_24h_sent_at = Column(DateTime, nullable=True)
+    reminder_15m_sent_at = Column(DateTime, nullable=True)
+    lapse_reminder_sent_at = Column(DateTime, nullable=True)
+    # The tutor's own manually-recorded Meet link, submitted after the
+    # session (see submit_session_recording in backend/tutoring.py) -
+    # there's no API that can force a recording on a non-Google-Workspace
+    # Meet call, so this is a tutor-submitted link, not an automated one.
+    recording_link = Column(String, nullable=True)
+    recording_shared_at = Column(DateTime, nullable=True)
     # Each side confirms independently that the session actually took
     # place and rates the other - completed_at/the payout only happen
     # once BOTH are set (see confirm_session_by_learner/
@@ -611,7 +660,8 @@ class TutoringSessionRequest(Base):
     tutor_rating_comment = Column(String, nullable=True)
 
     learner = relationship("User")
-    tutor = relationship("TutorAccount", back_populates="sessions")
+    tutor = relationship("TutorAccount", back_populates="sessions", foreign_keys=[tutor_id])
+    preferred_tutor = relationship("TutorAccount", foreign_keys=[preferred_tutor_id])
     module = relationship("Module")
     payout = relationship(
         "TutoringPayout", back_populates="session", uselist=False,
@@ -753,6 +803,15 @@ def init_db():
     _ensure_column("tutoring_session_requests", "tutor_rating_comment", "VARCHAR")
     _ensure_column("tutoring_session_requests", "proposed_scheduled_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "module_id", "INTEGER")
+    _ensure_column("tutoring_session_requests", "preferred_tutor_id", "INTEGER")
+    _ensure_column("tutoring_session_requests", "cancelled_by", "VARCHAR(20)")
+    _ensure_column("tutoring_session_requests", "cancellation_reason", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "lapsed_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "reminder_24h_sent_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "reminder_15m_sent_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "lapse_reminder_sent_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "recording_link", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "recording_shared_at", "TIMESTAMP")
     _ensure_column("users", "account_type", "VARCHAR(20) DEFAULT 'high_school'")
     _ensure_column("users", "higher_ed_institution_id", "INTEGER")
     _ensure_column("users", "higher_ed_qualification_id", "INTEGER")
@@ -767,6 +826,8 @@ def init_db():
     _ensure_column("tutor_accounts", "higher_ed_qualification_complete", "BOOLEAN DEFAULT FALSE")
     _ensure_column("tutor_accounts", "higher_ed_average", "FLOAT")
     _ensure_column("tutor_accounts", "higher_ed_transcript_note", "VARCHAR")
+    _ensure_column("tutor_accounts", "higher_ed_transcript_path", "VARCHAR")
+    _ensure_column("tutor_accounts", "higher_ed_qualification_certificate_path", "VARCHAR")
     _ensure_column("tutor_accounts", "higher_ed_reviewed_at", "TIMESTAMP")
     _migrate_removed_tier("super_premium", "premium")
 

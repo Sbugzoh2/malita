@@ -127,6 +127,21 @@ export function seedDefaultCatalog(token: string) {
   return request<CatalogSeedResult>("/admin/catalog/seed-default", { method: "POST", token });
 }
 
+// Removes a catalog entry - blocked server-side if a tutor or tutoring
+// request still references one of its modules (deleting an institution
+// or qualification cascades to everything under it).
+export function deleteInstitutionAdmin(token: string, institutionId: number) {
+  return request<{ deleted: string }>(`/admin/catalog/institutions/${institutionId}`, { method: "DELETE", token });
+}
+
+export function deleteQualificationAdmin(token: string, qualificationId: number) {
+  return request<{ deleted: string }>(`/admin/catalog/qualifications/${qualificationId}`, { method: "DELETE", token });
+}
+
+export function deleteModuleAdmin(token: string, moduleId: number) {
+  return request<{ deleted: string }>(`/admin/catalog/modules/${moduleId}`, { method: "DELETE", token });
+}
+
 export type MeResponse = {
   user: UserInfo;
   is_admin: boolean;

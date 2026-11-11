@@ -404,6 +404,74 @@ def add_module(qualification_id: int, name: str, year_level: int) -> dict:
         }
 
 
+def _module_dependent_count(db, module_ids: list[int]) -> int:
+    """How many real records (a tutor's declared module, or a learner's
+    tutoring request) point at any of these modules - used to block a
+    delete that would otherwise orphan live data rather than just a
+    catalog mistake."""
+    if not module_ids:
+        return 0
+    return (
+        db.query(TutorHigherEdModule).filter(TutorHigherEdModule.module_id.in_(module_ids)).count()
+        + db.query(TutoringSessionRequest).filter(TutoringSessionRequest.module_id.in_(module_ids)).count()
+    )
+
+
+def delete_module(module_id: int) -> dict:
+    """Removes one module - blocked if any tutor has declared it or any
+    tutoring request references it (delete those first, or leave the
+    module in place), so this can never silently orphan live data."""
+    with get_session() as db:
+        mod = db.query(Module).get(module_id)
+        if not mod:
+            raise TutoringError("Module not found.")
+        if _module_dependent_count(db, [mod.id]):
+            raise TutoringError(
+                f"Can't delete \"{mod.name}\" - a tutor or tutoring request still references it."
+            )
+        name = mod.name
+        db.delete(mod)
+        return {"deleted": name}
+
+
+def delete_qualification(qualification_id: int) -> dict:
+    """Removes a qualification AND every module under it (cascade) -
+    blocked if any of those modules has a real dependent (see
+    _module_dependent_count)."""
+    with get_session() as db:
+        qual = db.query(Qualification).get(qualification_id)
+        if not qual:
+            raise TutoringError("Qualification not found.")
+        module_ids = [m.id for m in qual.modules]
+        if _module_dependent_count(db, module_ids):
+            raise TutoringError(
+                f"Can't delete \"{qual.name}\" - a tutor or tutoring request still references one of its modules."
+            )
+        name = qual.name
+        db.delete(qual)
+        return {"deleted": name}
+
+
+def delete_institution(institution_id: int) -> dict:
+    """Removes an institution AND every qualification/module under it
+    (cascade) - blocked if any of those modules has a real dependent (see
+    _module_dependent_count). This is the fix for a catalog mistake like
+    a qualification name accidentally typed into the institution field -
+    not meant for removing a real institution that's actually in use."""
+    with get_session() as db:
+        inst = db.query(Institution).get(institution_id)
+        if not inst:
+            raise TutoringError("Institution not found.")
+        module_ids = [m.id for q in inst.qualifications for m in q.modules]
+        if _module_dependent_count(db, module_ids):
+            raise TutoringError(
+                f"Can't delete \"{inst.name}\" - a tutor or tutoring request still references one of its modules."
+            )
+        name = inst.name
+        db.delete(inst)
+        return {"deleted": name}
+
+
 # ---------------------------------------------------------------------------
 # A starter higher-ed catalog, for an admin to seed in one click (see
 # seed_default_higher_ed_catalog) instead of typing in 26 institutions and
@@ -506,50 +574,90 @@ def seed_default_higher_ed_catalog() -> dict:
     one's actual official curriculum). Idempotent: safe to run more than
     once - anything whose name already exists (by the same uniqueness
     rule add_institution/add_qualification/add_module already enforce)
-    is skipped, not duplicated. Runs as ONE transaction (unlike calling
-    add_institution/add_qualification/add_module in a loop, which would
-    be ~1,500 separate commits) since this can insert well over a
-    thousand rows in one go."""
+    is skipped, not duplicated.
+
+    Batched into a handful of ROUND TRIPS rather than one existence-
+    check-then-insert pair per row (an earlier version checked/inserted
+    row by row, which is well over 1,500 sequential round trips against
+    a REMOTE database - instant against a local SQLite test db, but slow
+    enough against production Postgres to hit a request timeout and fail
+    the whole seed with nothing visibly wrong in this function's own
+    logic). This version uses SQLAlchemy's Core insert() with a list of
+    rows (not one ORM .add() per object), which SQLAlchemy 2.0 batches
+    into one (or a couple, for the biggest table) actual INSERT
+    statements each - about 8 round trips total for the whole catalog,
+    regardless of its size, versus 1,500+ before."""
     created = {"institutions": 0, "qualifications": 0, "modules": 0}
     skipped = {"institutions": 0, "qualifications": 0, "modules": 0}
     with get_session() as db:
-        for uni_name in DEFAULT_SA_UNIVERSITIES:
-            inst = db.query(Institution).filter(Institution.name == uni_name).first()
-            if inst:
-                skipped["institutions"] += 1
-            else:
-                inst = Institution(name=uni_name)
-                db.add(inst)
-                db.flush()
-                created["institutions"] += 1
+        # --- institutions ---
+        existing_insts = {
+            i.name: i for i in
+            db.query(Institution).filter(Institution.name.in_(DEFAULT_SA_UNIVERSITIES)).all()
+        }
+        new_inst_names = [n for n in DEFAULT_SA_UNIVERSITIES if n not in existing_insts]
+        skipped["institutions"] = len(DEFAULT_SA_UNIVERSITIES) - len(new_inst_names)
+        created["institutions"] = len(new_inst_names)
+        if new_inst_names:
+            db.execute(sa.insert(Institution), [{"name": n} for n in new_inst_names])
+        # Re-fetch (existing + just-created) in one query to get every id,
+        # including the ones SQLAlchemy just assigned above.
+        inst_by_name = {
+            i.name: i for i in
+            db.query(Institution).filter(Institution.name.in_(DEFAULT_SA_UNIVERSITIES)).all()
+        }
 
+        # --- qualifications ---
+        desired_quals: list[tuple] = []  # (institution, qualification_name, modules)
+        for uni_name in DEFAULT_SA_UNIVERSITIES:
+            inst = inst_by_name[uni_name]
             quals_for_this_uni = dict(_COMMON_QUALIFICATION_MODULES)
             if uni_name in _BENG_UNIVERSITIES:
                 quals_for_this_uni["Bachelor of Engineering (BEng)"] = _BENG_MODULES
             if uni_name in _UNIVERSITIES_OF_TECHNOLOGY:
                 quals_for_this_uni["Bachelor of Engineering Technology (BEngTech)"] = _BENGTECH_MODULES
-
             for qual_name, modules in quals_for_this_uni.items():
-                qual = db.query(Qualification).filter(
-                    Qualification.institution_id == inst.id, Qualification.name == qual_name,
-                ).first()
-                if qual:
-                    skipped["qualifications"] += 1
-                else:
-                    qual = Qualification(institution_id=inst.id, name=qual_name)
-                    db.add(qual)
-                    db.flush()
-                    created["qualifications"] += 1
+                desired_quals.append((inst, qual_name, modules))
 
-                for mod_name, year_level in modules:
-                    existing_mod = db.query(Module).filter(
-                        Module.qualification_id == qual.id, Module.name == mod_name,
-                    ).first()
-                    if existing_mod:
-                        skipped["modules"] += 1
-                    else:
-                        db.add(Module(qualification_id=qual.id, name=mod_name, year_level=year_level))
-                        created["modules"] += 1
+        all_inst_ids = [i.id for i in inst_by_name.values()]
+        existing_quals = {
+            (q.institution_id, q.name): q for q in
+            db.query(Qualification).filter(Qualification.institution_id.in_(all_inst_ids)).all()
+        }
+        new_qual_rows = [
+            {"institution_id": inst.id, "name": qual_name}
+            for inst, qual_name, _ in desired_quals
+            if (inst.id, qual_name) not in existing_quals
+        ]
+        skipped["qualifications"] = len(desired_quals) - len(new_qual_rows)
+        created["qualifications"] = len(new_qual_rows)
+        if new_qual_rows:
+            db.execute(sa.insert(Qualification), new_qual_rows)
+        all_quals = {
+            (q.institution_id, q.name): q for q in
+            db.query(Qualification).filter(Qualification.institution_id.in_(all_inst_ids)).all()
+        }
+        qual_module_pairs = [
+            (all_quals[(inst.id, qual_name)], modules) for inst, qual_name, modules in desired_quals
+        ]
+
+        # --- modules ---
+        all_qual_ids = [q.id for q, _ in qual_module_pairs]
+        existing_mods = {
+            (m.qualification_id, m.name) for m in
+            db.query(Module).filter(Module.qualification_id.in_(all_qual_ids)).all()
+        }
+        new_mod_rows = []
+        total_desired_modules = 0
+        for qual, modules in qual_module_pairs:
+            for mod_name, year_level in modules:
+                total_desired_modules += 1
+                if (qual.id, mod_name) not in existing_mods:
+                    new_mod_rows.append({"qualification_id": qual.id, "name": mod_name, "year_level": year_level})
+        skipped["modules"] = total_desired_modules - len(new_mod_rows)
+        created["modules"] = len(new_mod_rows)
+        if new_mod_rows:
+            db.execute(sa.insert(Module), new_mod_rows)
     return {"created": created, "skipped": skipped}
 
 

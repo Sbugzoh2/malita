@@ -85,6 +85,7 @@ from backend.tutoring import (
     DEFAULT_PLATFORM_CUT_PERCENT,
     list_institutions, add_institution, list_qualifications, add_qualification,
     list_modules, add_module, seed_default_higher_ed_catalog,
+    delete_institution, delete_qualification, delete_module,
     list_tutor_higher_ed_applications, approve_tutor_higher_ed, reject_tutor_higher_ed,
     edit_tutoring_request, withdraw_tutoring_request, cancel_accepted_session,
     send_due_reminders, submit_session_recording,
@@ -1733,6 +1734,39 @@ def admin_catalog_add_module(payload: CatalogModuleRequest, authorization: str =
         raise HTTPException(status_code=403, detail="Admin access required.")
     try:
         return add_module(payload.qualification_id, payload.name, payload.year_level)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/admin/catalog/institutions/{institution_id}")
+def admin_catalog_delete_institution(institution_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return delete_institution(institution_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/admin/catalog/qualifications/{qualification_id}")
+def admin_catalog_delete_qualification(qualification_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return delete_qualification(qualification_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/admin/catalog/modules/{module_id}")
+def admin_catalog_delete_module(module_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return delete_module(module_id)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

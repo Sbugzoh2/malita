@@ -45,6 +45,9 @@ import {
   addQualificationAdmin,
   addModuleAdmin,
   seedDefaultCatalog,
+  deleteInstitutionAdmin,
+  deleteQualificationAdmin,
+  deleteModuleAdmin,
   YEAR_LEVEL_LABELS,
   API_BASE_URL,
 } from "../api/client";
@@ -629,6 +632,81 @@ function CatalogSection({ token }: { token: string }) {
     }
   }
 
+  function confirmDeleteInstitution(id: number, name: string) {
+    Alert.alert(
+      `Delete "${name}"?`,
+      "This also removes every qualification and module under it. Blocked if a tutor or " +
+        "tutoring request still references one of those modules.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setError(null);
+            try {
+              await deleteInstitutionAdmin(token, id);
+              if (qualInstitutionId === id) setQualInstitutionId(null);
+              if (modInstitutionId === id) setModInstitutionId(null);
+              loadInstitutions();
+            } catch (e) {
+              setError(e instanceof ApiError ? e.message : "Could not delete institution.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  function confirmDeleteQualification(id: number, name: string) {
+    Alert.alert(
+      `Delete "${name}"?`,
+      "This also removes every module under it. Blocked if a tutor or tutoring request " +
+        "still references one of those modules.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setError(null);
+            try {
+              await deleteQualificationAdmin(token, id);
+              if (qualInstitutionId) fetchQualifications(qualInstitutionId).then((res) => setQualifications(res.qualifications));
+              if (modQualificationId === id) setModQualificationId(null);
+              if (modInstitutionId) fetchQualifications(modInstitutionId).then((res) => setModQualifications(res.qualifications));
+            } catch (e) {
+              setError(e instanceof ApiError ? e.message : "Could not delete qualification.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  function confirmDeleteModule(id: number, name: string) {
+    Alert.alert(
+      `Delete "${name}"?`,
+      "Blocked if a tutor or tutoring request still references it.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setError(null);
+            try {
+              await deleteModuleAdmin(token, id);
+              if (modQualificationId) fetchModules(modQualificationId).then((res) => setModules(res.modules));
+            } catch (e) {
+              setError(e instanceof ApiError ? e.message : "Could not delete module.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
   return (
     <View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -648,7 +726,12 @@ function CatalogSection({ token }: { token: string }) {
 
       <Text style={styles.sectionTitle}>Institutions</Text>
       {institutions.map((i) => (
-        <Text key={i.id} style={styles.detailLine}>• {i.name}</Text>
+        <View key={i.id} style={styles.catalogRow}>
+          <Text style={styles.catalogRowText}>• {i.name}</Text>
+          <Pressable onPress={() => confirmDeleteInstitution(i.id, i.name)} hitSlop={8}>
+            <Text style={styles.deleteIcon}>🗑</Text>
+          </Pressable>
+        </View>
       ))}
       <TextInput
         style={styles.input}
@@ -668,7 +751,12 @@ function CatalogSection({ token }: { token: string }) {
         onChange={(v) => setQualInstitutionId(parseInt(v, 10))}
       />
       {qualifications.map((q) => (
-        <Text key={q.id} style={styles.detailLine}>• {q.name}</Text>
+        <View key={q.id} style={styles.catalogRow}>
+          <Text style={styles.catalogRowText}>• {q.name}</Text>
+          <Pressable onPress={() => confirmDeleteQualification(q.id, q.name)} hitSlop={8}>
+            <Text style={styles.deleteIcon}>🗑</Text>
+          </Pressable>
+        </View>
       ))}
       {qualInstitutionId ? (
         <>
@@ -700,7 +788,12 @@ function CatalogSection({ token }: { token: string }) {
         />
       ) : null}
       {modules.map((m) => (
-        <Text key={m.id} style={styles.detailLine}>• {m.name} ({m.year_level_label})</Text>
+        <View key={m.id} style={styles.catalogRow}>
+          <Text style={styles.catalogRowText}>• {m.name} ({m.year_level_label})</Text>
+          <Pressable onPress={() => confirmDeleteModule(m.id, m.name)} hitSlop={8}>
+            <Text style={styles.deleteIcon}>🗑</Text>
+          </Pressable>
+        </View>
       ))}
       {modQualificationId ? (
         <>
@@ -1172,6 +1265,14 @@ const styles = StyleSheet.create({
   cardSubtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
   cardDetail: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   detailLine: { fontSize: 13, color: colors.text, marginTop: 4 },
+  catalogRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  catalogRowText: { fontSize: 13, color: colors.text, flex: 1 },
+  deleteIcon: { fontSize: 15, marginLeft: 10 },
   cardLink: { color: colors.primary, fontWeight: "700", fontSize: 13, marginTop: 8 },
   sectionTitle: { fontSize: 15, fontWeight: "700", color: colors.text, marginBottom: 8 },
   catalogSectionSpacing: { marginTop: 20 },

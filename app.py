@@ -62,7 +62,9 @@ from backend.tutoring import (
     list_pending_payouts, mark_payout_paid, get_tutor_document_url,
     get_tutor_profile, TUTOR_STATUS_LABELS, list_all_tutoring_sessions,
     list_institutions, add_institution, list_qualifications, add_qualification,
-    list_modules, add_module, seed_default_higher_ed_catalog, list_tutor_higher_ed_applications,
+    list_modules, add_module, seed_default_higher_ed_catalog,
+    delete_institution, delete_qualification, delete_module,
+    list_tutor_higher_ed_applications,
     approve_tutor_higher_ed, reject_tutor_higher_ed, list_learner_requests,
 )
 
@@ -2092,7 +2094,10 @@ elif mode == "🛠️ Tutoring Admin":
                                     st.rerun()
 
         # ---- Higher-ed catalog management (admin-managed, see
-        # backend/tutoring.py's catalog docstring - no edit/delete in v1).
+        # backend/tutoring.py's catalog docstring - no edit in v1, but
+        # delete is supported, blocked server-side if a tutor or tutoring
+        # request still references a module, so a catalog typo can be
+        # cleaned up without risking orphaned live data).
         # The catalog starts empty by design; the seed button below is an
         # opt-in convenience (South Africa's 26 public universities with a
         # GENERIC qualification/module set, not each one's real official
@@ -2128,7 +2133,15 @@ elif mode == "🛠️ Tutoring Admin":
             st.markdown("#### Institutions")
             institutions = list_institutions()
             for i in institutions:
-                st.write(f"- {i['name']}")
+                col_name, col_del = st.columns([5, 1])
+                col_name.write(f"- {i['name']}")
+                if col_del.button("🗑", key=f"del_inst_{i['id']}"):
+                    try:
+                        delete_institution(i["id"])
+                        st.success(f"Deleted \"{i['name']}\".")
+                        st.rerun()
+                    except TutoringError as e:
+                        st.error(str(e))
             with st.form("add_institution_form"):
                 new_inst_name = st.text_input("New institution name")
                 if st.form_submit_button("Add Institution"):
@@ -2148,7 +2161,15 @@ elif mode == "🛠️ Tutoring Admin":
                 qual_inst_choice = st.selectbox("Institution", list(inst_labels.keys()), key="catalog_qual_institution")
                 qual_inst_id = inst_labels[qual_inst_choice]
                 for q in list_qualifications(qual_inst_id):
-                    st.write(f"- {q['name']}")
+                    col_name, col_del = st.columns([5, 1])
+                    col_name.write(f"- {q['name']}")
+                    if col_del.button("🗑", key=f"del_qual_{q['id']}"):
+                        try:
+                            delete_qualification(q["id"])
+                            st.success(f"Deleted \"{q['name']}\".")
+                            st.rerun()
+                        except TutoringError as e:
+                            st.error(str(e))
                 with st.form("add_qualification_form"):
                     new_qual_name = st.text_input("New qualification name")
                     if st.form_submit_button("Add Qualification"):
@@ -2173,7 +2194,15 @@ elif mode == "🛠️ Tutoring Admin":
                     mod_qual_choice = st.selectbox("Qualification", list(mod_qual_labels.keys()), key="catalog_mod_qualification")
                     mod_qual_id = mod_qual_labels[mod_qual_choice]
                     for m in list_modules(mod_qual_id):
-                        st.write(f"- {m['name']} ({m['year_level_label']})")
+                        col_name, col_del = st.columns([5, 1])
+                        col_name.write(f"- {m['name']} ({m['year_level_label']})")
+                        if col_del.button("🗑", key=f"del_mod_{m['id']}"):
+                            try:
+                                delete_module(m["id"])
+                                st.success(f"Deleted \"{m['name']}\".")
+                                st.rerun()
+                            except TutoringError as e:
+                                st.error(str(e))
                     with st.form("add_module_form"):
                         new_mod_name = st.text_input("New module name")
                         year_labels = {v: k for k, v in YEAR_LEVEL_LABELS.items()}

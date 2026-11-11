@@ -83,6 +83,13 @@ init_db()
 def to_sast_str(d, fmt="%d %b %Y, %H:%M") -> str:
     if not d:
         return "—"
+    if isinstance(d, str):
+        # list_learner_requests (backend/tutoring.py) hands scheduled_at
+        # back as an ISO string with a trailing "Z" for the mobile JSON
+        # API's benefit (see _iso_utc's docstring there) - this app reuses
+        # that same function directly, so unwrap it back to a naive UTC
+        # datetime here rather than duplicating the query.
+        d = dt.datetime.fromisoformat(d).replace(tzinfo=None)
     return (d + dt.timedelta(hours=2)).strftime(fmt) + " SAST"
 
 

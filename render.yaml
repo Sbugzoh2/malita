@@ -43,3 +43,33 @@ services:
         value: "3.12.3"
       - key: DATABASE_URL
         sync: false
+      # This service builds the PayFast checkout form the learner's
+      # browser actually posts to payfast.co.za, so it needs the SAME
+      # merchant credentials and live/sandbox flag as the webhook
+      # service below - otherwise it silently falls back to
+      # backend/payfast.py's hardcoded sandbox test merchant_id/key,
+      # which PayFast's live edge (CloudFront) rejects with a raw,
+      # un-PayFast-branded 500 "Server Error" instead of a normal
+      # checkout page. fromService (rather than a second sync:false
+      # entry) means these can never drift out of sync with the
+      # webhook service's values again.
+      - key: PAYFAST_MERCHANT_ID
+        fromService:
+          type: web
+          name: malita-payfast-webhook
+          envVarKey: PAYFAST_MERCHANT_ID
+      - key: PAYFAST_MERCHANT_KEY
+        fromService:
+          type: web
+          name: malita-payfast-webhook
+          envVarKey: PAYFAST_MERCHANT_KEY
+      - key: PAYFAST_PASSPHRASE
+        fromService:
+          type: web
+          name: malita-payfast-webhook
+          envVarKey: PAYFAST_PASSPHRASE
+      - key: PAYFAST_SANDBOX
+        fromService:
+          type: web
+          name: malita-payfast-webhook
+          envVarKey: PAYFAST_SANDBOX

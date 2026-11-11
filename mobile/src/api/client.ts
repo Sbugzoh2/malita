@@ -57,6 +57,10 @@ export type UserInfo = {
   subscription_status: string;
   is_admin: boolean;
   account_type: "high_school" | "higher_ed";
+  // Rare admin override (see backend/set_cross_segment_access.py) - when
+  // true, this account sees BOTH the high_school and higher_ed
+  // experiences at once, regardless of its own account_type.
+  cross_segment_access?: boolean;
   higher_ed_institution_id?: number | null;
   higher_ed_qualification_id?: number | null;
   higher_ed_year_of_study?: number | null;

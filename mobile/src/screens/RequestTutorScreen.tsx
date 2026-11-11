@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  View,
   Text,
   TextInput,
   Pressable,
@@ -27,7 +28,10 @@ const MIN_DURATION_MINUTES = 60;
 
 export default function RequestTutorScreen({ navigation, route }: any) {
   const { token, me } = useAuth();
-  const isHigherEd = me?.user.account_type === "higher_ed";
+  // Rare admin override (see backend/set_cross_segment_access.py) - lets
+  // this one account submit EITHER kind of request instead of being
+  // locked to its own account_type.
+  const hasCrossAccess = !!me?.user.cross_segment_access;
 
   // Editing an existing not-yet-accepted request (navigated here from
   // MyTutoringRequestsScreen's "Edit" button) instead of creating a new one.
@@ -40,6 +44,20 @@ export default function RequestTutorScreen({ navigation, route }: any) {
   const directoryPrefill = route?.params?.directoryPrefill;
   const preferredTutorId: number | undefined =
     route?.params?.preferredTutorId ?? editRequest?.preferred_tutor_id ?? undefined;
+
+  // Which picker to show: subject (high school) or institution/
+  // qualification/module (higher-ed). Normally fixed by the account's own
+  // account_type; editing or a directory pick already fixes the mode too
+  // (inferred from the existing request/prefill), so the toggle below
+  // only ever applies to a fresh, undirected request.
+  const inferredIsHigherEd = isEdit
+    ? editRequest!.module_id != null
+    : directoryPrefill
+    ? directoryPrefill.moduleId != null || directoryPrefill.institutionId != null
+    : me?.user.account_type === "higher_ed";
+  const [modeOverride, setModeOverride] = useState<boolean | null>(null);
+  const isHigherEd = hasCrossAccess && modeOverride != null ? modeOverride : inferredIsHigherEd;
+  const showModeToggle = hasCrossAccess && !isEdit && !directoryPrefill;
 
   const [subject, setSubject] = useState<Subject>(
     (editRequest?.subject as Subject) || (directoryPrefill?.subject as Subject) || "Mathematics"
@@ -203,6 +221,25 @@ export default function RequestTutorScreen({ navigation, route }: any) {
           <Text style={styles.myRequestsLinkText}>View my existing requests ›</Text>
         </Pressable>
 
+        {showModeToggle && (
+          <View style={styles.modeToggleRow}>
+            <Pressable
+              style={[styles.modeToggleButton, !isHigherEd && styles.modeToggleButtonActive]}
+              onPress={() => setModeOverride(false)}
+            >
+              <Text style={[styles.modeToggleText, !isHigherEd && styles.modeToggleTextActive]}>High School</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modeToggleButton, isHigherEd && styles.modeToggleButtonActive]}
+              onPress={() => setModeOverride(true)}
+            >
+              <Text style={[styles.modeToggleText, isHigherEd && styles.modeToggleTextActive]}>
+                University / College
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {isHigherEd ? (
           <>
             <Dropdown
@@ -305,6 +342,19 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
   directoryNote: { fontSize: 13, color: colors.primary, fontWeight: "600", marginTop: 10 },
   myRequestsLink: { marginTop: 14, alignSelf: "flex-start" },
+  modeToggleRow: { flexDirection: "row", gap: 8, marginTop: 16 },
+  modeToggleButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  modeToggleButtonActive: { backgroundColor: colors.primary, borderColor: "transparent" },
+  modeToggleText: { color: colors.text, fontSize: 13, fontWeight: "600" },
+  modeToggleTextActive: { color: "#fff" },
   myRequestsLinkText: { color: colors.primary, fontWeight: "600", fontSize: 13 },
   label: { fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginTop: 14, marginBottom: 6 },
   input: {

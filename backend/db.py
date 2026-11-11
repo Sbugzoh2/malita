@@ -81,6 +81,13 @@ class User(Base):
     higher_ed_year_of_study = Column(Integer, nullable=True)
     student_number = Column(String(50), nullable=True)
     is_admin = Column(Boolean, default=False)
+    # Rare, high-trust override (see backend/set_cross_segment_access.py) -
+    # lets ONE account see both the high_school AND higher_ed experiences
+    # at once, regardless of its own account_type. Deliberately not a
+    # general "both" account_type: that would mean reworking every
+    # account_type-gated screen's assumption that it's one or the other
+    # for every learner, not just this one.
+    cross_segment_access = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
     subscription = relationship(
@@ -817,6 +824,7 @@ def init_db():
     _ensure_column("users", "higher_ed_qualification_id", "INTEGER")
     _ensure_column("users", "higher_ed_year_of_study", "INTEGER")
     _ensure_column("users", "student_number", "VARCHAR(50)")
+    _ensure_column("users", "cross_segment_access", "BOOLEAN DEFAULT FALSE")
     _ensure_column("tutor_accounts", "wants_high_school", "BOOLEAN DEFAULT TRUE")
     _ensure_column("tutor_accounts", "wants_higher_ed", "BOOLEAN DEFAULT FALSE")
     _ensure_column("tutor_accounts", "higher_ed_status", "VARCHAR(20)")

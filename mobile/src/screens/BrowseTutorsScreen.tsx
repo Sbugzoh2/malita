@@ -9,6 +9,12 @@ import Dropdown from "../components/Dropdown";
 export default function BrowseTutorsScreen({ navigation }: any) {
   const { token, me } = useAuth();
   const isHigherEd = me?.user.account_type === "higher_ed";
+  // Rare admin override (see backend/set_cross_segment_access.py) - shows
+  // BOTH high-school subject tutors and higher-ed module tutors together,
+  // instead of the usual either/or.
+  const hasCrossAccess = !!me?.user.cross_segment_access;
+  const showSubjects = hasCrossAccess || !isHigherEd;
+  const showModules = hasCrossAccess || isHigherEd;
 
   const [subjectFilter, setSubjectFilter] = useState<Subject | null>(null);
   const [tutors, setTutors] = useState<DirectoryTutor[] | null>(null);
@@ -16,10 +22,14 @@ export default function BrowseTutorsScreen({ navigation }: any) {
 
   const load = useCallback(() => {
     if (!token) return;
-    fetchTutorsDirectory(token, { subject: !isHigherEd && subjectFilter ? subjectFilter : undefined })
+    // With cross access the subject filter is applied client-side below
+    // instead (the API's subject param would otherwise hide a tutor who
+    // only offers higher-ed modules, since it's an AND-filter server-side).
+    const serverSubjectFilter = !hasCrossAccess && !isHigherEd ? subjectFilter ?? undefined : undefined;
+    fetchTutorsDirectory(token, { subject: serverSubjectFilter })
       .then((res) => setTutors(res.tutors))
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load the tutor directory."));
-  }, [token, isHigherEd, subjectFilter]);
+  }, [token, isHigherEd, hasCrossAccess, subjectFilter]);
 
   useFocusEffect(
     useCallback(() => {
@@ -49,9 +59,14 @@ export default function BrowseTutorsScreen({ navigation }: any) {
     });
   }
 
-  const visibleTutors = (tutors ?? []).filter((t) =>
-    isHigherEd ? t.higher_ed_modules.length > 0 : t.subjects.length > 0
-  );
+  const visibleTutors = (tutors ?? []).filter((t) => {
+    const matchingSubjects = showSubjects
+      ? t.subjects.filter((s) => !subjectFilter || s.subject === subjectFilter)
+      : [];
+    const hasQualifyingSubject = matchingSubjects.length > 0;
+    const hasQualifyingModule = showModules && t.higher_ed_modules.length > 0;
+    return hasQualifyingSubject || hasQualifyingModule;
+  });
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -61,7 +76,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
         flow — a Google Meet link is created and you'll be asked to pay before the session is confirmed.
       </Text>
 
-      {!isHigherEd && (
+      {showSubjects && (
         <Dropdown
           label="Filter by subject (optional)"
           options={[{ label: "All subjects", value: "" }, ...SUBJECTS.map((s) => ({ label: s, value: s }))]}
@@ -86,8 +101,10 @@ export default function BrowseTutorsScreen({ navigation }: any) {
               <Text style={styles.cardMeta}>Availability: {tutor.availability_note}</Text>
             ) : null}
 
-            {!isHigherEd &&
-              tutor.subjects.map((s) => (
+            {showSubjects &&
+              tutor.subjects
+                .filter((s) => !subjectFilter || s.subject === subjectFilter)
+                .map((s) => (
                 <View key={s.subject} style={styles.offerRow}>
                   <View style={styles.offerTextCol}>
                     <Text style={styles.offerTitle}>{s.subject}</Text>
@@ -103,7 +120,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
                 </View>
               ))}
 
-            {isHigherEd &&
+            {showModules &&
               tutor.higher_ed_modules.map((m) => (
                 <View key={m.id} style={styles.offerRow}>
                   <View style={styles.offerTextCol}>

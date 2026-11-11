@@ -1,5 +1,6 @@
 import React from "react";
 import { View, ActivityIndicator, Pressable, Text, StyleSheet } from "react-native";
+import Constants from "expo-constants";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
@@ -71,8 +72,10 @@ function AppNavigator() {
   // University/college accounts get ONLY the tutoring marketplace -
   // these screens aren't just hidden from Home's tile list (see
   // HomeScreen.tsx), they're not even registered in the stack, so
-  // there's no route to navigate to even in principle.
-  const isHigherEd = me?.user.account_type === "higher_ed";
+  // there's no route to navigate to even in principle. cross_segment_access
+  // (a rare admin override - see backend/set_cross_segment_access.py)
+  // registers every screen regardless of the account's own account_type.
+  const isHigherEd = me?.user.account_type === "higher_ed" && !me?.user.cross_segment_access;
 
   return (
     <AppStack.Navigator
@@ -134,9 +137,13 @@ export default function RootNavigator() {
         // Lets PayFast's checkout redirect (return_url/cancel_url) bring
         // the learner straight back into the app instead of landing in a
         // browser with nowhere to go - see api_server.py's
-        // /billing/checkout-page, which points PayFast at malita://billing
-        // rather than the web app's URL for exactly this reason.
-        prefixes: ["malita://"],
+        // /billing/checkout-page, which points PayFast at
+        // {scheme}://billing rather than the web app's URL for exactly
+        // this reason. Read from app.config.js's own "scheme" field
+        // (not hardcoded) since the Malita Campus variant uses a
+        // different scheme ("malitacampus") - see api_server.py's
+        // SCHEME_BY_ACCOUNT_TYPE for the matching server-side half.
+        prefixes: [`${Constants.expoConfig?.scheme ?? "malita"}://`],
         config: {
           screens: {
             Subscription: "billing",

@@ -83,7 +83,10 @@ const HIGHER_ED_TILES: Tile[] = TILES.filter((t) => t.key === "RequestTutor" || 
 export default function HomeScreen({ navigation }: any) {
   const { me, logout } = useAuth();
   const firstName = me?.user.name.split(" ")[0] ?? "";
-  const isHigherEd = me?.user.account_type === "higher_ed";
+  // cross_segment_access (a rare admin override - see
+  // backend/set_cross_segment_access.py) unlocks the full tile set and
+  // subscription UI regardless of the account's own account_type.
+  const isHigherEd = me?.user.account_type === "higher_ed" && !me?.user.cross_segment_access;
   const tiles = isHigherEd ? HIGHER_ED_TILES : me?.is_admin ? [...TILES, ADMIN_TILE] : TILES;
 
   return (

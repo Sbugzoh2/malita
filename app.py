@@ -334,9 +334,12 @@ if st.session_state.auth_user is None:
 
 auth_user = st.session_state.auth_user
 
-if auth_user.get("account_type") == "higher_ed":
+if auth_user.get("account_type") == "higher_ed" and not auth_user.get("cross_segment_access"):
     # University/college accounts get ONLY the tutoring marketplace - none
     # of the AI Tutor/past papers/subscription UI below applies to them.
+    # cross_segment_access (a rare admin override - see
+    # backend/set_cross_segment_access.py) skips this entirely, letting
+    # that one account reach the full web app below as well.
     # The web app has no request-creation UI at all (that only exists in
     # the mobile app's RequestTutorScreen/MyTutoringRequestsScreen) so
     # this is a read-only summary pointing them there, not a parallel

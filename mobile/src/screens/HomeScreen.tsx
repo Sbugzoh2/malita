@@ -68,10 +68,16 @@ const ADMIN_TILE: Tile = {
   color: "#4a3aa7",
 };
 
+// University/college accounts get ONLY the tutoring marketplace - every
+// other tile above (AI Tutor, past papers, subscription, etc.) is simply
+// never shown, same gating principle as app.py's web equivalent.
+const HIGHER_ED_TILES: Tile[] = TILES.filter((t) => t.key === "RequestTutor");
+
 export default function HomeScreen({ navigation }: any) {
   const { me, logout } = useAuth();
   const firstName = me?.user.name.split(" ")[0] ?? "";
-  const tiles = me?.is_admin ? [...TILES, ADMIN_TILE] : TILES;
+  const isHigherEd = me?.user.account_type === "higher_ed";
+  const tiles = isHigherEd ? HIGHER_ED_TILES : me?.is_admin ? [...TILES, ADMIN_TILE] : TILES;
 
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -84,21 +90,25 @@ export default function HomeScreen({ navigation }: any) {
         <View style={styles.heroScrim} />
         <View style={styles.heroContent}>
           <Text style={styles.heroGreeting}>Welcome back, {firstName}!</Text>
-          <Pressable style={styles.planBadge} onPress={() => navigation.navigate("Subscription")}>
-            <Text style={styles.planBadgeText}>{me?.tier_label ?? "Free"} plan</Text>
-            <Text style={styles.planBadgeArrow}>›</Text>
-          </Pressable>
+          {!isHigherEd && (
+            <Pressable style={styles.planBadge} onPress={() => navigation.navigate("Subscription")}>
+              <Text style={styles.planBadgeText}>{me?.tier_label ?? "Free"} plan</Text>
+              <Text style={styles.planBadgeArrow}>›</Text>
+            </Pressable>
+          )}
         </View>
       </View>
 
       <View style={styles.body}>
-        {me?.daily_limit != null && (
+        {!isHigherEd && me?.daily_limit != null && (
           <Text style={styles.usage}>
             {me.used_today}/{me.daily_limit} solves used today
           </Text>
         )}
 
-        <Text style={styles.pick}>Pick where you'd like to start.</Text>
+        <Text style={styles.pick}>
+          {isHigherEd ? "Your account is set up for tutoring." : "Pick where you'd like to start."}
+        </Text>
 
         {tiles.map((tile) => (
           <Pressable

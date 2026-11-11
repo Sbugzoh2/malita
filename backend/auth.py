@@ -12,7 +12,10 @@ import secrets
 import datetime as dt
 import bcrypt
 
-from .db import get_session, User, Subscription, PasswordReset, ApiToken, LoginEvent
+from .db import (
+    get_session, User, Subscription, PasswordReset, ApiToken, LoginEvent,
+    Institution, Qualification, ACCOUNT_TYPES, YEAR_LEVEL_LABELS,
+)
 from .payfast import cancel_payfast_subscription
 from .tiers import TIER_ORDER
 
@@ -70,13 +73,27 @@ def parse_sa_id_number(id_number: str) -> dt.date:
         raise AuthError("ID number contains an invalid birth date.")
 
 
-def register_user(name: str, email: str, password: str, school: str = "",
-                   province: str = "", city_town: str = "", id_number: str = "") -> dict:
+def register_user(
+    name: str, email: str, password: str, school: str = "",
+    province: str = "", city_town: str = "", id_number: str = "",
+    account_type: str = "high_school",
+    higher_ed_institution_id: int | None = None,
+    higher_ed_qualification_id: int | None = None,
+    higher_ed_year_of_study: int | None = None,
+    student_number: str = "",
+) -> dict:
+    """account_type decides what the account can reach afterward (see
+    app.py's feature gating) - "high_school" (default, the original
+    product) gets everything built so far; "higher_ed" (university/
+    college) gets ONLY the tutoring marketplace, so it needs the higher_ed_*
+    fields instead of (or in addition to) school."""
     name = (name or "").strip()
     email = (email or "").strip().lower()
     province = (province or "").strip()
     city_town = (city_town or "").strip()
     id_number = (id_number or "").strip()
+    account_type = (account_type or "high_school").strip()
+    student_number = (student_number or "").strip()
 
     if not name:
         raise AuthError("Please enter your name.")
@@ -90,7 +107,17 @@ def register_user(name: str, email: str, password: str, school: str = "",
         raise AuthError("Please enter your city or town.")
     if not id_number:
         raise AuthError("Please enter your ID number.")
+    if account_type not in ACCOUNT_TYPES:
+        raise AuthError("Please choose whether you're a high school learner or a university/college student.")
     date_of_birth = parse_sa_id_number(id_number)
+
+    if account_type == "higher_ed":
+        if not higher_ed_institution_id or not higher_ed_qualification_id:
+            raise AuthError("Please select your institution and qualification.")
+        if not higher_ed_year_of_study or not (1 <= higher_ed_year_of_study <= max(YEAR_LEVEL_LABELS)):
+            raise AuthError("Please select your year of study.")
+        if not student_number:
+            raise AuthError("Please enter your student number.")
 
     with get_session() as db:
         existing = db.query(User).filter(User.email == email).first()
@@ -99,6 +126,11 @@ def register_user(name: str, email: str, password: str, school: str = "",
         existing_id = db.query(User).filter(User.id_number == id_number).first()
         if existing_id:
             raise AuthError("An account with this ID number already exists. Try logging in instead.")
+
+        if account_type == "higher_ed":
+            qual = db.query(Qualification).get(higher_ed_qualification_id)
+            if not qual or qual.institution_id != higher_ed_institution_id:
+                raise AuthError("That qualification doesn't belong to the selected institution.")
 
         user = User(
             name=name,
@@ -109,16 +141,24 @@ def register_user(name: str, email: str, password: str, school: str = "",
             city_town=city_town,
             id_number=id_number,
             date_of_birth=date_of_birth,
+            account_type=account_type,
+            higher_ed_institution_id=higher_ed_institution_id if account_type == "higher_ed" else None,
+            higher_ed_qualification_id=higher_ed_qualification_id if account_type == "higher_ed" else None,
+            higher_ed_year_of_study=higher_ed_year_of_study if account_type == "higher_ed" else None,
+            student_number=student_number if account_type == "higher_ed" else None,
         )
         db.add(user)
         db.flush()  # get user.id before commit
 
-        # Every new signup starts on the Free tier automatically.
+        # Every new signup starts on the Free tier automatically - harmless
+        # for a higher_ed account even though it never surfaces tier UI
+        # (see app.py), since every other function that reads
+        # user.subscription.tier still has a row to read.
         sub = Subscription(user_id=user.id, tier="free", status="active")
         db.add(sub)
         db.flush()
 
-        return {"id": user.id, "name": user.name, "email": user.email}
+        return {"id": user.id, "name": user.name, "email": user.email, "account_type": user.account_type}
 
 
 def login_user(email: str, password: str, source: str = None) -> dict:
@@ -141,6 +181,11 @@ def login_user(email: str, password: str, source: str = None) -> dict:
             "tier": tier,
             "subscription_status": status,
             "is_admin": user.is_admin,
+            "account_type": user.account_type,
+            "higher_ed_institution_id": user.higher_ed_institution_id,
+            "higher_ed_qualification_id": user.higher_ed_qualification_id,
+            "higher_ed_year_of_study": user.higher_ed_year_of_study,
+            "student_number": user.student_number,
         }
 
 
@@ -341,6 +386,11 @@ def get_user_by_token(token: str):
             "tier": tier,
             "subscription_status": status,
             "is_admin": user.is_admin,
+            "account_type": user.account_type,
+            "higher_ed_institution_id": user.higher_ed_institution_id,
+            "higher_ed_qualification_id": user.higher_ed_qualification_id,
+            "higher_ed_year_of_study": user.higher_ed_year_of_study,
+            "student_number": user.student_number,
         }
 
 

@@ -26,7 +26,7 @@ import datetime as dt
 
 #from frontend import *
 
-from backend.db import init_db, SA_PROVINCES, get_session, Subscription
+from backend.db import init_db, SA_PROVINCES, get_session, Subscription, YEAR_LEVEL_LABELS
 from backend.auth import (
     register_user, login_user, get_user_tier, is_user_admin, AuthError,
     create_password_reset, reset_password, cancel_subscription, create_api_token,
@@ -60,7 +60,10 @@ from backend.tutoring import (
     TutoringError, list_tutor_applications, approve_tutor, reject_tutor,
     list_approved_tutors, list_open_requests, match_tutor_to_request,
     list_pending_payouts, mark_payout_paid, get_tutor_document_url,
-    get_tutor_profile, TUTOR_STATUS_LABELS,
+    get_tutor_profile, TUTOR_STATUS_LABELS, list_all_tutoring_sessions,
+    list_institutions, add_institution, list_qualifications, add_qualification,
+    list_modules, add_module, list_tutor_higher_ed_applications,
+    approve_tutor_higher_ed, reject_tutor_higher_ed, list_learner_requests,
 )
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -70,6 +73,16 @@ APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfa
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8002")
 
 init_db()
+
+# -------------------------------------------------
+# HELPER: SAST display (sessions are stored as naive UTC - admin ops are in
+# South Africa, so always show the SAST wall-clock time, not raw UTC)
+# -------------------------------------------------
+def to_sast_str(d, fmt="%d %b %Y, %H:%M") -> str:
+    if not d:
+        return "—"
+    return (d + dt.timedelta(hours=2)).strftime(fmt) + " SAST"
+
 
 # -------------------------------------------------
 # HELPER: Convert SVG to Base64
@@ -237,37 +250,123 @@ if st.session_state.auth_user is None:
                         st.success("If an account exists for that email, a reset link has been generated.")
 
     with register_tab:
-        with st.form("register_form"):
-            reg_name = st.text_input("Full name")
-            reg_email = st.text_input("Email", key="reg_email")
-            reg_school = st.text_input("School (optional)")
-            reg_province = st.selectbox("Province", SA_PROVINCES)
-            reg_city = st.text_input("City / Town")
-            reg_id_number = st.text_input("ID number", key="reg_id_number", max_chars=13)
-            st.caption("We use this to work out your date of birth automatically - no need to type it separately.")
-            reg_password = st.text_input("Password", type="password", key="reg_pw")
-            reg_password_confirm = st.text_input("Confirm password", type="password")
-            st.caption(
-                f"By creating an account you agree to Malita's [Terms & Conditions]({API_BASE_URL}/terms) "
-                f"and [Privacy Policy]({API_BASE_URL}/privacy)."
+        # Deliberately NOT st.form here - the institution/qualification
+        # cascading selects below need to rerun and refresh their options
+        # the moment an earlier choice changes, and a form only evaluates
+        # once, on submit.
+        st.markdown("**Are you a...**")
+        reg_account_type_label = st.radio(
+            "Account type", ["High School Learner", "University / College Student"],
+            key="reg_account_type", label_visibility="collapsed",
+        )
+        account_type = "high_school" if reg_account_type_label == "High School Learner" else "higher_ed"
+
+        reg_name = st.text_input("Full name", key="reg_name")
+        reg_email = st.text_input("Email", key="reg_email")
+        reg_province = st.selectbox("Province", SA_PROVINCES, key="reg_province")
+        reg_city = st.text_input("City / Town", key="reg_city")
+        reg_id_number = st.text_input("ID number", key="reg_id_number", max_chars=13)
+        st.caption("We use this to work out your date of birth automatically - no need to type it separately.")
+
+        reg_school = ""
+        higher_ed_institution_id = None
+        higher_ed_qualification_id = None
+        higher_ed_year_of_study = None
+        reg_student_number = ""
+
+        if account_type == "high_school":
+            reg_school = st.text_input("School (optional)", key="reg_school")
+        else:
+            institutions = list_institutions()
+            if not institutions:
+                st.warning(
+                    "No institutions are set up yet - please contact Malita support, "
+                    "or check back shortly."
+                )
+            inst_labels = {i["name"]: i["id"] for i in institutions}
+            chosen_inst = st.selectbox(
+                "Institution", list(inst_labels.keys()) or ["—"], key="reg_institution",
             )
-            submitted_reg = st.form_submit_button("Create Free Account")
-            if submitted_reg:
-                if reg_password != reg_password_confirm:
-                    st.error("Passwords don't match.")
-                else:
-                    try:
-                        user = register_user(
-                            reg_name, reg_email, reg_password, reg_school,
-                            province=reg_province, city_town=reg_city, id_number=reg_id_number,
-                        )
-                        st.success("Account created! Please log in on the 'Log In' tab.")
-                    except AuthError as e:
-                        st.error(str(e))
+            higher_ed_institution_id = inst_labels.get(chosen_inst)
+
+            quals = list_qualifications(higher_ed_institution_id) if higher_ed_institution_id else []
+            qual_labels = {q["name"]: q["id"] for q in quals}
+            if higher_ed_institution_id and not quals:
+                st.caption("No qualifications listed for this institution yet - contact Malita support.")
+            chosen_qual = st.selectbox(
+                "Qualification", list(qual_labels.keys()) or ["—"], key="reg_qualification",
+            )
+            higher_ed_qualification_id = qual_labels.get(chosen_qual)
+
+            year_labels = {v: k for k, v in YEAR_LEVEL_LABELS.items()}
+            chosen_year = st.selectbox("Year of study", list(year_labels.keys()), key="reg_year")
+            higher_ed_year_of_study = year_labels[chosen_year]
+
+            reg_student_number = st.text_input("Student number", key="reg_student_number")
+
+        reg_password = st.text_input("Password", type="password", key="reg_pw")
+        reg_password_confirm = st.text_input("Confirm password", type="password", key="reg_pw2")
+        st.caption(
+            f"By creating an account you agree to Malita's [Terms & Conditions]({API_BASE_URL}/terms) "
+            f"and [Privacy Policy]({API_BASE_URL}/privacy)."
+        )
+        if st.button("Create Free Account", key="reg_submit"):
+            if reg_password != reg_password_confirm:
+                st.error("Passwords don't match.")
+            else:
+                try:
+                    user = register_user(
+                        reg_name, reg_email, reg_password, reg_school,
+                        province=reg_province, city_town=reg_city, id_number=reg_id_number,
+                        account_type=account_type,
+                        higher_ed_institution_id=higher_ed_institution_id,
+                        higher_ed_qualification_id=higher_ed_qualification_id,
+                        higher_ed_year_of_study=higher_ed_year_of_study,
+                        student_number=reg_student_number,
+                    )
+                    st.success("Account created! Please log in on the 'Log In' tab.")
+                except AuthError as e:
+                    st.error(str(e))
 
     st.stop()
 
 auth_user = st.session_state.auth_user
+
+if auth_user.get("account_type") == "higher_ed":
+    # University/college accounts get ONLY the tutoring marketplace - none
+    # of the AI Tutor/past papers/subscription UI below applies to them.
+    # The web app has no request-creation UI at all (that only exists in
+    # the mobile app's RequestTutorScreen/MyTutoringRequestsScreen) so
+    # this is a read-only summary pointing them there, not a parallel
+    # implementation of the whole flow.
+    st.sidebar.title("🎓 Malita Tutoring")
+    st.sidebar.markdown(f"👋 **{auth_user['name']}**")
+    st.sidebar.caption("University / College account")
+    st.sidebar.divider()
+    if st.sidebar.button("Log Out"):
+        st.session_state.auth_user = None
+        st.rerun()
+
+    st.title("🎓 Your Tutoring Requests")
+    st.info(
+        "Your account is set up for university/college tutoring. Request and manage "
+        "sessions from the **Malita mobile app** - this web page shows a read-only summary."
+    )
+    my_requests = list_learner_requests(auth_user["id"])
+    if not my_requests:
+        st.caption("You haven't requested a tutor yet - open the Malita mobile app to get started.")
+    for r in my_requests:
+        topic_suffix = f" ({r['topic']})" if r["topic"] else ""
+        with st.expander(f"{r['subject']}{topic_suffix} — {r['status_label']}"):
+            if r["scheduled_at"]:
+                st.write(f"**Scheduled:** {to_sast_str(r['scheduled_at'])}")
+            if r["price_zar"] is not None:
+                st.write(f"**Price:** R{r['price_zar']:.2f} ({r['duration_minutes']} min)")
+            if r["tutor_name"]:
+                st.write(f"**Tutor:** {r['tutor_name']}")
+            if r["meet_link"]:
+                st.write(f"**Google Meet:** {r['meet_link']}")
+    st.stop()
 
 # Safe math expression parsing (safe_parse/detect_variables/_fmt_num) now
 # lives in backend/math_utils.py (imported above) so api_server.py can
@@ -1863,8 +1962,11 @@ elif mode == "🛠️ Tutoring Admin":
             "verifies the app — see backend/google_calendar.py)."
         )
 
-        tab_apps, tab_match, tab_tutors, tab_payouts = st.tabs(
-            ["Tutor Applications", "Match Requests", "Tutors", "Payouts"]
+        tab_apps, tab_higher_ed_apps, tab_catalog, tab_match, tab_sessions, tab_tutors, tab_payouts = st.tabs(
+            [
+                "Tutor Applications", "Higher-Ed Applications", "Higher-Ed Catalog",
+                "Match Requests", "All Sessions", "Tutors", "Payouts",
+            ]
         )
 
         # ---- Tutor applications ----
@@ -1935,6 +2037,120 @@ elif mode == "🛠️ Tutoring Admin":
                                     st.success("Rejected.")
                                     st.rerun()
 
+        # ---- Higher-ed tutor applications (independent vetting track) ----
+        with tab_higher_ed_apps:
+            he_status_filter = st.selectbox(
+                "Status", list(TUTOR_STATUS_LABELS.keys()),
+                format_func=lambda s: TUTOR_STATUS_LABELS.get(s, s),
+                key="tutor_higher_ed_status_filter",
+            )
+            he_apps = list_tutor_higher_ed_applications(he_status_filter)
+            if not he_apps:
+                st.caption(f"No higher-ed applications with status '{TUTOR_STATUS_LABELS.get(he_status_filter, he_status_filter)}'.")
+            for a in he_apps:
+                with st.expander(f"{a['name']} — {a['email']} ({a['higher_ed_status_label']})"):
+                    st.write(f"**Phone:** {a['phone'] or '—'}")
+                    st.write(f"**Institution:** {a['higher_ed_institution'] or '—'}")
+                    st.write(f"**Qualification:** {a['higher_ed_qualification'] or '—'}")
+                    st.write(f"**Year of study:** {a['higher_ed_year_of_study_label'] or '—'}")
+                    if a["higher_ed_qualification_complete"]:
+                        st.caption("Qualification already completed.")
+                    st.write(f"**Semester/final average:** {a['higher_ed_average']}%")
+                    st.write(f"**Transcript note:** {a['higher_ed_transcript_note'] or '—'}")
+                    st.write(f"**Bio:** {a['bio'] or '—'}")
+                    st.write(f"**Availability:** {a['availability_note'] or '—'}")
+                    st.write(f"**Bank details:** {a['bank_account_note'] or '—'}")
+                    st.markdown("**Modules applied for:**")
+                    for m in a["modules"]:
+                        st.write(f"- {m['name']} ({m['year_level_label']})")
+                    if a["wants_high_school"]:
+                        st.caption("This tutor also applied for high-school tutoring (see the other tab).")
+                    if a["admin_notes"]:
+                        st.caption(f"Admin notes: {a['admin_notes']}")
+
+                    if a["higher_ed_status"] == "pending_review":
+                        hcol1, hcol2 = st.columns(2)
+                        if hcol1.button("✅ Approve", key=f"approve_higher_ed_{a['id']}"):
+                            approve_tutor_higher_ed(a["id"])
+                            st.success("Approved.")
+                            st.rerun()
+                        show_he_reject_key = f"show_reject_higher_ed_{a['id']}"
+                        if hcol2.button("❌ Reject", key=f"reject_higher_ed_{a['id']}"):
+                            st.session_state[show_he_reject_key] = True
+                        if st.session_state.get(show_he_reject_key):
+                            with st.form(f"reject_higher_ed_form_{a['id']}"):
+                                he_reason = st.text_input("Reason (optional)", key=f"reject_higher_ed_reason_{a['id']}")
+                                if st.form_submit_button("Confirm Reject"):
+                                    reject_tutor_higher_ed(a["id"], he_reason)
+                                    st.session_state[show_he_reject_key] = False
+                                    st.success("Rejected.")
+                                    st.rerun()
+
+        # ---- Higher-ed catalog management (admin-managed, see
+        # backend/tutoring.py's catalog docstring - deliberately no
+        # pre-populated institution list, and no edit/delete in v1) ----
+        with tab_catalog:
+            st.markdown("#### Institutions")
+            institutions = list_institutions()
+            for i in institutions:
+                st.write(f"- {i['name']}")
+            with st.form("add_institution_form"):
+                new_inst_name = st.text_input("New institution name")
+                if st.form_submit_button("Add Institution"):
+                    try:
+                        add_institution(new_inst_name)
+                        st.success("Added.")
+                        st.rerun()
+                    except TutoringError as e:
+                        st.error(str(e))
+
+            st.divider()
+            st.markdown("#### Qualifications")
+            inst_labels = {i["name"]: i["id"] for i in institutions}
+            if not inst_labels:
+                st.caption("Add an institution first.")
+            else:
+                qual_inst_choice = st.selectbox("Institution", list(inst_labels.keys()), key="catalog_qual_institution")
+                qual_inst_id = inst_labels[qual_inst_choice]
+                for q in list_qualifications(qual_inst_id):
+                    st.write(f"- {q['name']}")
+                with st.form("add_qualification_form"):
+                    new_qual_name = st.text_input("New qualification name")
+                    if st.form_submit_button("Add Qualification"):
+                        try:
+                            add_qualification(qual_inst_id, new_qual_name)
+                            st.success("Added.")
+                            st.rerun()
+                        except TutoringError as e:
+                            st.error(str(e))
+
+            st.divider()
+            st.markdown("#### Modules")
+            if not inst_labels:
+                st.caption("Add an institution and qualification first.")
+            else:
+                mod_inst_choice = st.selectbox("Institution", list(inst_labels.keys()), key="catalog_mod_institution")
+                mod_inst_id = inst_labels[mod_inst_choice]
+                mod_qual_labels = {q["name"]: q["id"] for q in list_qualifications(mod_inst_id)}
+                if not mod_qual_labels:
+                    st.caption("Add a qualification for this institution first.")
+                else:
+                    mod_qual_choice = st.selectbox("Qualification", list(mod_qual_labels.keys()), key="catalog_mod_qualification")
+                    mod_qual_id = mod_qual_labels[mod_qual_choice]
+                    for m in list_modules(mod_qual_id):
+                        st.write(f"- {m['name']} ({m['year_level_label']})")
+                    with st.form("add_module_form"):
+                        new_mod_name = st.text_input("New module name")
+                        year_labels = {v: k for k, v in YEAR_LEVEL_LABELS.items()}
+                        new_mod_year_label = st.selectbox("Year level", list(year_labels.keys()))
+                        if st.form_submit_button("Add Module"):
+                            try:
+                                add_module(mod_qual_id, new_mod_name, year_labels[new_mod_year_label])
+                                st.success("Added.")
+                                st.rerun()
+                            except TutoringError as e:
+                                st.error(str(e))
+
         # ---- Admin override: force-assign a tutor to an open request ----
         # Tutors now self-accept open requests at the price/duration the
         # learner already set (see the mobile tutor app) - this tab is
@@ -1951,7 +2167,7 @@ elif mode == "🛠️ Tutoring Admin":
                     f"({r['duration_minutes']} min) — requested {requested_str}"
                 ):
                     if r["scheduled_at"]:
-                        st.write(f"**Learner requested:** {r['scheduled_at']}")
+                        st.write(f"**Learner requested:** {to_sast_str(r['scheduled_at'])}")
                     if r["preferred_times_note"]:
                         st.write(f"**Notes:** {r['preferred_times_note']}")
                     candidates = list_approved_tutors(r["subject"])
@@ -1967,24 +2183,60 @@ elif mode == "🛠️ Tutoring Admin":
                                 "Tutor", list(tutor_labels.keys()), key=f"match_tutor_{r['id']}"
                             )
                             scheduled_date = st.date_input(
-                                "Scheduled date (optional)", value=None, key=f"match_date_{r['id']}"
+                                "Propose a different date (optional, SAST)", value=None, key=f"match_date_{r['id']}"
                             )
                             scheduled_time = st.time_input(
-                                "Scheduled time (optional)", value=None, key=f"match_time_{r['id']}"
+                                "Propose a different time (optional, SAST)", value=None, key=f"match_time_{r['id']}"
                             )
-                            if st.form_submit_button("Force-Assign Tutor"):
+                            if st.form_submit_button("Suggest This Tutor"):
+                                # Entered as SAST (this admin console is used
+                                # from South Africa) - stored as naive UTC
+                                # like every other scheduled_at, so subtract
+                                # the fixed 2-hour offset.
                                 scheduled_at = (
-                                    dt.datetime.combine(scheduled_date, scheduled_time)
+                                    dt.datetime.combine(scheduled_date, scheduled_time) - dt.timedelta(hours=2)
                                     if scheduled_date and scheduled_time else None
                                 )
                                 try:
                                     match_tutor_to_request(
                                         r["id"], tutor_labels[chosen_label], scheduled_at=scheduled_at,
                                     )
-                                    st.success("Assigned! The learner can now pay to confirm the session.")
+                                    st.success(
+                                        "Suggested! The tutor needs to confirm in their app before "
+                                        "anything is booked - nothing is final yet."
+                                    )
                                     st.rerun()
                                 except TutoringError as e:
                                     st.error(str(e))
+
+        # ---- Every matched session (upcoming + completed), full detail ----
+        with tab_sessions:
+            session_filter = st.radio(
+                "Show", ["Upcoming", "Completed", "All"], horizontal=True, key="admin_sessions_filter",
+            )
+            sessions = list_all_tutoring_sessions(
+                upcoming_only=(session_filter == "Upcoming"),
+                completed_only=(session_filter == "Completed"),
+            )
+            st.caption(f"{len(sessions)} session(s).")
+            for s in sessions:
+                topic_str = f" ({s['topic']})" if s["topic"] else ""
+                with st.expander(
+                    f"{s['subject']}{topic_str} — {s['learner_name']} ↔ {s['tutor_name']} — {s['status_label']}"
+                ):
+                    st.write(f"**Learner:** {s['learner_name']} ({s['learner_email']})")
+                    st.write(f"**Tutor:** {s['tutor_name']} ({s['tutor_email']})")
+                    st.write(f"**Scheduled:** {to_sast_str(s['scheduled_at'])}")
+                    st.write(f"**Duration:** {s['duration_minutes']} min")
+                    st.write(f"**Price:** R{s['price_zar']:.2f}" if s["price_zar"] is not None else "**Price:** —")
+                    if s["platform_cut_percent"] is not None:
+                        st.caption(f"Malita's cut on this session: {s['platform_cut_percent']:.0f}%")
+                    if s["meet_link"]:
+                        st.write(f"**Google Meet:** {s['meet_link']}")
+                    if s["learner_rating"] is not None:
+                        st.write(f"Learner rated this session {s['learner_rating']}/5")
+                    if s["tutor_rating"] is not None:
+                        st.write(f"Tutor rated this session {s['tutor_rating']}/5")
 
         # ---- Approved tutors' standing record (subjects + full session
         # history) - an approved tutor's record never goes away, so an
@@ -2008,7 +2260,7 @@ elif mode == "🛠️ Tutoring Admin":
                         st.caption("No sessions yet.")
                     for sess in profile["sessions"]:
                         when = sess["scheduled_at"] or sess["created_at"]
-                        when_str = when.strftime("%d %b %Y") if when else "—"
+                        when_str = to_sast_str(when, fmt="%d %b %Y")
                         topic_str = f" ({sess['topic']})" if sess["topic"] else ""
                         rating_str = (
                             f" — learner rated this tutor {sess['learner_rating']}/5"

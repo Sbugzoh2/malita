@@ -8,6 +8,7 @@ import { colors } from "../theme";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import TutorLoginScreen from "../screens/TutorLoginScreen";
+import TutorApplyScreen from "../screens/TutorApplyScreen";
 import TutorHomeScreen from "../screens/TutorHomeScreen";
 import HomeScreen from "../screens/HomeScreen";
 import AITutorScreen from "../screens/AITutorScreen";
@@ -33,6 +34,7 @@ function AuthNavigator() {
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Register" component={RegisterScreen} />
       <AuthStack.Screen name="TutorLogin" component={TutorLoginScreen} />
+      <AuthStack.Screen name="TutorApply" component={TutorApplyScreen} />
     </AuthStack.Navigator>
   );
 }
@@ -64,6 +66,13 @@ function LogoutHeaderButton() {
 }
 
 function AppNavigator() {
+  const { me } = useAuth();
+  // University/college accounts get ONLY the tutoring marketplace -
+  // these screens aren't just hidden from Home's tile list (see
+  // HomeScreen.tsx), they're not even registered in the stack, so
+  // there's no route to navigate to even in principle.
+  const isHigherEd = me?.user.account_type === "higher_ed";
+
   return (
     <AppStack.Navigator
       screenOptions={{
@@ -73,30 +82,34 @@ function AppNavigator() {
       }}
     >
       <AppStack.Screen name="Home" component={HomeScreen} options={{ title: "Malita" }} />
-      <AppStack.Screen
-        name="AITutor"
-        component={AITutorScreen}
-        options={{ title: "AI Tutor", headerRight: LogoutHeaderButton }}
-      />
-      <AppStack.Screen name="AITeacher" component={AITeacherScreen} options={{ title: "AI Teacher" }} />
-      <AppStack.Screen name="Subscription" component={SubscriptionScreen} options={{ title: "Subscription" }} />
-      <AppStack.Screen name="PracticeQuestions" component={PracticeScreen} options={{ title: "Practice Questions" }} />
-      <AppStack.Screen name="PastPapersLibrary" component={PastPapersScreen} options={{ title: "Past Papers Library" }} />
-      <AppStack.Screen name="PastPaperViewer" component={PastPaperViewerScreen} options={{ title: "View Document" }} />
-      <AppStack.Screen name="LearnerProfile" component={LearnerProfileScreen} options={{ title: "Learner Profile" }} />
-      <AppStack.Screen name="Collab" component={CollabScreen} options={{ title: "Collaboration Forum" }} />
-      <AppStack.Screen name="CollabQuestionDetail" component={CollabQuestionDetailScreen} options={{ title: "Question" }} />
       <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
       <AppStack.Screen
         name="MyTutoringRequests"
         component={MyTutoringRequestsScreen}
         options={{ title: "My Tutoring Requests" }}
       />
-      <AppStack.Screen
-        name="TutoringAdmin"
-        component={TutoringAdminScreen}
-        options={{ title: "Tutoring Admin" }}
-      />
+      {!isHigherEd && (
+        <>
+          <AppStack.Screen
+            name="AITutor"
+            component={AITutorScreen}
+            options={{ title: "AI Tutor", headerRight: LogoutHeaderButton }}
+          />
+          <AppStack.Screen name="AITeacher" component={AITeacherScreen} options={{ title: "AI Teacher" }} />
+          <AppStack.Screen name="Subscription" component={SubscriptionScreen} options={{ title: "Subscription" }} />
+          <AppStack.Screen name="PracticeQuestions" component={PracticeScreen} options={{ title: "Practice Questions" }} />
+          <AppStack.Screen name="PastPapersLibrary" component={PastPapersScreen} options={{ title: "Past Papers Library" }} />
+          <AppStack.Screen name="PastPaperViewer" component={PastPaperViewerScreen} options={{ title: "View Document" }} />
+          <AppStack.Screen name="LearnerProfile" component={LearnerProfileScreen} options={{ title: "Learner Profile" }} />
+          <AppStack.Screen name="Collab" component={CollabScreen} options={{ title: "Collaboration Forum" }} />
+          <AppStack.Screen name="CollabQuestionDetail" component={CollabQuestionDetailScreen} options={{ title: "Question" }} />
+          <AppStack.Screen
+            name="TutoringAdmin"
+            component={TutoringAdminScreen}
+            options={{ title: "Tutoring Admin" }}
+          />
+        </>
+      )}
     </AppStack.Navigator>
   );
 }

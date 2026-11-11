@@ -41,7 +41,10 @@ from PIL import Image
 
 LEGAL_DIR = Path(__file__).resolve().parent / "static" / "legal"
 
-from backend.db import init_db, SA_PROVINCES, get_session, Subscription, GooglePlayChoiceEvent, TutoringSessionRequest
+from backend.db import (
+    init_db, SA_PROVINCES, get_session, Subscription, GooglePlayChoiceEvent, TutoringSessionRequest,
+    Module, YEAR_LEVEL_LABELS,
+)
 from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
@@ -72,13 +75,17 @@ from backend.tutoring import (
     TutoringError, apply_as_tutor, list_tutor_applications, approve_tutor,
     reject_tutor, list_approved_tutors, request_tutoring_session,
     list_learner_requests, list_open_requests, list_open_requests_for_tutor,
-    match_tutor_to_request, accept_tutoring_request, propose_new_time,
+    list_all_tutoring_sessions,
+    match_tutor_to_request, tutor_respond_to_admin_match, accept_tutoring_request, propose_new_time,
     respond_to_time_proposal, confirm_session_by_learner, confirm_session_by_tutor,
     cancel_session, complete_session, list_pending_payouts, mark_payout_paid,
     get_tutor_document_url, get_tutor_profile, login_tutor,
     create_tutor_api_token, get_tutor_by_token, revoke_tutor_api_token,
     list_tutor_own_payouts, create_tutor_password_reset, reset_tutor_password,
     DEFAULT_PLATFORM_CUT_PERCENT,
+    list_institutions, add_institution, list_qualifications, add_qualification,
+    list_modules, add_module,
+    list_tutor_higher_ed_applications, approve_tutor_higher_ed, reject_tutor_higher_ed,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -140,6 +147,11 @@ class RegisterRequest(BaseModel):
     city_town: str
     id_number: str
     school: str = ""
+    account_type: str = "high_school"  # "high_school" | "higher_ed"
+    higher_ed_institution_id: int | None = None
+    higher_ed_qualification_id: int | None = None
+    higher_ed_year_of_study: int | None = None
+    student_number: str = ""
 
 
 class LoginRequest(BaseModel):
@@ -234,12 +246,18 @@ class TutorSubjectInput(BaseModel):
 
 
 class TutoringRequestRequest(BaseModel):
-    subject: str
+    # Required for a high-school request (an NSC subject name). Ignored
+    # (the module's own name is used instead) for a higher-ed request -
+    # see module_id below.
+    subject: str = ""
     price_zar: float
     scheduled_at: str  # ISO 8601, required - not optional, see request_tutoring_session
     duration_minutes: int = 60
     topic: str = ""
     preferred_times_note: str = ""
+    # A higher-ed catalog Module id - set this INSTEAD OF subject for a
+    # university/college tutoring request.
+    module_id: int | None = None
 
 
 class TutorRejectRequest(BaseModel):
@@ -337,6 +355,11 @@ def register(body: RegisterRequest):
         user = register_user(
             body.name, body.email, body.password, body.school,
             province=body.province, city_town=body.city_town, id_number=body.id_number,
+            account_type=body.account_type,
+            higher_ed_institution_id=body.higher_ed_institution_id,
+            higher_ed_qualification_id=body.higher_ed_qualification_id,
+            higher_ed_year_of_study=body.higher_ed_year_of_study,
+            student_number=body.student_number,
         )
     except AuthError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1179,6 +1202,20 @@ def tutor_accept_request(request_id: int, authorization: str = Header(None)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/tutor/requests/{request_id}/admin-match/respond")
+def tutor_respond_to_admin_match_endpoint(
+    request_id: int, payload: TimeProposalResponseRequest, authorization: str = Header(None)
+):
+    """The tutor confirming or declining an admin-suggested match (see
+    backend/tutoring.py's tutor_respond_to_admin_match) - nothing from an
+    admin force-match is final until the tutor confirms here."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return tutor_respond_to_admin_match(request_id, tutor["id"], payload.accept)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/tutor/requests/{request_id}/propose-time")
 def tutor_propose_time(request_id: int, payload: TutorProposeTimeRequest, authorization: str = Header(None)):
     """A tutor proposing an alternative time when they can't make the
@@ -1205,6 +1242,23 @@ def tutor_confirm_session(request_id: int, payload: SessionConfirmRequest, autho
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/catalog/institutions")
+def catalog_institutions():
+    """Public, unauthenticated - needed at registration and tutor-application
+    time, before anyone is logged in."""
+    return {"institutions": list_institutions()}
+
+
+@app.get("/catalog/qualifications")
+def catalog_qualifications(institution_id: int):
+    return {"qualifications": list_qualifications(institution_id)}
+
+
+@app.get("/catalog/modules")
+def catalog_modules(qualification_id: int):
+    return {"modules": list_modules(qualification_id), "year_levels": YEAR_LEVEL_LABELS}
+
+
 @app.post("/tutoring/apply")
 async def tutoring_apply(
     name: str = Form(...),
@@ -1218,27 +1272,47 @@ async def tutoring_apply(
     cv_note: str = Form(""),
     availability_note: str = Form(""),
     bank_account_note: str = Form(""),
-    subjects: str = Form(...),
+    wants_high_school: bool = Form(True),
+    wants_higher_ed: bool = Form(False),
+    subjects: str = Form("[]"),
+    higher_ed_institution_id: int | None = Form(None),
+    higher_ed_qualification_id: int | None = Form(None),
+    higher_ed_year_of_study: int | None = Form(None),
+    higher_ed_qualification_complete: bool = Form(False),
+    higher_ed_average: float | None = Form(None),
+    higher_ed_transcript_note: str = Form(""),
+    higher_ed_module_ids: str = Form("[]"),
     id_document: UploadFile | None = File(None),
     matric_certificate: UploadFile | None = File(None),
     cv: UploadFile | None = File(None),
 ):
     """Public, unauthenticated - a prospective tutor applying is not yet a
-    Malita user of any kind. Rejects immediately (no admin review needed)
-    if any subject's matric mark is below Malita's stated 65% minimum.
+    Malita user of any kind. Covers one or BOTH segments in one submission
+    (wants_high_school / wants_higher_ed) - see apply_as_tutor's docstring
+    for the independent-per-segment vetting this sets up. Rejects
+    immediately (no admin review needed) if a high-school subject's matric
+    mark, or the higher-ed average, is below Malita's stated 65% minimum,
+    or if a selected higher-ed module isn't at least one year behind the
+    applicant's own year of study.
 
     multipart/form-data, not JSON - id_document/matric_certificate/cv are
     optional file uploads (an ID photo, NSC certificate, and a one-page
     CV), and FastAPI requires every other field to ride along as Form(...)
     rather than a JSON body when any File(...) param is present. `subjects`
-    is a JSON-encoded string of [{"subject", "matric_percentage", "topics"?,
-    "hourly_rate_zar"?}, ...] for the same reason - multipart has no
+    and `higher_ed_module_ids` are JSON-encoded strings ([{"subject",
+    "matric_percentage", "topics"?, "hourly_rate_zar"?}, ...] and
+    [module_id, ...] respectively) for the same reason - multipart has no
     native nested-list encoding."""
     try:
-        subjects_raw = json.loads(subjects)
+        subjects_raw = json.loads(subjects) if subjects else []
         parsed_subjects = [TutorSubjectInput(**s) for s in subjects_raw]
     except Exception:
         raise HTTPException(status_code=400, detail="'subjects' must be a JSON-encoded list of subject objects.")
+    try:
+        module_ids = json.loads(higher_ed_module_ids) if higher_ed_module_ids else []
+        module_ids = [int(m) for m in module_ids]
+    except Exception:
+        raise HTTPException(status_code=400, detail="'higher_ed_module_ids' must be a JSON-encoded list of integers.")
 
     id_document_tuple = None
     if id_document is not None:
@@ -1260,7 +1334,15 @@ async def tutoring_apply(
             matric_certificate_note=matric_certificate_note,
             cv_note=cv_note, availability_note=availability_note,
             bank_account_note=bank_account_note,
+            wants_high_school=wants_high_school, wants_higher_ed=wants_higher_ed,
             subjects=[s.model_dump() for s in parsed_subjects],
+            higher_ed_institution_id=higher_ed_institution_id,
+            higher_ed_qualification_id=higher_ed_qualification_id,
+            higher_ed_year_of_study=higher_ed_year_of_study,
+            higher_ed_qualification_complete=higher_ed_qualification_complete,
+            higher_ed_average=higher_ed_average,
+            higher_ed_transcript_note=higher_ed_transcript_note,
+            higher_ed_module_ids=module_ids,
             id_document=id_document_tuple,
             matric_certificate_document=matric_document_tuple,
             cv_document=cv_document_tuple,
@@ -1285,16 +1367,31 @@ def admin_tutoring_document_url(tutor_id: int, kind: str, authorization: str = H
 @app.post("/tutoring/requests")
 def tutoring_create_request(payload: TutoringRequestRequest, authorization: str = Header(None)):
     """A learner asking for a tutor - works for any subscription tier,
-    including Free, since tutoring is billed separately."""
+    including Free, since tutoring is billed separately. A higher-ed
+    request (module_id set) looks up the module's own name server-side
+    so `subject` always reflects it, even if the client sent something
+    else or nothing at all."""
     user = _auth_user(authorization)
     try:
         scheduled_at = _parse_iso_datetime(payload.scheduled_at)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date/time format.")
+
+    subject = payload.subject
+    if payload.module_id is not None:
+        with get_session() as db:
+            mod = db.query(Module).get(payload.module_id)
+            if not mod:
+                raise HTTPException(status_code=400, detail="That module no longer exists.")
+            subject = mod.name
+    elif not subject.strip():
+        raise HTTPException(status_code=400, detail="Please choose a subject.")
+
     try:
         return request_tutoring_session(
-            user["id"], payload.subject, payload.price_zar, scheduled_at,
+            user["id"], subject, payload.price_zar, scheduled_at,
             payload.duration_minutes, payload.topic, payload.preferred_times_note,
+            module_id=payload.module_id,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1406,6 +1503,88 @@ def admin_tutoring_reject(tutor_id: int, payload: TutorRejectRequest, authorizat
     return {"status": "rejected"}
 
 
+@app.get("/admin/tutoring/applications/higher-ed")
+def admin_tutoring_higher_ed_applications(status: str | None = None, authorization: str = Header(None)):
+    """The independent higher-ed vetting queue - see
+    list_tutor_higher_ed_applications."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"applications": list_tutor_higher_ed_applications(status)}
+
+
+@app.post("/admin/tutoring/applications/{tutor_id}/higher-ed/approve")
+def admin_tutoring_higher_ed_approve(tutor_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        approve_tutor_higher_ed(tutor_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "approved"}
+
+
+@app.post("/admin/tutoring/applications/{tutor_id}/higher-ed/reject")
+def admin_tutoring_higher_ed_reject(tutor_id: int, payload: TutorRejectRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        reject_tutor_higher_ed(tutor_id, payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "rejected"}
+
+
+class CatalogInstitutionRequest(BaseModel):
+    name: str
+
+
+class CatalogQualificationRequest(BaseModel):
+    institution_id: int
+    name: str
+
+
+class CatalogModuleRequest(BaseModel):
+    qualification_id: int
+    name: str
+    year_level: int
+
+
+@app.post("/admin/catalog/institutions")
+def admin_catalog_add_institution(payload: CatalogInstitutionRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return add_institution(payload.name)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/catalog/qualifications")
+def admin_catalog_add_qualification(payload: CatalogQualificationRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return add_qualification(payload.institution_id, payload.name)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/catalog/modules")
+def admin_catalog_add_module(payload: CatalogModuleRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return add_module(payload.qualification_id, payload.name, payload.year_level)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/admin/tutoring/tutors")
 def admin_tutoring_tutors(subject: str | None = None, authorization: str = Header(None)):
     user = _auth_user(authorization)
@@ -1434,6 +1613,19 @@ def admin_tutoring_open_requests(authorization: str = Header(None)):
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
     return {"requests": list_open_requests()}
+
+
+@app.get("/admin/tutoring/sessions")
+def admin_tutoring_sessions(filter: str = "upcoming", authorization: str = Header(None)):
+    """Every MATCHED session (both sides assigned) - 'upcoming' (awaiting
+    payment or confirmed), 'completed', or 'all'. Distinct from the
+    /requests/open list above, which is only still-unmatched requests."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"sessions": list_all_tutoring_sessions(
+        upcoming_only=(filter == "upcoming"), completed_only=(filter == "completed"),
+    )}
 
 
 @app.post("/admin/tutoring/requests/{request_id}/match")

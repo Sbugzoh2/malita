@@ -56,7 +56,38 @@ export type UserInfo = {
   tier: string;
   subscription_status: string;
   is_admin: boolean;
+  account_type: "high_school" | "higher_ed";
+  higher_ed_institution_id?: number | null;
+  higher_ed_qualification_id?: number | null;
+  higher_ed_year_of_study?: number | null;
+  student_number?: string | null;
 };
+
+export const YEAR_LEVEL_LABELS: Record<number, string> = {
+  1: "1st Year", 2: "2nd Year", 3: "3rd Year", 4: "4th Year / Honours",
+  5: "Postgraduate (Masters/Doctoral)",
+};
+
+export type Institution = { id: number; name: string };
+export type Qualification = { id: number; name: string; institution_id: number };
+export type CatalogModule = {
+  id: number; name: string; year_level: number;
+  year_level_label: string; qualification_id: number;
+};
+
+export function fetchInstitutions() {
+  return request<{ institutions: Institution[] }>("/catalog/institutions");
+}
+
+export function fetchQualifications(institutionId: number) {
+  return request<{ qualifications: Qualification[] }>(`/catalog/qualifications?institution_id=${institutionId}`);
+}
+
+export function fetchModules(qualificationId: number) {
+  return request<{ modules: CatalogModule[]; year_levels: Record<string, string> }>(
+    `/catalog/modules?qualification_id=${qualificationId}`
+  );
+}
 
 export type MeResponse = {
   user: UserInfo;
@@ -83,6 +114,11 @@ export type RegisterParams = {
   city_town: string;
   id_number: string;
   school?: string;
+  account_type?: "high_school" | "higher_ed";
+  higher_ed_institution_id?: number | null;
+  higher_ed_qualification_id?: number | null;
+  higher_ed_year_of_study?: number | null;
+  student_number?: string;
 };
 
 export function register(params: RegisterParams) {
@@ -254,7 +290,7 @@ export type TutoringRequest = {
   subject: string;
   topic: string | null;
   preferred_times_note: string | null;
-  status: "requested" | "time_proposed" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
+  status: "requested" | "time_proposed" | "admin_proposed" | "awaiting_payment" | "confirmed" | "completed" | "cancelled";
   status_label: string;
   tutor_id: number | null;
   tutor_name: string | null;
@@ -276,23 +312,28 @@ export type TutoringRequest = {
 export function requestTutoringSession(
   token: string,
   params: {
-    subject: string;
+    subject?: string;
     price_zar: number;
     scheduled_at: string; // ISO 8601, required
     duration_minutes?: number;
     topic?: string;
     preferred_times_note?: string;
+    // A higher-ed catalog Module id - set this INSTEAD OF subject for a
+    // university/college tutoring request (the server looks up the
+    // module's own name).
+    module_id?: number;
   }
 ) {
   return request<{ id: number; status: string }>("/tutoring/requests", {
     method: "POST",
     body: {
-      subject: params.subject,
+      subject: params.subject ?? "",
       price_zar: params.price_zar,
       scheduled_at: params.scheduled_at,
       duration_minutes: params.duration_minutes ?? 60,
       topic: params.topic ?? "",
       preferred_times_note: params.preferred_times_note ?? "",
+      module_id: params.module_id,
     },
     token,
   });
@@ -335,6 +376,10 @@ export type TutorMe = {
   email: string;
   status: TutorApplication["status"];
   status_label: string;
+  wants_high_school: boolean;
+  wants_higher_ed: boolean;
+  higher_ed_status: TutorApplication["status"] | null;
+  higher_ed_status_label: string | null;
 };
 
 export function tutorLogin(email: string, password: string) {
@@ -364,6 +409,105 @@ export function tutorResetPassword(token: string, newPassword: string) {
 
 export function fetchTutorMe(token: string) {
   return request<TutorMe>("/tutor/me", { token });
+}
+
+export type TutorApplySubjectInput = {
+  subject: string;
+  matric_percentage: number;
+  topics?: string;
+  hourly_rate_zar?: number;
+};
+
+export type TutorApplyParams = {
+  name: string;
+  email: string;
+  password: string;
+  phone?: string;
+  bio?: string;
+  id_number?: string;
+  id_verification_note?: string;
+  matric_certificate_note?: string;
+  cv_note?: string;
+  availability_note?: string;
+  bank_account_note?: string;
+  wants_high_school: boolean;
+  wants_higher_ed: boolean;
+  subjects?: TutorApplySubjectInput[];
+  higher_ed_institution_id?: number | null;
+  higher_ed_qualification_id?: number | null;
+  higher_ed_year_of_study?: number | null;
+  higher_ed_qualification_complete?: boolean;
+  higher_ed_average?: number | null;
+  higher_ed_transcript_note?: string;
+  higher_ed_module_ids?: number[];
+  id_document?: { uri: string; name: string; type: string } | null;
+  matric_certificate?: { uri: string; name: string; type: string } | null;
+  cv?: { uri: string; name: string; type: string } | null;
+};
+
+// A prospective tutor's application - public, unauthenticated, multipart
+// (the three document fields are optional file uploads). See
+// backend/tutoring.py's apply_as_tutor for the full validation this hits:
+// matric marks / higher-ed average must meet Malita's 65% minimum, and a
+// higher-ed module must be at least one year behind the applicant's own
+// year of study.
+export async function applyAsTutor(params: TutorApplyParams): Promise<{ id: number; status: string; higher_ed_status: string | null }> {
+  const formData = new FormData();
+  const textFields: Record<string, string> = {
+    name: params.name,
+    email: params.email,
+    password: params.password,
+    phone: params.phone ?? "",
+    bio: params.bio ?? "",
+    id_number: params.id_number ?? "",
+    id_verification_note: params.id_verification_note ?? "",
+    matric_certificate_note: params.matric_certificate_note ?? "",
+    cv_note: params.cv_note ?? "",
+    availability_note: params.availability_note ?? "",
+    bank_account_note: params.bank_account_note ?? "",
+    wants_high_school: String(params.wants_high_school),
+    wants_higher_ed: String(params.wants_higher_ed),
+    subjects: JSON.stringify(params.subjects ?? []),
+    higher_ed_qualification_complete: String(params.higher_ed_qualification_complete ?? false),
+    higher_ed_transcript_note: params.higher_ed_transcript_note ?? "",
+    higher_ed_module_ids: JSON.stringify(params.higher_ed_module_ids ?? []),
+  };
+  if (params.higher_ed_institution_id != null) {
+    textFields.higher_ed_institution_id = String(params.higher_ed_institution_id);
+  }
+  if (params.higher_ed_qualification_id != null) {
+    textFields.higher_ed_qualification_id = String(params.higher_ed_qualification_id);
+  }
+  if (params.higher_ed_year_of_study != null) {
+    textFields.higher_ed_year_of_study = String(params.higher_ed_year_of_study);
+  }
+  if (params.higher_ed_average != null) {
+    textFields.higher_ed_average = String(params.higher_ed_average);
+  }
+  for (const [key, value] of Object.entries(textFields)) {
+    formData.append(key, value);
+  }
+
+  // Same Blob-conversion technique as uploadFile() above - Expo SDK 57's
+  // fetch/FormData only accepts a real Blob/File-like part, not the
+  // classic React Native {uri,name,type} shape.
+  const fileFields: [string, TutorApplyParams["id_document"]][] = [
+    ["id_document", params.id_document],
+    ["matric_certificate", params.matric_certificate],
+    ["cv", params.cv],
+  ];
+  for (const [field, file] of fileFields) {
+    if (!file) continue;
+    const blob = await (await fetch(file.uri)).blob();
+    formData.append(field, blob, file.name);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/tutoring/apply`, { method: "POST", body: formData });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ApiError(response.status, errorMessage(data));
+  }
+  return data;
 }
 
 // Returns the same shape as the admin's TutorProfile (see below) - the
@@ -526,6 +670,29 @@ export function fetchOpenTutoringRequestsAdmin(token: string) {
   return request<{ requests: TutoringRequest[] }>("/admin/tutoring/requests/open", { token });
 }
 
+export type AdminTutoringSession = {
+  id: number;
+  subject: string;
+  topic: string | null;
+  status: string;
+  status_label: string;
+  learner_name: string;
+  learner_email: string;
+  tutor_name: string;
+  tutor_email: string;
+  scheduled_at: string | null;
+  duration_minutes: number | null;
+  price_zar: number | null;
+  platform_cut_percent: number | null;
+  meet_link: string | null;
+  learner_rating: number | null;
+  tutor_rating: number | null;
+};
+
+export function fetchAllTutoringSessionsAdmin(token: string, filter: "upcoming" | "completed" | "all" = "upcoming") {
+  return request<{ sessions: AdminTutoringSession[] }>(`/admin/tutoring/sessions?filter=${filter}`, { token });
+}
+
 // Admin override only - price/duration are set by the learner at
 // request time now, not here (see backend/tutoring.py's
 // match_tutor_to_request docstring).
@@ -534,10 +701,25 @@ export function matchTutorToRequestAdmin(
   requestId: number,
   params: { tutor_id: number; scheduled_at?: string | null }
 ) {
-  return request<{ id: number; status: string; m_payment_id: string; meet_link: string | null }>(
+  // Suggests a tutor - doesn't finalize. The tutor still has to confirm
+  // (respondToAdminMatch) before anything is booked, so this only ever
+  // returns the request moving to 'admin_proposed', not a payment ref.
+  return request<{ id: number; status: string }>(
     `/admin/tutoring/requests/${requestId}/match`,
     { method: "POST", body: params, token }
   );
+}
+
+// The tutor confirming or declining an admin-suggested match (status
+// "admin_proposed"). Declining reopens the request; accepting either
+// finalizes directly (if the time is unchanged) or moves to
+// "time_proposed" so the learner also approves a changed time.
+export function respondToAdminMatch(token: string, requestId: number, accept: boolean) {
+  return request<{ id: number; status: string }>(`/tutor/requests/${requestId}/admin-match/respond`, {
+    method: "POST",
+    body: { accept },
+    token,
+  });
 }
 
 export type TutoringPayout = {

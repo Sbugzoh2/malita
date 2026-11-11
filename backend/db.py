@@ -38,6 +38,21 @@ SA_PROVINCES = (
     "Mpumalanga", "Northern Cape", "North West", "Western Cape",
 )
 
+# Which population an account serves. "high_school" is the original Malita
+# product (AI Tutor, past papers, OCR, subscription tiers, PLUS tutoring).
+# "higher_ed" (university/college) accounts get ONLY the tutoring
+# marketplace - see app.py's feature gating and backend/tutoring.py's
+# higher-ed request/matching path.
+ACCOUNT_TYPES = ("high_school", "higher_ed")
+
+# A module's year level, used for the "must be at least one year ahead"
+# tutoring-eligibility rule (see TutorHigherEdModule) - an integer so
+# eligibility is a plain comparison, not a lookup table.
+YEAR_LEVEL_LABELS = {
+    1: "1st Year", 2: "2nd Year", 3: "3rd Year", 4: "4th Year / Honours",
+    5: "Postgraduate (Masters/Doctoral)",
+}
+
 
 class User(Base):
     __tablename__ = "users"
@@ -54,6 +69,17 @@ class User(Base):
     # from it so learners don't type both.
     id_number = Column(String(13), nullable=True, unique=True, index=True)
     date_of_birth = Column(Date, nullable=True)
+    # "high_school" (default, backward-compatible with every existing row)
+    # or "higher_ed" - decided once at signup, see register_user(). Gates
+    # which features the account can reach (see app.py).
+    account_type = Column(String(20), default="high_school", nullable=False)
+    # Only set for higher_ed accounts - which institution/qualification/
+    # year the learner is studying, used both to show relevant modules
+    # first and (year_of_study) for the tutor-matching eligibility rule.
+    higher_ed_institution_id = Column(Integer, ForeignKey("institutions.id"), nullable=True)
+    higher_ed_qualification_id = Column(Integer, ForeignKey("qualifications.id"), nullable=True)
+    higher_ed_year_of_study = Column(Integer, nullable=True)
+    student_number = Column(String(50), nullable=True)
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
@@ -299,6 +325,54 @@ class WebhookEvent(Base):
     processed = Column(Boolean, default=False)
 
 
+class Institution(Base):
+    """A university/college/TVET college - admin-managed (see
+    backend/tutoring.py's catalog functions), not pre-populated with every
+    South African institution, since that list is large and changes over
+    time. An admin adds institutions/qualifications/modules as real
+    learners/tutors need them."""
+    __tablename__ = "institutions"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), unique=True, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    qualifications = relationship(
+        "Qualification", back_populates="institution", cascade="all, delete-orphan"
+    )
+
+
+class Qualification(Base):
+    """A degree/diploma offered by one Institution, e.g. 'BSc Computer
+    Science' at University of Pretoria - modules belong to one of these."""
+    __tablename__ = "qualifications"
+    __table_args__ = (UniqueConstraint("institution_id", "name", name="uq_qualification_institution_name"),)
+
+    id = Column(Integer, primary_key=True)
+    institution_id = Column(Integer, ForeignKey("institutions.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    institution = relationship("Institution", back_populates="qualifications")
+    modules = relationship("Module", back_populates="qualification", cascade="all, delete-orphan")
+
+
+class Module(Base):
+    """One module/course within a Qualification, tagged with the year it's
+    taken - year_level is what enforces "a tutor must be at least one
+    year ahead of the module they tutor" (see TutorHigherEdModule)."""
+    __tablename__ = "modules"
+    __table_args__ = (UniqueConstraint("qualification_id", "name", name="uq_module_qualification_name"),)
+
+    id = Column(Integer, primary_key=True)
+    qualification_id = Column(Integer, ForeignKey("qualifications.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    year_level = Column(Integer, nullable=False)  # 1-5, see YEAR_LEVEL_LABELS
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    qualification = relationship("Qualification", back_populates="modules")
+
+
 class TutorAccount(Base):
     """A tutor who applied to offer paid 1-on-1 tutoring through Malita -
     entirely separate from the learner `User` table since tutors are a
@@ -355,14 +429,50 @@ class TutorAccount(Base):
     availability_note = Column(String, nullable=True)
     bank_account_note = Column(String, nullable=True)
     bio = Column(String, nullable=True)
-    # pending_review | approved | rejected | suspended
+    # pending_review | approved | rejected | suspended - this is the
+    # HIGH SCHOOL vetting status (kept as the original column name/meaning
+    # so every pre-existing tutor and all of v1's code keeps working
+    # unchanged). See higher_ed_status below for the separate, independent
+    # higher-ed vetting track - a tutor applying for "Both" has two
+    # statuses that can differ (e.g. approved for high school, still
+    # pending_review for higher-ed).
     status = Column(String(20), default="pending_review", nullable=False)
     admin_notes = Column(String, nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
 
+    # Which segment(s) this tutor applied to teach - decided once at
+    # application time (a tutor can later ask an admin to add the other
+    # segment, but there's no self-service "add segment" flow in v1).
+    wants_high_school = Column(Boolean, default=True, nullable=False)
+    wants_higher_ed = Column(Boolean, default=False, nullable=False)
+
+    # ---- Higher-ed vetting track (independent of the fields above) ----
+    # NULL higher_ed_status means "never applied for this track" (distinct
+    # from "pending_review", which means they applied and are waiting).
+    higher_ed_status = Column(String(20), nullable=True)
+    higher_ed_institution_id = Column(Integer, ForeignKey("institutions.id"), nullable=True)
+    higher_ed_qualification_id = Column(Integer, ForeignKey("qualifications.id"), nullable=True)
+    # The tutor's OWN year of study (or, if higher_ed_qualification_complete,
+    # the year they finished in) - gates which modules they're allowed to
+    # add in TutorHigherEdModule (must be strictly ahead of the module's
+    # own year_level).
+    higher_ed_year_of_study = Column(Integer, nullable=True)
+    higher_ed_qualification_complete = Column(Boolean, default=False, nullable=False)
+    # Self-reported semester/final average (%) - Malita's stated minimum is
+    # 65%, enforced at application time (see apply_as_tutor's higher-ed
+    # path), same spirit as matric_percentage for high school but NOT
+    # independently verified against the institution in v1 - same manual-
+    # review-by-admin approach as matric_certificate_note.
+    higher_ed_average = Column(Float, nullable=True)
+    higher_ed_transcript_note = Column(String, nullable=True)
+    higher_ed_reviewed_at = Column(DateTime, nullable=True)
+
     subjects = relationship(
         "TutorSubject", back_populates="tutor", cascade="all, delete-orphan"
+    )
+    higher_ed_modules = relationship(
+        "TutorHigherEdModule", back_populates="tutor", cascade="all, delete-orphan"
     )
     sessions = relationship(
         "TutoringSessionRequest", back_populates="tutor"
@@ -384,6 +494,25 @@ class TutorSubject(Base):
     is_active = Column(Boolean, default=True)
 
     tutor = relationship("TutorAccount", back_populates="subjects")
+
+
+class TutorHigherEdModule(Base):
+    """One catalog Module a higher-ed tutor declared/is approved to
+    tutor - validated at creation time (module.year_level must be below
+    the tutor's own higher_ed_year_of_study, or the tutor must have
+    completed the qualification) so a first-year student can never be
+    linked to a first-year module. See backend/tutoring.py's
+    add_tutor_higher_ed_module."""
+    __tablename__ = "tutor_higher_ed_modules"
+    __table_args__ = (UniqueConstraint("tutor_id", "module_id", name="uq_tutor_module"),)
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=False)
+    module_id = Column(Integer, ForeignKey("modules.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    tutor = relationship("TutorAccount", back_populates="higher_ed_modules")
+    module = relationship("Module")
 
 
 class TutoringSessionRequest(Base):
@@ -421,7 +550,17 @@ class TutoringSessionRequest(Base):
 
     id = Column(Integer, primary_key=True)
     learner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # For a high-school request: an NSC subject name (e.g. "Mathematics").
+    # For a higher-ed request (module_id set below): the module's own
+    # display name, kept here too so every existing subject-string-based
+    # display/notification code path keeps working unchanged.
     subject = Column(String(60), nullable=False)
+    # NULL = a high-school request (matched by `subject` against
+    # TutorSubject, as in v1). Set = a higher-ed request, matched by this
+    # exact Module against TutorHigherEdModule instead - see
+    # backend/tutoring.py's list_open_requests_for_tutor/
+    # accept_tutoring_request for the branch.
+    module_id = Column(Integer, ForeignKey("modules.id"), nullable=True)
     topic = Column(String(60), nullable=True)
     # Free-text extra context (e.g. "need help with proofs specifically")
     # - NOT where the learner's actual time goes anymore, that's the
@@ -473,6 +612,7 @@ class TutoringSessionRequest(Base):
 
     learner = relationship("User")
     tutor = relationship("TutorAccount", back_populates="sessions")
+    module = relationship("Module")
     payout = relationship(
         "TutoringPayout", back_populates="session", uselist=False,
         cascade="all, delete-orphan"
@@ -612,6 +752,22 @@ def init_db():
     _ensure_column("tutoring_session_requests", "tutor_rating", "INTEGER")
     _ensure_column("tutoring_session_requests", "tutor_rating_comment", "VARCHAR")
     _ensure_column("tutoring_session_requests", "proposed_scheduled_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "module_id", "INTEGER")
+    _ensure_column("users", "account_type", "VARCHAR(20) DEFAULT 'high_school'")
+    _ensure_column("users", "higher_ed_institution_id", "INTEGER")
+    _ensure_column("users", "higher_ed_qualification_id", "INTEGER")
+    _ensure_column("users", "higher_ed_year_of_study", "INTEGER")
+    _ensure_column("users", "student_number", "VARCHAR(50)")
+    _ensure_column("tutor_accounts", "wants_high_school", "BOOLEAN DEFAULT TRUE")
+    _ensure_column("tutor_accounts", "wants_higher_ed", "BOOLEAN DEFAULT FALSE")
+    _ensure_column("tutor_accounts", "higher_ed_status", "VARCHAR(20)")
+    _ensure_column("tutor_accounts", "higher_ed_institution_id", "INTEGER")
+    _ensure_column("tutor_accounts", "higher_ed_qualification_id", "INTEGER")
+    _ensure_column("tutor_accounts", "higher_ed_year_of_study", "INTEGER")
+    _ensure_column("tutor_accounts", "higher_ed_qualification_complete", "BOOLEAN DEFAULT FALSE")
+    _ensure_column("tutor_accounts", "higher_ed_average", "FLOAT")
+    _ensure_column("tutor_accounts", "higher_ed_transcript_note", "VARCHAR")
+    _ensure_column("tutor_accounts", "higher_ed_reviewed_at", "TIMESTAMP")
     _migrate_removed_tier("super_premium", "premium")
 
 

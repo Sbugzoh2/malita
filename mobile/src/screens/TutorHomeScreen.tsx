@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
@@ -14,6 +14,7 @@ import {
   acceptTutoringRequest,
   proposeNewTime,
   confirmTutoringSessionAsTutor,
+  respondToAdminMatch,
 } from "../api/client";
 import SessionDateTimePicker, {
   SessionDateTimeValue,
@@ -23,8 +24,13 @@ import SessionDateTimePicker, {
 type Section = "open" | "sessions" | "payouts";
 
 function formatScheduled(iso: string): string {
+  // Always render in SAST (fixed UTC+2, no daylight saving), regardless of
+  // the device's own timezone - otherwise the same stored instant displays
+  // as a different wall-clock time depending on where the phone's clock is
+  // set, which looked like scheduling itself being "hours off".
   return new Date(iso).toLocaleString("en-ZA", {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    timeZone: "Africa/Johannesburg",
   });
 }
 
@@ -66,6 +72,7 @@ export default function TutorHomeScreen() {
   const [ratingDraft, setRatingDraft] = useState<Record<number, number>>({});
   const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [respondingAdminMatchId, setRespondingAdminMatchId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -114,6 +121,20 @@ export default function TutorHomeScreen() {
       setError(e instanceof ApiError ? e.message : "Could not send that proposal.");
     } finally {
       setSendingProposalId(null);
+    }
+  }
+
+  async function handleAdminMatchResponse(requestId: number, accept: boolean) {
+    if (!token) return;
+    setRespondingAdminMatchId(requestId);
+    setError(null);
+    try {
+      await respondToAdminMatch(token, requestId, accept);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not record your response.");
+    } finally {
+      setRespondingAdminMatchId(null);
     }
   }
 
@@ -207,7 +228,7 @@ export default function TutorHomeScreen() {
                     R{r.price_zar}{r.duration_minutes ? ` · ${r.duration_minutes} min` : ""}
                   </Text>
                   <Text style={styles.payoutNote}>
-                    You'll receive {r.price_zar != null ? payoutPreview(r.price_zar, openCutPercent) : "—"} after
+                    Estimated payout: ~{r.price_zar != null ? payoutPreview(r.price_zar, openCutPercent) : "—"} after
                     Malita's {openCutPercent}% cut — the amount above is not your final payout.
                   </Text>
                   {r.scheduled_at ? (
@@ -282,8 +303,8 @@ export default function TutorHomeScreen() {
                         R{sess.price_zar}{sess.duration_minutes ? ` · ${sess.duration_minutes} min` : ""}
                       </Text>
                       <Text style={styles.payoutNote}>
-                        You'll receive {payoutPreview(sess.price_zar, sess.platform_cut_percent ?? openCutPercent)} after
-                        Malita's {sess.platform_cut_percent ?? openCutPercent}% cut.
+                        Estimated payout: ~{payoutPreview(sess.price_zar, sess.platform_cut_percent ?? openCutPercent)} after
+                        Malita's {sess.platform_cut_percent ?? openCutPercent}% cut — not your final payout.
                       </Text>
                     </>
                   ) : null}
@@ -292,12 +313,47 @@ export default function TutorHomeScreen() {
                       Your proposed time: {sess.proposed_scheduled_at ? formatScheduled(sess.proposed_scheduled_at) : "—"} -
                       awaiting the learner's approval.
                     </Text>
+                  ) : sess.status === "admin_proposed" ? (
+                    <Text style={styles.cardMeta}>
+                      {sess.proposed_scheduled_at
+                        ? `An admin proposed: ${formatScheduled(sess.proposed_scheduled_at)}`
+                        : `Learner's requested time: ${sess.scheduled_at ? formatScheduled(sess.scheduled_at) : "—"}`}
+                    </Text>
                   ) : sess.scheduled_at ? (
                     <Text style={styles.cardMeta}>Scheduled: {formatScheduled(sess.scheduled_at)}</Text>
                   ) : null}
                   {sess.meet_link ? (
-                    <Text style={styles.cardMeta}>🎥 Google Meet link sent by email</Text>
+                    <Pressable onPress={() => Linking.openURL(sess.meet_link!)}>
+                      <Text style={styles.meetLink}>🎥 Join via Google Meet</Text>
+                    </Pressable>
                   ) : null}
+
+                  {sess.status === "admin_proposed" && (
+                    <View style={styles.proposalButtonRow}>
+                      <Pressable
+                        style={[styles.acceptButton, styles.proposalApproveButton]}
+                        onPress={() => handleAdminMatchResponse(sess.id, true)}
+                        disabled={respondingAdminMatchId === sess.id}
+                      >
+                        {respondingAdminMatchId === sess.id ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <Text style={styles.acceptButtonText}>Confirm</Text>
+                        )}
+                      </Pressable>
+                      <Pressable
+                        style={[styles.acceptButton, styles.proposalDeclineButton]}
+                        onPress={() => handleAdminMatchResponse(sess.id, false)}
+                        disabled={respondingAdminMatchId === sess.id}
+                      >
+                        {respondingAdminMatchId === sess.id ? (
+                          <ActivityIndicator color={colors.primary} />
+                        ) : (
+                          <Text style={styles.proposalDeclineButtonText}>Decline</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  )}
 
                   {sess.status === "confirmed" && !sess.tutor_confirmed && (
                     <View style={styles.confirmBox}>
@@ -416,6 +472,17 @@ const styles = StyleSheet.create({
   },
   acceptButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   payoutNote: { fontSize: 12, color: colors.textSecondary, marginTop: 4, fontStyle: "italic" },
+  meetLink: { color: colors.primary, fontWeight: "700", fontSize: 13, marginTop: 10 },
+  proposalButtonRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  proposalApproveButton: { flex: 1, marginTop: 0 },
+  proposalDeclineButton: {
+    flex: 1,
+    marginTop: 0,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  proposalDeclineButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
   proposeLinkButton: { marginTop: 10, alignItems: "center" },
   proposeLinkText: { color: colors.primary, fontWeight: "600", fontSize: 13 },
   confirmBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },

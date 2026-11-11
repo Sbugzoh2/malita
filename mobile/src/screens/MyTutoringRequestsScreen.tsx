@@ -15,8 +15,11 @@ import {
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   try {
+    // Always render in SAST (fixed UTC+2) regardless of the device's own
+    // timezone, matching how the date/time was originally picked.
     return new Date(iso).toLocaleString("en-ZA", {
       year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+      timeZone: "Africa/Johannesburg",
     });
   } catch {
     return iso;
@@ -26,6 +29,7 @@ function formatDate(iso: string | null): string {
 const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   requested: colors.textSecondary,
   time_proposed: "#eda100",
+  admin_proposed: colors.textSecondary,
   awaiting_payment: "#eda100",
   confirmed: colors.primary,
   completed: colors.success,

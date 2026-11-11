@@ -29,11 +29,13 @@ import {
   markPayoutPaidAdmin,
   TutorProfile,
   fetchTutorProfile,
+  AdminTutoringSession,
+  fetchAllTutoringSessionsAdmin,
   API_BASE_URL,
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
 
-type Section = "applications" | "match" | "tutors" | "payouts";
+type Section = "applications" | "match" | "sessions" | "tutors" | "payouts";
 
 const STATUS_OPTIONS: { label: string; value: TutorApplication["status"] }[] = [
   { label: "Pending Review", value: "pending_review" },
@@ -64,6 +66,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
         {([
           { key: "applications", label: "Applications" },
           { key: "match", label: "Match Requests" },
+          { key: "sessions", label: "All Sessions" },
           { key: "tutors", label: "Tutors" },
           { key: "payouts", label: "Payouts" },
         ] as { key: Section; label: string }[]).map((s) => (
@@ -81,6 +84,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
 
       {token && section === "applications" && <ApplicationsSection token={token} />}
       {token && section === "match" && <MatchSection token={token} />}
+      {token && section === "sessions" && <SessionsSection token={token} />}
       {token && section === "tutors" && <TutorsSection token={token} />}
       {token && section === "payouts" && <PayoutsSection token={token} />}
     </ScrollView>
@@ -311,22 +315,31 @@ function MatchSection({ token }: { token: string }) {
       // through as a "valid" but nonsensical date that then crashed the
       // backend (datetime.fromisoformat can't parse what toISOString()
       // produces for a year that far out).
-      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(raw)) {
-        setError("Scheduled date/time must look like 2026-11-20 18:00");
+      const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(raw);
+      if (!match) {
+        setError("Scheduled date/time must look like 2026-11-20 18:00 (SAST)");
         return;
       }
-      const parsed = new Date(raw.replace(" ", "T"));
-      if (isNaN(parsed.getTime())) {
-        setError("Scheduled date/time must look like 2026-11-20 18:00");
+      // Entered as SAST (fixed UTC+2), same as SessionDateTimePicker - NOT
+      // new Date(string).toISOString(), which would parse this as the
+      // ADMIN'S OWN DEVICE timezone and silently shift it by however many
+      // hours that differs from SAST.
+      const [, y, mo, d, h, mi] = match.map(Number);
+      const utcMillis = Date.UTC(y, mo - 1, d, h - 2, mi, 0);
+      if (isNaN(utcMillis)) {
+        setError("Scheduled date/time must look like 2026-11-20 18:00 (SAST)");
         return;
       }
-      scheduled_at = parsed.toISOString();
+      scheduled_at = new Date(utcMillis).toISOString();
     }
     setBusyId(r.id);
     setError(null);
     try {
       await matchTutorToRequestAdmin(token, r.id, { tutor_id: tutorId, scheduled_at });
-      Alert.alert("Assigned!", "The learner can now pay to confirm the session.");
+      Alert.alert(
+        "Suggested!",
+        "The tutor needs to confirm in their app before anything is booked - nothing is final yet."
+      );
       setExpandedId(null);
       load();
     } catch (e) {
@@ -355,7 +368,9 @@ function MatchSection({ token }: { token: string }) {
                   {r.topic ? ` (${r.topic})` : ""} — R{r.price_zar} ({r.duration_minutes} min)
                 </Text>
                 {r.scheduled_at ? (
-                  <Text style={styles.cardSubtitle}>Requested: {new Date(r.scheduled_at).toLocaleString()}</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Requested: {new Date(r.scheduled_at).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" })}
+                  </Text>
                 ) : null}
                 {r.preferred_times_note ? (
                   <Text style={styles.cardSubtitle}>{r.preferred_times_note}</Text>
@@ -376,7 +391,7 @@ function MatchSection({ token }: { token: string }) {
                         value={selectedTutor[r.id] != null ? String(selectedTutor[r.id]) : null}
                         onChange={(v) => setSelectedTutor((prev) => ({ ...prev, [r.id]: parseInt(v, 10) }))}
                       />
-                      <Text style={styles.label}>Scheduled date/time (optional)</Text>
+                      <Text style={styles.label}>Propose a different date/time (optional, SAST)</Text>
                       <TextInput
                         style={styles.input}
                         value={scheduledAt[r.id] || ""}
@@ -391,7 +406,7 @@ function MatchSection({ token }: { token: string }) {
                         {busyId === r.id ? (
                           <ActivityIndicator color="#fff" />
                         ) : (
-                          <Text style={styles.approveButtonText}>Force-Assign Tutor</Text>
+                          <Text style={styles.approveButtonText}>Suggest This Tutor</Text>
                         )}
                       </Pressable>
                     </>
@@ -480,7 +495,9 @@ function TutorsSection({ token }: { token: string }) {
                       ) : (
                         profile.sessions.map((sess) => {
                           const when = sess.scheduled_at || sess.created_at;
-                          const whenStr = when ? new Date(when).toLocaleDateString("en-ZA") : "—";
+                          const whenStr = when
+                            ? new Date(when).toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" })
+                            : "—";
                           return (
                             <Text key={sess.id} style={styles.detailLine}>
                               • {sess.subject}
@@ -565,6 +582,81 @@ function PayoutsSection({ token }: { token: string }) {
   );
 }
 
+function SessionsSection({ token }: { token: string }) {
+  const [filter, setFilter] = useState<"upcoming" | "completed" | "all">("upcoming");
+  const [sessions, setSessions] = useState<AdminTutoringSession[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setSessions(null);
+    fetchAllTutoringSessionsAdmin(token, filter)
+      .then((res) => setSessions(res.sessions))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load sessions."));
+  }, [token, filter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <View>
+      <View style={styles.sectionRow}>
+        {(["upcoming", "completed", "all"] as const).map((f) => (
+          <Pressable
+            key={f}
+            style={[styles.sectionChip, filter === f && styles.sectionChipActive]}
+            onPress={() => setFilter(f)}
+          >
+            <Text style={[styles.sectionChipText, filter === f && styles.sectionChipTextActive]}>
+              {f === "upcoming" ? "Upcoming" : f === "completed" ? "Completed" : "All"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!sessions ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      ) : sessions.length === 0 ? (
+        <Text style={styles.empty}>No sessions to show.</Text>
+      ) : (
+        sessions.map((s) => (
+          <View key={s.id} style={styles.card}>
+            <Text style={styles.cardTitle}>
+              {s.subject}
+              {s.topic ? ` (${s.topic})` : ""} — {s.status_label}
+            </Text>
+            <Text style={styles.cardSubtitle}>Learner: {s.learner_name} ({s.learner_email})</Text>
+            <Text style={styles.cardSubtitle}>Tutor: {s.tutor_name} ({s.tutor_email})</Text>
+            <Text style={styles.detailLine}>
+              {s.scheduled_at
+                ? new Date(s.scheduled_at).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" })
+                : "—"}
+              {s.duration_minutes ? ` · ${s.duration_minutes} min` : ""}
+            </Text>
+            {s.price_zar != null ? (
+              <Text style={styles.detailLine}>
+                R{s.price_zar.toFixed(2)}
+                {s.platform_cut_percent != null ? ` · Malita's cut: ${s.platform_cut_percent.toFixed(0)}%` : ""}
+              </Text>
+            ) : null}
+            {s.meet_link ? (
+              <Pressable onPress={() => Linking.openURL(s.meet_link!)}>
+                <Text style={styles.cardLink}>🎥 Open Google Meet link</Text>
+              </Pressable>
+            ) : null}
+            {s.learner_rating != null ? (
+              <Text style={styles.detailLine}>Learner rated: {s.learner_rating}/5</Text>
+            ) : null}
+            {s.tutor_rating != null ? (
+              <Text style={styles.detailLine}>Tutor rated: {s.tutor_rating}/5</Text>
+            ) : null}
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
@@ -605,6 +697,7 @@ const styles = StyleSheet.create({
   cardSubtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
   cardDetail: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   detailLine: { fontSize: 13, color: colors.text, marginTop: 4 },
+  cardLink: { color: colors.primary, fontWeight: "700", fontSize: 13, marginTop: 8 },
   detailLabel: { fontSize: 13, fontWeight: "700", color: colors.text, marginTop: 10 },
   docButton: { marginTop: 8, alignSelf: "flex-start" },
   docButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },

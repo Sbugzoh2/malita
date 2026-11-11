@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Text,
   TextInput,
@@ -11,7 +11,11 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors, SUBJECTS, Subject } from "../theme";
-import { ApiError, requestTutoringSession } from "../api/client";
+import {
+  ApiError, requestTutoringSession,
+  Institution, Qualification, CatalogModule,
+  fetchInstitutions, fetchQualifications, fetchModules,
+} from "../api/client";
 import Dropdown from "../components/Dropdown";
 import SessionDateTimePicker, {
   SessionDateTimeValue,
@@ -21,8 +25,18 @@ import SessionDateTimePicker, {
 const MIN_DURATION_MINUTES = 60;
 
 export default function RequestTutorScreen({ navigation }: any) {
-  const { token } = useAuth();
+  const { token, me } = useAuth();
+  const isHigherEd = me?.user.account_type === "higher_ed";
+
   const [subject, setSubject] = useState<Subject>("Mathematics");
+
+  const [institutions, setInstitutions] = useState<Institution[]>([]);
+  const [institutionId, setInstitutionId] = useState<number | null>(null);
+  const [qualifications, setQualifications] = useState<Qualification[]>([]);
+  const [qualificationId, setQualificationId] = useState<number | null>(null);
+  const [modules, setModules] = useState<CatalogModule[]>([]);
+  const [moduleId, setModuleId] = useState<number | null>(null);
+
   const [price, setPrice] = useState("");
   const [duration, setDuration] = useState("60");
   const [dateTime, setDateTime] = useState<SessionDateTimeValue>(null);
@@ -30,6 +44,40 @@ export default function RequestTutorScreen({ navigation }: any) {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isHigherEd) return;
+    fetchInstitutions()
+      .then((res) => {
+        setInstitutions(res.institutions);
+        if (me?.user.higher_ed_institution_id) setInstitutionId(me.user.higher_ed_institution_id);
+      })
+      .catch(() => setError("Could not load the list of institutions."));
+  }, [isHigherEd]);
+
+  useEffect(() => {
+    setQualificationId(null);
+    setModules([]);
+    setModuleId(null);
+    if (!institutionId) {
+      setQualifications([]);
+      return;
+    }
+    fetchQualifications(institutionId)
+      .then((res) => setQualifications(res.qualifications))
+      .catch(() => setError("Could not load qualifications for that institution."));
+  }, [institutionId]);
+
+  useEffect(() => {
+    setModuleId(null);
+    if (!qualificationId) {
+      setModules([]);
+      return;
+    }
+    fetchModules(qualificationId)
+      .then((res) => setModules(res.modules))
+      .catch(() => setError("Could not load modules for that qualification."));
+  }, [qualificationId]);
 
   async function handleSubmit() {
     if (!token) return;
@@ -47,11 +95,16 @@ export default function RequestTutorScreen({ navigation }: any) {
       setError("Please select a date and time for your session.");
       return;
     }
+    if (isHigherEd && !moduleId) {
+      setError("Please select the module you'd like help with.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       await requestTutoringSession(token, {
-        subject,
+        subject: isHigherEd ? undefined : subject,
+        module_id: isHigherEd ? moduleId! : undefined,
         price_zar: priceVal,
         scheduled_at: sessionDateTimeToIso(dateTime),
         duration_minutes: durationVal,
@@ -82,12 +135,35 @@ export default function RequestTutorScreen({ navigation }: any) {
           <Text style={styles.myRequestsLinkText}>View my existing requests ›</Text>
         </Pressable>
 
-        <Dropdown
-          label="Subject"
-          options={SUBJECTS.map((s) => ({ label: s, value: s }))}
-          value={subject}
-          onChange={(v) => setSubject(v as Subject)}
-        />
+        {isHigherEd ? (
+          <>
+            <Dropdown
+              label="Institution"
+              options={institutions.map((i) => ({ label: i.name, value: String(i.id) }))}
+              value={institutionId != null ? String(institutionId) : null}
+              onChange={(v) => setInstitutionId(parseInt(v, 10))}
+            />
+            <Dropdown
+              label="Qualification"
+              options={qualifications.map((q) => ({ label: q.name, value: String(q.id) }))}
+              value={qualificationId != null ? String(qualificationId) : null}
+              onChange={(v) => setQualificationId(parseInt(v, 10))}
+            />
+            <Dropdown
+              label="Module"
+              options={modules.map((m) => ({ label: `${m.name} (${m.year_level_label})`, value: String(m.id) }))}
+              value={moduleId != null ? String(moduleId) : null}
+              onChange={(v) => setModuleId(parseInt(v, 10))}
+            />
+          </>
+        ) : (
+          <Dropdown
+            label="Subject"
+            options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+            value={subject}
+            onChange={(v) => setSubject(v as Subject)}
+          />
+        )}
 
         <Text style={styles.label}>What are you willing to pay? (R)</Text>
         <TextInput
@@ -137,8 +213,8 @@ export default function RequestTutorScreen({ navigation }: any) {
         </Pressable>
 
         <Text style={styles.note}>
-          Your request goes straight to tutors who teach this subject - once one accepts your
-          price and time (or proposes a different time for you to approve), you'll be asked to
+          Your request goes straight to tutors who teach this {isHigherEd ? "module" : "subject"} - once one
+          accepts your price and time (or proposes a different time for you to approve), you'll be asked to
           pay securely before the session is confirmed.
         </Text>
       </ScrollView>

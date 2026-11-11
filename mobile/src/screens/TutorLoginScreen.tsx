@@ -9,17 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Linking,
 } from "react-native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
 import { ApiError, tutorForgotPassword, tutorResetPassword } from "../api/client";
-
-// Applying to tutor happens on a public web form, not in the app itself
-// (it needs file uploads for ID/matric/CV documents) - this is the one
-// place a prospective tutor would land without already having an
-// account, so it's the one place that needs to point them there.
-const APPLY_URL = "https://malitatech.co.za/apply-to-tutor.html";
 
 export default function TutorLoginScreen({ navigation }: any) {
   const { login } = useTutorAuth();
@@ -201,7 +194,7 @@ export default function TutorLoginScreen({ navigation }: any) {
           ) : null}
         </View>
 
-        <Pressable onPress={() => Linking.openURL(APPLY_URL)} style={styles.linkButton}>
+        <Pressable onPress={() => navigation.navigate("TutorApply")} style={styles.linkButton}>
           <Text style={styles.link}>Not a tutor yet? Apply here</Text>
         </Pressable>
 

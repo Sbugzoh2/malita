@@ -85,7 +85,7 @@ function AppNavigator() {
         headerTintColor: colors.primary,
       }}
     >
-      <AppStack.Screen name="Home" component={HomeScreen} options={{ title: "Malita" }} />
+      <AppStack.Screen name="Home" component={HomeScreen} options={{ title: "Malita Learner" }} />
       <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
       <AppStack.Screen name="BrowseTutors" component={BrowseTutorsScreen} options={{ title: "Browse Tutors" }} />
       <AppStack.Screen

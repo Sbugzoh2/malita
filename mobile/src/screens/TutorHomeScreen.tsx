@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, View, Text, Pressable, TextInput, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
+import { Alert, View, Text, Pressable, TextInput, StyleSheet, ScrollView, ActivityIndicator, Linking, Image } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
@@ -254,11 +254,22 @@ export default function TutorHomeScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>🙋 Welcome, {me.name.split(" ")[0]}!</Text>
-      <Text style={[styles.statusBadge, { color: STATUS_COLOR[me.status] ?? colors.text }]}>
-        {me.status_label}
-      </Text>
+      <View style={styles.hero}>
+        <Image
+          source={require("../../assets/hero-student.png")}
+          style={styles.heroImage}
+          resizeMode="cover"
+        />
+        <View style={styles.heroScrim} />
+        <View style={styles.heroContent}>
+          <Text style={styles.heroGreeting}>🙋 Welcome, {me.name.split(" ")[0]}!</Text>
+          <View style={[styles.statusBadgePill, { backgroundColor: STATUS_COLOR[me.status] ?? colors.primary }]}>
+            <Text style={styles.statusBadgeText}>{me.status_label}</Text>
+          </View>
+        </View>
+      </View>
 
+      <View style={styles.body}>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {me.status !== "approved" ? (
@@ -602,15 +613,35 @@ export default function TutorHomeScreen() {
       <Pressable style={styles.logoutButton} onPress={logout}>
         <Text style={styles.logoutText}>Log Out</Text>
       </Pressable>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
-  title: { fontSize: 24, fontWeight: "700", color: colors.text },
-  statusBadge: { fontSize: 14, fontWeight: "700", marginTop: 6, marginBottom: 16 },
+  container: { backgroundColor: colors.background, flexGrow: 1 },
+  body: { padding: 20, paddingBottom: 40 },
+  hero: { height: 160, position: "relative" },
+  heroImage: { width: "100%", height: "100%" },
+  heroScrim: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(11,11,11,0.45)",
+  },
+  heroContent: { position: "absolute", left: 20, right: 20, bottom: 18 },
+  heroGreeting: { fontSize: 22, fontWeight: "700", color: "#fff" },
+  statusBadgePill: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+  statusBadgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 16 },
   // flexWrap so a 4th+ chip (e.g. the inner Active/Completed/Cancelled/

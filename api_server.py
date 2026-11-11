@@ -106,7 +106,19 @@ APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
 # This service's own public URL - needed so PayFast's mobile checkout can
 # redirect back to a real https page (see /billing/return below).
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8002")
+# Never set explicitly in render.yaml or documented in .env.example -
+# nobody configuring the deployed malita-api service was ever told this
+# variable existed, so it's been silently falling back to
+# "http://localhost:8002" in production ever since /billing/return (the
+# PayFast return_url/cancel_url bridge page) was introduced. Every
+# checkout since then has been handing PayFast an unreachable,
+# non-https return_url/cancel_url - which fits "every payment has
+# errored ever since" far better than a one-off regression would.
+# RENDER_EXTERNAL_URL is set automatically by Render for every web
+# service (no manual config needed) with its real public https URL, so
+# prefer that over the localhost default when API_BASE_URL itself isn't
+# explicitly set.
+API_BASE_URL = os.environ.get("API_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8002")
 
 # One backend serves BOTH mobile apps (see mobile/app.config.js) - a
 # high_school account is only ever holding the "Malita" app (scheme

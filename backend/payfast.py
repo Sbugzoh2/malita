@@ -111,6 +111,20 @@ def build_checkout_payload(
     if custom_fields:
         data.update(custom_fields)
 
+    # Strip every value BEFORE signing, not just when building the
+    # signature string - generate_signature/_payfast_urlencode already
+    # strip internally, but build_checkout_page_html/_hidden_fields_html
+    # submit this same `data` dict's raw values as the actual POST form
+    # fields. A stray leading/trailing space or newline in an env var
+    # (merchant_id/merchant_key pasted into a dashboard, say) would
+    # otherwise sign one (stripped) value but submit a different
+    # (unstripped) one - PayFast recomputes the signature from what it
+    # actually received, gets a mismatch, and its backend has been seen
+    # throwing a raw 500 instead of a clean "invalid signature" error.
+    # Stripping here, once, before signing keeps signed and submitted
+    # values identical no matter what.
+    data = {k: (v.strip() if isinstance(v, str) else v) for k, v in data.items()}
+
     # Signature MUST be generated last, once every field we're actually
     # sending (including custom_str1/2 etc.) is already in the dict —
     # otherwise PayFast will compute a different signature than we did and

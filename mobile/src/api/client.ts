@@ -113,6 +113,20 @@ export function addModuleAdmin(token: string, qualificationId: number, name: str
   });
 }
 
+export type CatalogSeedResult = {
+  created: { institutions: number; qualifications: number; modules: number };
+  skipped: { institutions: number; qualifications: number; modules: number };
+};
+
+// One-click starter catalog (SA's 26 public universities with a generic
+// qualification/module set) instead of adding institutions/qualifications/
+// modules one at a time - see backend/tutoring.py's
+// seed_default_higher_ed_catalog for exactly what this is and isn't.
+// Idempotent - safe to tap more than once.
+export function seedDefaultCatalog(token: string) {
+  return request<CatalogSeedResult>("/admin/catalog/seed-default", { method: "POST", token });
+}
+
 export type MeResponse = {
   user: UserInfo;
   is_admin: boolean;

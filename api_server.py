@@ -84,7 +84,7 @@ from backend.tutoring import (
     list_tutor_own_payouts, create_tutor_password_reset, reset_tutor_password,
     DEFAULT_PLATFORM_CUT_PERCENT,
     list_institutions, add_institution, list_qualifications, add_qualification,
-    list_modules, add_module,
+    list_modules, add_module, seed_default_higher_ed_catalog,
     list_tutor_higher_ed_applications, approve_tutor_higher_ed, reject_tutor_higher_ed,
     edit_tutoring_request, withdraw_tutoring_request, cancel_accepted_session,
     send_due_reminders, submit_session_recording,
@@ -106,6 +106,13 @@ APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfa
 # This service's own public URL - needed so PayFast's mobile checkout can
 # redirect back to a real https page (see /billing/return below).
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8002")
+
+# One backend serves BOTH mobile apps (see mobile/app.config.js) - a
+# high_school account is only ever holding the "Malita" app (scheme
+# "malita") and a higher_ed account is only ever holding "Malita Campus"
+# (scheme "malitacampus"), so /billing/return (below) needs to know which
+# one to hand the PayFast redirect back to.
+SCHEME_BY_ACCOUNT_TYPE = {"high_school": "malita", "higher_ed": "malitacampus"}
 
 app = FastAPI(title="Malita API")
 init_db()
@@ -660,8 +667,8 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
         # deep link - PayFast rejects a non-http(s) return_url/cancel_url
         # outright ("invalid url format"), so the bridge page is what
         # actually forwards the browser into the mobile app afterward.
-        return_url=f"{API_BASE_URL}/billing/return?status=upgraded",
-        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled",
+        return_url=f"{API_BASE_URL}/billing/return?status=upgraded&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}",
+        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}",
         notify_url=APP_WEBHOOK_URL,
         recurring=True,
         recurring_amount=cfg["price_zar"],
@@ -673,25 +680,31 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
 
 
 @app.get("/billing/return", response_class=HTMLResponse)
-def billing_return(status: str = "upgraded", target: str = "billing"):
+def billing_return(status: str = "upgraded", target: str = "billing", scheme: str = "malita"):
     """Bridge page for PayFast's mobile return_url/cancel_url. PayFast
-    requires a real http(s) URL and rejects a bare malita:// deep link
-    outright ("invalid url format") - this page is what PayFast actually
-    redirects the phone's browser to, and it then forwards the browser
-    into the mobile app via that same deep link once it loads (the OS
-    only resolves a custom-scheme navigation triggered from a real
-    webpage, not from PayFast's own server-side redirect chain).
+    requires a real http(s) URL and rejects a bare custom-scheme deep
+    link outright ("invalid url format") - this page is what PayFast
+    actually redirects the phone's browser to, and it then forwards the
+    browser into the mobile app via that same deep link once it loads
+    (the OS only resolves a custom-scheme navigation triggered from a
+    real webpage, not from PayFast's own server-side redirect chain).
+
+    `scheme` picks WHICH app to hand back to - "malita" (default, the
+    Grade 12 app) or "malitacampus" (the Campus/tutoring app - see
+    SCHEME_BY_ACCOUNT_TYPE above and mobile/app.config.js). Not
+    validated against a fixed list for the same reason `target` isn't -
+    an unknown scheme just means the OS has nothing registered for it
+    and the redirect silently goes nowhere, which is a no-op, not a
+    broken payment (the payment itself already went through PayFast's
+    webhook independently of this bridge page).
 
     `target` picks which deep-linked screen to return to (see
     RootNavigator's linking config) - "billing" (default, the
     Subscription screen) for a subscription checkout, "tutoring" (the My
-    Tutoring Requests screen) for a tutoring-session checkout. Not
-    validated against a fixed list since an unknown target just means
-    the OS's deep-link resolution silently falls through to the default
-    screen - no harm in a typo here, unlike a wrong value reaching PayFast."""
+    Tutoring Requests screen) for a tutoring-session checkout."""
     if status not in ("upgraded", "cancelled"):
         status = "upgraded"
-    app_url = f"malita://{target}?{status}=1"
+    app_url = f"{scheme}://{target}?{status}=1"
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Returning to Malita…</title></head>
 <body onload='window.location.href = {json.dumps(app_url)};'>
@@ -1588,8 +1601,8 @@ def tutoring_checkout_page(request_id: int, authorization: str = Header(None), t
         item_name=f"Malita Tutoring Session: {req['subject']}",
         name_first=user["name"].split(" ")[0],
         email_address=user["email"],
-        return_url=f"{API_BASE_URL}/billing/return?status=upgraded&target=tutoring",
-        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled&target=tutoring",
+        return_url=f"{API_BASE_URL}/billing/return?status=upgraded&target=tutoring&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}",
+        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled&target=tutoring&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}",
         notify_url=APP_WEBHOOK_URL,
         recurring=False,
         custom_fields={"custom_str1": "tutoring_session", "custom_str2": str(req["id"])},
@@ -1722,6 +1735,18 @@ def admin_catalog_add_module(payload: CatalogModuleRequest, authorization: str =
         return add_module(payload.qualification_id, payload.name, payload.year_level)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/catalog/seed-default")
+def admin_catalog_seed_default(authorization: str = Header(None)):
+    """One-click starter catalog (South Africa's 26 public universities,
+    each with a generic qualification/module set - see
+    seed_default_higher_ed_catalog's docstring for exactly what this is
+    and isn't). Idempotent - safe to call more than once."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return seed_default_higher_ed_catalog()
 
 
 @app.get("/admin/tutoring/tutors")

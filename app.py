@@ -62,7 +62,7 @@ from backend.tutoring import (
     list_pending_payouts, mark_payout_paid, get_tutor_document_url,
     get_tutor_profile, TUTOR_STATUS_LABELS, list_all_tutoring_sessions,
     list_institutions, add_institution, list_qualifications, add_qualification,
-    list_modules, add_module, list_tutor_higher_ed_applications,
+    list_modules, add_module, seed_default_higher_ed_catalog, list_tutor_higher_ed_applications,
     approve_tutor_higher_ed, reject_tutor_higher_ed, list_learner_requests,
 )
 
@@ -2092,9 +2092,39 @@ elif mode == "🛠️ Tutoring Admin":
                                     st.rerun()
 
         # ---- Higher-ed catalog management (admin-managed, see
-        # backend/tutoring.py's catalog docstring - deliberately no
-        # pre-populated institution list, and no edit/delete in v1) ----
+        # backend/tutoring.py's catalog docstring - no edit/delete in v1).
+        # The catalog starts empty by design; the seed button below is an
+        # opt-in convenience (South Africa's 26 public universities with a
+        # GENERIC qualification/module set, not each one's real official
+        # curriculum - see seed_default_higher_ed_catalog's docstring) so
+        # an admin isn't stuck typing in institutions one at a time. ----
         with tab_catalog:
+            if st.button("🌱 Seed SA Universities (starter catalog)"):
+                st.session_state["_confirm_seed_catalog"] = True
+            if st.session_state.get("_confirm_seed_catalog"):
+                st.warning(
+                    "Adds South Africa's 26 public universities with a generic "
+                    "BSc/BCom/BA/BEd (+ BEng/BEngTech where applicable) qualification "
+                    "and module set - a starting point to edit/extend, not each "
+                    "university's actual official curriculum. Safe to run again later; "
+                    "existing entries are never duplicated."
+                )
+                col_confirm, col_cancel = st.columns(2)
+                if col_confirm.button("Seed It", key="confirm_seed_catalog_btn"):
+                    result = seed_default_higher_ed_catalog()
+                    st.session_state["_confirm_seed_catalog"] = False
+                    c = result["created"]
+                    s = result["skipped"]
+                    st.success(
+                        f"Added {c['institutions']} institution(s), {c['qualifications']} qualification(s), "
+                        f"{c['modules']} module(s). Already there: {s['institutions']} institution(s), "
+                        f"{s['qualifications']} qualification(s), {s['modules']} module(s)."
+                    )
+                    st.rerun()
+                if col_cancel.button("Cancel", key="cancel_seed_catalog_btn"):
+                    st.session_state["_confirm_seed_catalog"] = False
+                    st.rerun()
+
             st.markdown("#### Institutions")
             institutions = list_institutions()
             for i in institutions:

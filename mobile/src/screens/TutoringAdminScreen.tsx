@@ -44,6 +44,7 @@ import {
   addInstitutionAdmin,
   addQualificationAdmin,
   addModuleAdmin,
+  seedDefaultCatalog,
   YEAR_LEVEL_LABELS,
   API_BASE_URL,
 } from "../api/client";
@@ -498,6 +499,8 @@ function CatalogSection({ token }: { token: string }) {
   const [modules, setModules] = useState<CatalogModule[]>([]);
   const [newModuleName, setNewModuleName] = useState("");
   const [newModuleYear, setNewModuleYear] = useState<number>(1);
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<string | null>(null);
 
   const loadInstitutions = useCallback(() => {
     fetchInstitutions()
@@ -555,6 +558,39 @@ function CatalogSection({ token }: { token: string }) {
     }
   }
 
+  async function handleSeedDefaultCatalog() {
+    setError(null);
+    setSeedResult(null);
+    setSeeding(true);
+    try {
+      const res = await seedDefaultCatalog(token);
+      setSeedResult(
+        `Added ${res.created.institutions} institution(s), ${res.created.qualifications} qualification(s), ` +
+          `${res.created.modules} module(s). Already there: ${res.skipped.institutions} institution(s), ` +
+          `${res.skipped.qualifications} qualification(s), ${res.skipped.modules} module(s).`
+      );
+      loadInstitutions();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not seed the default catalog.");
+    } finally {
+      setSeeding(false);
+    }
+  }
+
+  function confirmSeedDefaultCatalog() {
+    Alert.alert(
+      "Seed starter catalog?",
+      "Adds South Africa's 26 public universities with a generic BSc/BCom/BA/BEd " +
+        "(+ BEng/BEngTech where applicable) qualification and module set - a starting " +
+        "point to edit/extend, not each university's actual official curriculum. " +
+        "Safe to run again later; existing entries are never duplicated.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Seed It", onPress: handleSeedDefaultCatalog },
+      ]
+    );
+  }
+
   async function handleAddQualification() {
     setError(null);
     if (!qualInstitutionId) {
@@ -596,6 +632,19 @@ function CatalogSection({ token }: { token: string }) {
   return (
     <View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Pressable
+        style={[styles.seedButton, seeding && styles.buttonDisabled]}
+        onPress={confirmSeedDefaultCatalog}
+        disabled={seeding}
+      >
+        {seeding ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          <Text style={styles.seedButtonText}>🌱 Seed SA Universities (starter catalog)</Text>
+        )}
+      </Pressable>
+      {seedResult ? <Text style={styles.seedResultText}>{seedResult}</Text> : null}
 
       <Text style={styles.sectionTitle}>Institutions</Text>
       {institutions.map((i) => (
@@ -1087,6 +1136,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   connectCalendarButtonText: { color: colors.primary, fontWeight: "700", fontSize: 12 },
+  seedButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  buttonDisabled: { opacity: 0.6 },
+  seedButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
+  seedResultText: { fontSize: 12, color: colors.textSecondary, marginBottom: 16, lineHeight: 17 },
   sectionRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 16 },
   sectionChip: {
     borderWidth: 1,

@@ -613,7 +613,12 @@ const styles = StyleSheet.create({
   statusBadge: { fontSize: 14, fontWeight: "700", marginTop: 6, marginBottom: 16 },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 16 },
-  sectionRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  // flexWrap so a 4th+ chip (e.g. the inner Active/Completed/Cancelled/
+  // Lapsed tabs) wraps to a second line instead of being clipped off the
+  // right edge of the screen - this row is reused for both the outer
+  // Open Requests/My Sessions/My Payouts tabs (3 chips, never wraps) and
+  // the inner session-status tabs (4 chips, needs to wrap).
+  sectionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
   sectionChip: {
     borderWidth: 1,
     borderColor: colors.border,

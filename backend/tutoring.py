@@ -404,6 +404,155 @@ def add_module(qualification_id: int, name: str, year_level: int) -> dict:
         }
 
 
+# ---------------------------------------------------------------------------
+# A starter higher-ed catalog, for an admin to seed in one click (see
+# seed_default_higher_ed_catalog) instead of typing in 26 institutions and
+# hundreds of modules by hand. IMPORTANT - what this is and isn't:
+#   - DEFAULT_SA_UNIVERSITIES is South Africa's actual, stable list of 26
+#     public universities - that part is factual.
+#   - The qualifications/modules below are a GENERIC, broadly-applicable
+#     starter set (the same common first/second/third-year subject names
+#     most SA science/commerce/arts/education degrees share), NOT each
+#     university's real, official curriculum pulled from DHET or the
+#     institution itself - no such authoritative source was used. They
+#     exist so the catalog is immediately usable; an admin is expected to
+#     refine/add to them over time via the normal add_institution/
+#     add_qualification/add_module functions above, same as any
+#     admin-entered row.
+#   - TVET and private colleges are deliberately NOT included - that list
+#     is far larger, less stable (frequent mergers/renames), and admins
+#     can add any of those the same one-at-a-time way if/when a tutor or
+#     learner from one actually signs up.
+# ---------------------------------------------------------------------------
+DEFAULT_SA_UNIVERSITIES = [
+    "University of Cape Town", "University of the Witwatersrand", "Stellenbosch University",
+    "University of Pretoria", "University of KwaZulu-Natal", "Rhodes University",
+    "University of Johannesburg", "University of South Africa", "University of the Western Cape",
+    "North-West University", "University of the Free State", "University of Fort Hare",
+    "University of Limpopo", "University of Mpumalanga", "Sefako Makgatho Health Sciences University",
+    "Sol Plaatje University", "Tshwane University of Technology", "Cape Peninsula University of Technology",
+    "Durban University of Technology", "Mangosuthu University of Technology", "Vaal University of Technology",
+    "Central University of Technology", "University of Zululand", "University of Venda",
+    "Walter Sisulu University", "Nelson Mandela University",
+]
+
+# Universities of Technology get a Diploma/BEngTech track (see below)
+# instead of a traditional BEng, reflecting their actual institutional
+# character rather than the research-university engineering model.
+_UNIVERSITIES_OF_TECHNOLOGY = {
+    "Tshwane University of Technology", "Cape Peninsula University of Technology",
+    "Durban University of Technology", "Mangosuthu University of Technology",
+    "Vaal University of Technology", "Central University of Technology",
+}
+# A curated subset with well-established traditional engineering faculties
+# - deliberately NOT applied to all 26, to avoid implying every university
+# offers a BEng.
+_BENG_UNIVERSITIES = {
+    "University of Cape Town", "University of the Witwatersrand", "Stellenbosch University",
+    "University of Pretoria", "University of KwaZulu-Natal", "University of Johannesburg",
+    "North-West University", "Nelson Mandela University", "University of the Free State",
+}
+
+# qualification name -> [(module name, year_level), ...]. Applied to every
+# university in DEFAULT_SA_UNIVERSITIES unless noted otherwise above.
+_COMMON_QUALIFICATION_MODULES: dict[str, list[tuple[str, int]]] = {
+    "Bachelor of Science (BSc)": [
+        ("Mathematics 1A", 1), ("Mathematics 1B", 1), ("Physics 1A", 1),
+        ("Chemistry 1A", 1), ("Computer Science 1A", 1), ("Statistics 1A", 1),
+        ("Calculus II", 2), ("Linear Algebra II", 2), ("Classical Mechanics", 2),
+        ("Data Structures & Algorithms", 2), ("Organic Chemistry", 2),
+        ("Real Analysis", 3), ("Abstract Algebra", 3), ("Quantum Mechanics", 3),
+        ("Machine Learning", 3), ("Differential Equations", 3),
+    ],
+    "Bachelor of Commerce (BCom)": [
+        ("Financial Accounting 1A", 1), ("Microeconomics 1A", 1), ("Macroeconomics 1A", 1),
+        ("Business Management 1A", 1), ("Statistics for Commerce 1A", 1),
+        ("Financial Accounting II", 2), ("Cost & Management Accounting", 2),
+        ("Corporate Finance", 2), ("Business Law", 2),
+        ("Financial Accounting III", 3), ("Taxation", 3), ("Auditing", 3),
+        ("Strategic Management", 3),
+    ],
+    "Bachelor of Arts (BA)": [
+        ("English 1A", 1), ("Psychology 1A", 1), ("Sociology 1A", 1),
+        ("Philosophy 1A", 1), ("History 1A", 1),
+        ("Psychology II", 2), ("Sociology II", 2), ("Political Studies", 2),
+        ("Psychology III", 3), ("Industrial Psychology", 3), ("Media Studies", 3),
+    ],
+    "Bachelor of Education (BEd)": [
+        ("Education Studies 1A", 1), ("Curriculum Studies 1A", 1), ("Child & Adolescent Development", 1),
+        ("Education Studies II", 2), ("Subject Didactics", 2),
+        ("Education Studies III", 3), ("Inclusive Education", 3),
+        ("Work-Integrated Learning (Teaching Practice)", 4),
+    ],
+}
+_BENG_MODULES: list[tuple[str, int]] = [
+    ("Engineering Mathematics 1A", 1), ("Engineering Mechanics (Statics)", 1),
+    ("Introduction to Programming for Engineers", 1),
+    ("Engineering Mathematics II", 2), ("Thermodynamics", 2), ("Electrical Circuits", 2),
+    ("Fluid Mechanics", 3), ("Structural Analysis", 3), ("Control Systems", 3),
+    ("Final Year Design Project", 4),
+]
+_BENGTECH_MODULES: list[tuple[str, int]] = [
+    ("Engineering Mathematics I", 1), ("Engineering Science I", 1), ("Technical Communication", 1),
+    ("Engineering Mathematics II", 2), ("Strength of Materials", 2),
+    ("Engineering Design Project", 3), ("Industrial Practice (WIL)", 3),
+]
+
+
+def seed_default_higher_ed_catalog() -> dict:
+    """One-click starter data for an otherwise-empty higher-ed catalog -
+    see the big comment above DEFAULT_SA_UNIVERSITIES for exactly what
+    this is (South Africa's real 26 public universities) and isn't (each
+    one's actual official curriculum). Idempotent: safe to run more than
+    once - anything whose name already exists (by the same uniqueness
+    rule add_institution/add_qualification/add_module already enforce)
+    is skipped, not duplicated. Runs as ONE transaction (unlike calling
+    add_institution/add_qualification/add_module in a loop, which would
+    be ~1,500 separate commits) since this can insert well over a
+    thousand rows in one go."""
+    created = {"institutions": 0, "qualifications": 0, "modules": 0}
+    skipped = {"institutions": 0, "qualifications": 0, "modules": 0}
+    with get_session() as db:
+        for uni_name in DEFAULT_SA_UNIVERSITIES:
+            inst = db.query(Institution).filter(Institution.name == uni_name).first()
+            if inst:
+                skipped["institutions"] += 1
+            else:
+                inst = Institution(name=uni_name)
+                db.add(inst)
+                db.flush()
+                created["institutions"] += 1
+
+            quals_for_this_uni = dict(_COMMON_QUALIFICATION_MODULES)
+            if uni_name in _BENG_UNIVERSITIES:
+                quals_for_this_uni["Bachelor of Engineering (BEng)"] = _BENG_MODULES
+            if uni_name in _UNIVERSITIES_OF_TECHNOLOGY:
+                quals_for_this_uni["Bachelor of Engineering Technology (BEngTech)"] = _BENGTECH_MODULES
+
+            for qual_name, modules in quals_for_this_uni.items():
+                qual = db.query(Qualification).filter(
+                    Qualification.institution_id == inst.id, Qualification.name == qual_name,
+                ).first()
+                if qual:
+                    skipped["qualifications"] += 1
+                else:
+                    qual = Qualification(institution_id=inst.id, name=qual_name)
+                    db.add(qual)
+                    db.flush()
+                    created["qualifications"] += 1
+
+                for mod_name, year_level in modules:
+                    existing_mod = db.query(Module).filter(
+                        Module.qualification_id == qual.id, Module.name == mod_name,
+                    ).first()
+                    if existing_mod:
+                        skipped["modules"] += 1
+                    else:
+                        db.add(Module(qualification_id=qual.id, name=mod_name, year_level=year_level))
+                        created["modules"] += 1
+    return {"created": created, "skipped": skipped}
+
+
 def apply_as_tutor(
     *, name: str, email: str, password: str, phone: str = "", bio: str = "",
     id_number: str = "", id_verification_note: str = "",

@@ -160,6 +160,22 @@ def _format_sast(d: dt.datetime | None) -> str:
     return (d + dt.timedelta(hours=2)).strftime("%A, %d %B %Y at %H:%M") + " SAST"
 
 
+def _iso_utc(d: dt.datetime | None) -> str | None:
+    """Every datetime column here is naive (no tzinfo) but genuinely
+    holds UTC - FastAPI's default JSON encoder calls plain .isoformat()
+    on that with no 'Z'/offset suffix, and a timezone-less ISO string is
+    parsed as LOCAL time by JavaScript's `new Date(...)` on the client,
+    not UTC. On a South African phone (Africa/Johannesburg, UTC+2) that
+    silently shifted every scheduled_at/proposed_scheduled_at back by
+    exactly 2 hours client-side, on top of the app's own correct SAST
+    display math - reproducing as "the time shows 2 hours behind what
+    was selected" even though the encode/decode math on both ends was
+    individually correct. Append the 'Z' explicitly on every datetime
+    this module hands back to a client, here, rather than relying on
+    FastAPI's default encoder to get it right."""
+    return d.isoformat() + "Z" if d else None
+
+
 class TutoringError(Exception):
     pass
 
@@ -294,7 +310,7 @@ def list_tutor_own_payouts(tutor_id: int) -> list[dict]:
                 "id": p.id, "session_id": p.session_id,
                 "amount_zar": p.amount_zar, "status": p.status,
                 "payment_reference": p.payment_reference,
-                "created_at": p.created_at, "paid_at": p.paid_at,
+                "created_at": _iso_utc(p.created_at), "paid_at": _iso_utc(p.paid_at),
             }
             for p in payouts
         ]
@@ -1069,7 +1085,7 @@ def list_tutor_applications(status: str | None = None) -> list[dict]:
                 "status_label": TUTOR_STATUS_LABELS.get(t.status, t.status),
                 "wants_higher_ed": t.wants_higher_ed,
                 "admin_notes": t.admin_notes,
-                "created_at": t.created_at, "reviewed_at": t.reviewed_at,
+                "created_at": _iso_utc(t.created_at), "reviewed_at": _iso_utc(t.reviewed_at),
                 "subjects": [
                     {
                         "subject": s.subject, "matric_percentage": s.matric_percentage,
@@ -1118,7 +1134,7 @@ def list_tutor_higher_ed_applications(status: str | None = None) -> list[dict]:
                 "has_higher_ed_transcript_document": bool(t.higher_ed_transcript_path),
                 "has_higher_ed_qualification_certificate_document": bool(t.higher_ed_qualification_certificate_path),
                 "admin_notes": t.admin_notes,
-                "created_at": t.created_at, "higher_ed_reviewed_at": t.higher_ed_reviewed_at,
+                "created_at": _iso_utc(t.created_at), "higher_ed_reviewed_at": _iso_utc(t.higher_ed_reviewed_at),
                 "modules": [
                     {
                         "id": m.module.id, "name": m.module.name,
@@ -1406,6 +1422,38 @@ def _validate_request_fields(
     )
 
 
+def _notify_directed_request(
+    *, tutor_name: str, tutor_email: str, learner_name: str,
+    subject: str, topic: str | None, price_zar: float, duration_minutes: int,
+    scheduled_at: dt.datetime | None,
+) -> None:
+    """Best-effort - tells a tutor a learner picked them directly from
+    the Browse Tutors directory (see request_tutoring_session's
+    preferred_tutor_id), same pattern as _notify_match. Broadcast
+    requests (no preferred tutor) are deliberately NOT emailed to every
+    eligible tutor - they just show up in each one's own Open Requests
+    queue - but a directed request is aimed at exactly one tutor, who
+    would otherwise have no way to know it's waiting for them."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        send_email(
+            tutor_email,
+            "A learner requested you directly on Malita",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"{learner_name} requested you directly for {subject}{topic_str}.\n\n"
+                f"Price: R{price_zar:.2f} ({duration_minutes} min)\n"
+                f"Requested time: {when_str}\n\n"
+                "Open the Malita Tutor app to accept it (or propose a different time) - "
+                "only you can see this request.\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify tutor %s of a directed request", tutor_email)
+
+
 def request_tutoring_session(
     learner_user_id: int, subject: str, price_zar: float, scheduled_at: dt.datetime,
     duration_minutes: int = 60, topic: str = "", preferred_times_note: str = "",
@@ -1433,10 +1481,12 @@ def request_tutoring_session(
     their open-requests queue (see list_open_requests_for_tutor), but
     every subsequent step (accept, propose, notify, Meet link) is
     otherwise identical to a broadcast request."""
+    preferred_tutor_notify: tuple | None = None
     with get_session() as db:
         learner = db.query(User).get(learner_user_id)
         if not learner:
             raise TutoringError("Account not found.")
+        learner_name = learner.name
         _validate_request_fields(
             db, learner_user_id=learner_user_id, subject=subject, price_zar=price_zar,
             scheduled_at=scheduled_at, duration_minutes=duration_minutes,
@@ -1456,7 +1506,19 @@ def request_tutoring_session(
         )
         db.add(req)
         db.flush()
-        return {"id": req.id, "status": req.status}
+        result = {"id": req.id, "status": req.status}
+        if preferred_tutor_id:
+            tutor = db.query(TutorAccount).get(preferred_tutor_id)
+            if tutor:
+                preferred_tutor_notify = (tutor.name, tutor.email)
+    if preferred_tutor_notify:
+        tutor_name, tutor_email = preferred_tutor_notify
+        _notify_directed_request(
+            tutor_name=tutor_name, tutor_email=tutor_email, learner_name=learner_name,
+            subject=subject, topic=topic, price_zar=price_zar,
+            duration_minutes=duration_minutes, scheduled_at=scheduled_at,
+        )
+    return result
 
 
 def edit_tutoring_request(
@@ -1821,11 +1883,13 @@ def list_all_tutoring_sessions(
                 "learner_email": learner.email if learner else "—",
                 "tutor_name": r.tutor.name if r.tutor else "—",
                 "tutor_email": r.tutor.email if r.tutor else "—",
-                "scheduled_at": r.scheduled_at, "duration_minutes": r.duration_minutes,
+                "scheduled_at": _iso_utc(r.scheduled_at), "duration_minutes": r.duration_minutes,
                 "price_zar": r.price_zar, "platform_cut_percent": r.platform_cut_percent,
                 "meet_link": r.meet_link,
+                "recording_link": r.recording_link,
                 "learner_rating": r.learner_rating, "tutor_rating": r.tutor_rating,
-                "created_at": r.created_at, "matched_at": r.matched_at, "paid_at": r.paid_at,
+                "created_at": _iso_utc(r.created_at), "matched_at": _iso_utc(r.matched_at),
+                "paid_at": _iso_utc(r.paid_at),
             })
         return result
 
@@ -1908,9 +1972,9 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "preferred_tutor_name": r.preferred_tutor.name if r.preferred_tutor else None,
         "duration_minutes": r.duration_minutes, "price_zar": r.price_zar,
         "platform_cut_percent": r.platform_cut_percent,
-        "scheduled_at": r.scheduled_at, "proposed_scheduled_at": r.proposed_scheduled_at,
-        "created_at": r.created_at,
-        "matched_at": r.matched_at, "paid_at": r.paid_at,
+        "scheduled_at": _iso_utc(r.scheduled_at), "proposed_scheduled_at": _iso_utc(r.proposed_scheduled_at),
+        "created_at": _iso_utc(r.created_at),
+        "matched_at": _iso_utc(r.matched_at), "paid_at": _iso_utc(r.paid_at),
         "meet_link": r.meet_link,
         "learner_confirmed": r.learner_confirmed_at is not None,
         "learner_rating": r.learner_rating,
@@ -1918,9 +1982,9 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "tutor_rating": r.tutor_rating,
         "cancelled_by": r.cancelled_by,
         "cancellation_reason": r.cancellation_reason,
-        "lapsed_at": r.lapsed_at,
+        "lapsed_at": _iso_utc(r.lapsed_at),
         "recording_link": r.recording_link,
-        "recording_shared_at": r.recording_shared_at,
+        "recording_shared_at": _iso_utc(r.recording_shared_at),
     }
 
 
@@ -2695,7 +2759,7 @@ def list_pending_payouts() -> list[dict]:
                 "id": p.id, "session_id": p.session_id, "tutor_id": p.tutor_id,
                 "tutor_name": tutor.name if tutor else None,
                 "tutor_bank_note": tutor.bank_account_note if tutor else None,
-                "amount_zar": p.amount_zar, "created_at": p.created_at,
+                "amount_zar": p.amount_zar, "created_at": _iso_utc(p.created_at),
             })
         return out
 

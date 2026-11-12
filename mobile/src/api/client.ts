@@ -364,6 +364,7 @@ export type TutoringRequest = {
   // "Other" - independent of custom_module_name (either escape hatch can
   // be used on its own).
   custom_qualification_name: string | null;
+  admin_match_note: string | null;
   is_custom_higher_ed: boolean;
   topic: string | null;
   preferred_times_note: string | null;
@@ -643,6 +644,9 @@ export type TutorApplyParams = {
   id_document?: { uri: string; name: string; type: string } | null;
   matric_certificate?: { uri: string; name: string; type: string } | null;
   cv?: { uri: string; name: string; type: string } | null;
+  // Required (a one-page bank statement or account confirmation letter)
+  // - see backend/db.py's TutorAccount.bank_proof_document_path.
+  bank_proof?: { uri: string; name: string; type: string } | null;
   higher_ed_transcript?: { uri: string; name: string; type: string } | null;
   higher_ed_qualification_certificate?: { uri: string; name: string; type: string } | null;
 };
@@ -717,6 +721,7 @@ export async function applyAsTutor(params: TutorApplyParams): Promise<TutorApply
     ["id_document", params.id_document],
     ["matric_certificate", params.matric_certificate],
     ["cv", params.cv],
+    ["bank_proof", params.bank_proof],
     ["higher_ed_transcript", params.higher_ed_transcript],
     ["higher_ed_qualification_certificate", params.higher_ed_qualification_certificate],
   ];
@@ -812,6 +817,7 @@ export type TutorApplication = {
   has_matric_certificate_document: boolean;
   cv_note: string | null;
   has_cv_document: boolean;
+  has_bank_proof_document: boolean;
   availability_note: string | null;
   bank_account_holder: string | null;
   bank_name: string | null;
@@ -856,7 +862,7 @@ export function rejectTutorApplication(token: string, tutorId: number, reason: s
 export function fetchTutorDocumentUrl(
   token: string,
   tutorId: number,
-  kind: "id" | "matric_certificate" | "cv" | "higher_ed_transcript" | "higher_ed_qualification_certificate"
+  kind: "id" | "matric_certificate" | "cv" | "bank_proof" | "higher_ed_transcript" | "higher_ed_qualification_certificate"
 ) {
   return request<{ url: string }>(`/admin/tutoring/applications/${tutorId}/documents/${kind}`, { token });
 }
@@ -872,6 +878,7 @@ export type TutorHigherEdApplication = {
   has_id_document: boolean;
   cv_note: string | null;
   has_cv_document: boolean;
+  has_bank_proof_document: boolean;
   availability_note: string | null;
   bank_account_holder: string | null;
   bank_name: string | null;
@@ -993,7 +1000,10 @@ export function fetchAllTutoringSessionsAdmin(token: string, filter: "upcoming" 
 export function matchTutorToRequestAdmin(
   token: string,
   requestId: number,
-  params: { tutor_id: number; scheduled_at?: string | null }
+  // admin_note: optional free-text context/instructions sent to the
+  // tutor alongside the suggestion - admin can no longer propose a
+  // different time here (see backend/tutoring.py's match_tutor_to_request).
+  params: { tutor_id: number; admin_note?: string }
 ) {
   // Suggests a tutor - doesn't finalize. The tutor still has to confirm
   // (respondToAdminMatch) before anything is booked, so this only ever

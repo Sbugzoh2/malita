@@ -2033,11 +2033,12 @@ elif mode == "🛠️ Tutoring Admin":
                     st.write(f"**Matric certificate note:** {a['matric_certificate_note'] or '—'}")
                     st.write(f"**CV note:** {a['cv_note'] or '—'}")
                     st.write(f"**Availability:** {a['availability_note'] or '—'}")
-                    doc_col1, doc_col2, doc_col3 = st.columns(3)
+                    doc_col1, doc_col2, doc_col3, doc_col4 = st.columns(4)
                     for doc_col, kind, label, has_doc in (
                         (doc_col1, "id", "ID document", a["has_id_document"]),
                         (doc_col2, "matric_certificate", "Matric certificate", a["has_matric_certificate_document"]),
                         (doc_col3, "cv", "CV", a["has_cv_document"]),
+                        (doc_col4, "bank_proof", "Bank proof", a["has_bank_proof_document"]),
                     ):
                         url_key = f"doc_url_{a['id']}_{kind}"
                         with doc_col:
@@ -2330,24 +2331,15 @@ elif mode == "🛠️ Tutoring Admin":
                             chosen_label = st.selectbox(
                                 "Tutor", list(tutor_labels.keys()), key=f"match_tutor_{r['id']}"
                             )
-                            scheduled_date = st.date_input(
-                                "Propose a different date (optional, SAST)", value=None, key=f"match_date_{r['id']}"
-                            )
-                            scheduled_time = st.time_input(
-                                "Propose a different time (optional, SAST)", value=None, key=f"match_time_{r['id']}"
+                            admin_note = st.text_area(
+                                "Note to tutor (optional)",
+                                placeholder="e.g. why you picked them, anything the learner mentioned",
+                                key=f"match_note_{r['id']}",
                             )
                             if st.form_submit_button("Suggest This Tutor"):
-                                # Entered as SAST (this admin console is used
-                                # from South Africa) - stored as naive UTC
-                                # like every other scheduled_at, so subtract
-                                # the fixed 2-hour offset.
-                                scheduled_at = (
-                                    dt.datetime.combine(scheduled_date, scheduled_time) - dt.timedelta(hours=2)
-                                    if scheduled_date and scheduled_time else None
-                                )
                                 try:
                                     match_tutor_to_request(
-                                        r["id"], tutor_labels[chosen_label], scheduled_at=scheduled_at,
+                                        r["id"], tutor_labels[chosen_label], admin_note=admin_note,
                                     )
                                     st.success(
                                         "Suggested! The tutor needs to confirm in their app before "

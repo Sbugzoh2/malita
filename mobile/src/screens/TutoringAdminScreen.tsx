@@ -233,6 +233,7 @@ function ApplicationsSection({ token }: { token: string }) {
                     ["id", "ID document", a.has_id_document] as const,
                     ["matric_certificate", "Matric certificate", a.has_matric_certificate_document] as const,
                     ["cv", "CV", a.has_cv_document] as const,
+                    ["bank_proof", "Bank proof", a.has_bank_proof_document] as const,
                   ]).map(([kind, label, hasDoc]) =>
                     hasDoc ? (
                       docUrls[`${a.id}_${kind}`] ? (
@@ -432,6 +433,7 @@ function HigherEdApplicationsSection({ token }: { token: string }) {
                   {([
                     ["id", "ID document", a.has_id_document] as const,
                     ["cv", "CV", a.has_cv_document] as const,
+                    ["bank_proof", "Bank proof", a.has_bank_proof_document] as const,
                     ["higher_ed_transcript", "Academic transcript", a.has_higher_ed_transcript_document] as const,
                     [
                       "higher_ed_qualification_certificate",
@@ -855,7 +857,7 @@ function MatchSection({ token }: { token: string }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [candidatesBySubject, setCandidatesBySubject] = useState<Record<string, ApprovedTutor[]>>({});
   const [selectedTutor, setSelectedTutor] = useState<Record<number, number | null>>({});
-  const [scheduledAt, setScheduledAt] = useState<Record<number, string>>({});
+  const [adminNote, setAdminNote] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const load = useCallback(() => {
@@ -887,37 +889,10 @@ function MatchSection({ token }: { token: string }) {
       setError("Please choose a tutor.");
       return;
     }
-    let scheduled_at: string | null = null;
-    const raw = (scheduledAt[r.id] || "").trim();
-    if (raw) {
-      // A strict 4-digit-year format check, not just "did Date() accept
-      // it" - Hermes (React Native's JS engine) parses malformed strings
-      // like a mistyped 5-digit year far more leniently than Node/Chrome
-      // do, so isNaN(parsed.getTime()) alone let a typo ("20126-...")
-      // through as a "valid" but nonsensical date that then crashed the
-      // backend (datetime.fromisoformat can't parse what toISOString()
-      // produces for a year that far out).
-      const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(raw);
-      if (!match) {
-        setError("Scheduled date/time must look like 2026-11-20 18:00 (SAST)");
-        return;
-      }
-      // Entered as SAST (fixed UTC+2), same as SessionDateTimePicker - NOT
-      // new Date(string).toISOString(), which would parse this as the
-      // ADMIN'S OWN DEVICE timezone and silently shift it by however many
-      // hours that differs from SAST.
-      const [, y, mo, d, h, mi] = match.map(Number);
-      const utcMillis = Date.UTC(y, mo - 1, d, h - 2, mi, 0);
-      if (isNaN(utcMillis)) {
-        setError("Scheduled date/time must look like 2026-11-20 18:00 (SAST)");
-        return;
-      }
-      scheduled_at = new Date(utcMillis).toISOString();
-    }
     setBusyId(r.id);
     setError(null);
     try {
-      await matchTutorToRequestAdmin(token, r.id, { tutor_id: tutorId, scheduled_at });
+      await matchTutorToRequestAdmin(token, r.id, { tutor_id: tutorId, admin_note: adminNote[r.id] || "" });
       Alert.alert(
         "Suggested!",
         "The tutor needs to confirm in their app before anything is booked - nothing is final yet."
@@ -973,12 +948,13 @@ function MatchSection({ token }: { token: string }) {
                         value={selectedTutor[r.id] != null ? String(selectedTutor[r.id]) : null}
                         onChange={(v) => setSelectedTutor((prev) => ({ ...prev, [r.id]: parseInt(v, 10) }))}
                       />
-                      <Text style={styles.label}>Propose a different date/time (optional, SAST)</Text>
+                      <Text style={styles.label}>Note to tutor (optional)</Text>
                       <TextInput
-                        style={styles.input}
-                        value={scheduledAt[r.id] || ""}
-                        onChangeText={(v) => setScheduledAt((prev) => ({ ...prev, [r.id]: v }))}
-                        placeholder="e.g. 2026-11-20 18:00"
+                        style={[styles.input, styles.textArea]}
+                        value={adminNote[r.id] || ""}
+                        onChangeText={(v) => setAdminNote((prev) => ({ ...prev, [r.id]: v }))}
+                        placeholder="e.g. why you picked them, anything the learner mentioned"
+                        multiline
                       />
                       <Pressable
                         style={styles.approveButton}
@@ -1327,6 +1303,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     marginBottom: 8,
   },
+  textArea: { minHeight: 70, textAlignVertical: "top" },
   actionRow: { flexDirection: "row", gap: 10, marginTop: 14 },
   approveButton: {
     backgroundColor: colors.primary,

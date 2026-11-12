@@ -332,7 +332,10 @@ class TutorRejectRequest(BaseModel):
 
 class TutorMatchRequest(BaseModel):
     tutor_id: int
-    scheduled_at: str | None = None  # ISO 8601, optional
+    # Free-text context/instructions sent to the tutor alongside the
+    # suggestion - admin can no longer propose a different time here (see
+    # backend/tutoring.py's match_tutor_to_request).
+    admin_note: str = ""
 
 
 class TutorProposeTimeRequest(BaseModel):
@@ -1396,6 +1399,7 @@ async def tutoring_apply(
     id_document: UploadFile | None = File(None),
     matric_certificate: UploadFile | None = File(None),
     cv: UploadFile | None = File(None),
+    bank_proof: UploadFile | None = File(None),
     higher_ed_transcript: UploadFile | None = File(None),
     higher_ed_qualification_certificate: UploadFile | None = File(None),
 ):
@@ -1448,6 +1452,9 @@ async def tutoring_apply(
     cv_document_tuple = None
     if cv is not None:
         cv_document_tuple = (await cv.read(), cv.content_type or "application/octet-stream")
+    bank_proof_document_tuple = None
+    if bank_proof is not None:
+        bank_proof_document_tuple = (await bank_proof.read(), bank_proof.content_type or "application/octet-stream")
     transcript_document_tuple = None
     if higher_ed_transcript is not None:
         transcript_document_tuple = (
@@ -1487,6 +1494,7 @@ async def tutoring_apply(
             id_document=id_document_tuple,
             matric_certificate_document=matric_document_tuple,
             cv_document=cv_document_tuple,
+            bank_proof_document=bank_proof_document_tuple,
             higher_ed_transcript_document=transcript_document_tuple,
             higher_ed_qualification_certificate_document=qualification_certificate_tuple,
         )
@@ -1898,14 +1906,8 @@ def admin_tutoring_match(request_id: int, payload: TutorMatchRequest, authorizat
     user = _auth_user(authorization)
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
-    scheduled_at = None
-    if payload.scheduled_at:
-        try:
-            scheduled_at = _parse_iso_datetime(payload.scheduled_at)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid scheduled date/time format.")
     try:
-        return match_tutor_to_request(request_id, payload.tutor_id, scheduled_at=scheduled_at)
+        return match_tutor_to_request(request_id, payload.tutor_id, admin_note=payload.admin_note)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

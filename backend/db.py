@@ -452,6 +452,13 @@ class TutorAccount(Base):
     bank_branch_code = Column(String(20), nullable=True)
     bank_account_number = Column(String(40), nullable=True)
     bank_account_type = Column(String(30), nullable=True)
+    # Proof of the account above (a one-page bank statement or account
+    # confirmation letter) - same optional-upload-with-free-text-fallback
+    # pattern as id_document_path/matric_certificate_path, except there's
+    # no free-text fallback for this one: required at apply time (see
+    # mobile/src/screens/TutorApplyScreen.tsx), so this is always set for
+    # any tutor who applied after this field was added.
+    bank_proof_document_path = Column(String, nullable=True)
     # Pre-dates the structured fields above (and kept for every tutor
     # who applied before them) - now doubles as an optional "anything
     # else" note (e.g. a SWIFT code for an international account)
@@ -709,6 +716,18 @@ class TutoringSessionRequest(Base):
     # an admin's manual override - kept as "matched_at" rather than
     # renamed to "accepted_at" to avoid a DB column rename migration.
     matched_at = Column(DateTime, nullable=True)
+    # Set when match_tutor_to_request suggests a tutor (status goes to
+    # "admin_proposed"), cleared once the tutor responds either way - the
+    # window ADMIN_PROPOSAL_DEADLINE_HOURS is measured from (see
+    # _expire_stale_admin_proposals). Deliberately its own column rather
+    # than reusing matched_at, which keeps its existing
+    # awaiting-payment-lapse meaning untouched.
+    admin_proposed_at = Column(DateTime, nullable=True)
+    # An admin's free-text note to the tutor, sent along with the
+    # suggested match (see match_tutor_to_request) - replaces proposing a
+    # different date/time at suggest-time; the learner's own scheduled_at
+    # is always what's offered, same as a tutor's own self-accept.
+    admin_match_note = Column(String, nullable=True)
     paid_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     cancelled_at = Column(DateTime, nullable=True)
@@ -882,6 +901,7 @@ def init_db():
     _ensure_column("tutor_accounts", "bank_branch_code", "VARCHAR(20)")
     _ensure_column("tutor_accounts", "bank_account_number", "VARCHAR(40)")
     _ensure_column("tutor_accounts", "bank_account_type", "VARCHAR(30)")
+    _ensure_column("tutor_accounts", "bank_proof_document_path", "VARCHAR")
     _ensure_column("tutoring_session_requests", "meet_link", "VARCHAR")
     _ensure_column("tutoring_session_requests", "calendar_event_id", "VARCHAR")
     _ensure_column("tutoring_session_requests", "learner_confirmed_at", "TIMESTAMP")
@@ -891,6 +911,8 @@ def init_db():
     _ensure_column("tutoring_session_requests", "tutor_rating", "INTEGER")
     _ensure_column("tutoring_session_requests", "tutor_rating_comment", "VARCHAR")
     _ensure_column("tutoring_session_requests", "proposed_scheduled_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "admin_proposed_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "admin_match_note", "VARCHAR")
     _ensure_column("tutoring_session_requests", "module_id", "INTEGER")
     _ensure_column("tutoring_session_requests", "preferred_tutor_id", "INTEGER")
     _ensure_column("tutoring_session_requests", "cancelled_by", "VARCHAR(20)")

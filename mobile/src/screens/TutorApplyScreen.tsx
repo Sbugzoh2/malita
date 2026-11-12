@@ -99,6 +99,7 @@ export default function TutorApplyScreen({ navigation }: any) {
 
   const [idDocument, setIdDocument] = useState<PickedDoc>(null);
   const [matricCertificate, setMatricCertificate] = useState<PickedDoc>(null);
+  const [bankProofDocument, setBankProofDocument] = useState<PickedDoc>(null);
   const [cv, setCv] = useState<PickedDoc>(null);
   const [transcriptDocument, setTranscriptDocument] = useState<PickedDoc>(null);
   const [qualificationCertificate, setQualificationCertificate] = useState<PickedDoc>(null);
@@ -214,6 +215,8 @@ export default function TutorApplyScreen({ navigation }: any) {
     }
     if (!idDocument) { setError("Please upload your ID document."); return; }
     if (!cv) { setError("Please upload your CV."); return; }
+    if (!matricCertificate) { setError("Please upload your matric certificate."); return; }
+    if (!bankProofDocument) { setError("Please upload proof of your bank account."); return; }
 
     const chosenSubjects = HIGH_SCHOOL_TUTORING_SUBJECTS.filter((s) => subjectRows[s].selected);
     // Selecting "Both" with no high-school subject chosen isn't an error -
@@ -239,10 +242,6 @@ export default function TutorApplyScreen({ navigation }: any) {
       }
     }
     const effectiveWantsHighSchool = chosenSubjects.length > 0;
-    if (effectiveWantsHighSchool && !matricCertificate) {
-      setError("Please upload your matric certificate.");
-      return;
-    }
 
     if (wantsHigherEd) {
       if (!institutionId || (!isCustomQualification && !qualificationId)) {
@@ -319,8 +318,9 @@ export default function TutorApplyScreen({ navigation }: any) {
         higher_ed_module_ids: wantsHigherEd && selectedModuleIds.size > 0 ? Array.from(selectedModuleIds) : undefined,
         higher_ed_custom_modules: wantsHigherEd && customModules.length > 0 ? customModules : undefined,
         id_document: idDocument,
-        matric_certificate: effectiveWantsHighSchool ? matricCertificate : null,
+        matric_certificate: matricCertificate,
         cv,
+        bank_proof: bankProofDocument,
         higher_ed_transcript: wantsHigherEd ? transcriptDocument : null,
         higher_ed_qualification_certificate: wantsHigherEd ? qualificationCertificate : null,
       });
@@ -370,7 +370,8 @@ export default function TutorApplyScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>🙋 Apply to Tutor</Text>
         <Text style={styles.subtitle}>
-          Malita's minimum bar is a 65% mark (matric subject or semester/final average) to apply.
+          Malita's minimum bar is a 75% matric subject mark for high school, or a 65% semester/final average
+          for university/college, to apply.
         </Text>
 
         <View style={styles.card}>
@@ -501,13 +502,19 @@ export default function TutorApplyScreen({ navigation }: any) {
             multiline
             placeholder="e.g. a SWIFT code for an international account"
           />
+          <DocumentField
+            label="Proof of bank account (statement or confirmation letter)"
+            value={bankProofDocument}
+            onPick={setBankProofDocument}
+            required
+          />
 
           <DocumentField label="ID document" value={idDocument} onPick={setIdDocument} />
           <DocumentField
             label="Matric certificate"
             value={matricCertificate}
             onPick={setMatricCertificate}
-            required={HIGH_SCHOOL_TUTORING_SUBJECTS.some((s) => subjectRows[s].selected)}
+            required
           />
           <DocumentField label="CV" value={cv} onPick={setCv} />
         </View>

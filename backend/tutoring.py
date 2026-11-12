@@ -72,12 +72,12 @@ from .email_util import send_email
 
 logger = logging.getLogger("malita.tutoring")
 
-MIN_MATRIC_PERCENTAGE = 65.0
+MIN_MATRIC_PERCENTAGE = 75.0
 # Minimum self-reported semester/final average to apply as a higher-ed
-# tutor - same bar as MIN_MATRIC_PERCENTAGE, kept as its own named
-# constant since the two tracks are conceptually separate (one's a
-# matric subject mark, the other a university/college average) even
-# though Malita's policy happens to set them to the same number.
+# tutor - kept as its own named constant since the two tracks are
+# conceptually separate (one's a matric subject mark, the other a
+# university/college average) and deliberately set lower than the
+# high-school bar above (Malita's policy).
 MIN_HIGHER_ED_AVERAGE = 65.0
 
 # Default cut Malita takes from a session's price - snapshotted onto each
@@ -137,6 +137,10 @@ SESSION_REMINDER_MINUTES_BEFORE = 15
 # How long before an unpaid match's PAYMENT_DEADLINE_HOURS deadline to
 # warn the learner it's about to lapse.
 PAYMENT_LAPSE_REMINDER_HOURS_BEFORE = 2
+# How long a tutor has to respond to an admin-suggested match (see
+# match_tutor_to_request) before it automatically reopens - see
+# _expire_stale_admin_proposals.
+ADMIN_PROPOSAL_DEADLINE_HOURS = 12
 # There's no API that can force-start a recording on a regular (non-
 # Google-Workspace) Meet call - see backend/google_calendar.py's docstring
 # for why this project uses a personal Gmail account, not Workspace. So
@@ -815,6 +819,7 @@ def apply_as_tutor(
     id_document: tuple[bytes, str] | None = None,
     matric_certificate_document: tuple[bytes, str] | None = None,
     cv_document: tuple[bytes, str] | None = None,
+    bank_proof_document: tuple[bytes, str] | None = None,
     higher_ed_transcript_document: tuple[bytes, str] | None = None,
     higher_ed_qualification_certificate_document: tuple[bytes, str] | None = None,
 ) -> dict:
@@ -1027,6 +1032,15 @@ def apply_as_tutor(
                 )
             except _storage.StorageError as e:
                 raise TutoringError(str(e))
+        bank_proof_path = None
+        if bank_proof_document:
+            file_bytes, content_type = bank_proof_document
+            try:
+                bank_proof_path = _storage.upload_tutor_document(
+                    file_bytes, content_type, applicant_email=email, kind="bank_proof",
+                )
+            except _storage.StorageError as e:
+                raise TutoringError(str(e))
         higher_ed_transcript_path = None
         if higher_ed_transcript_document:
             file_bytes, content_type = higher_ed_transcript_document
@@ -1062,6 +1076,7 @@ def apply_as_tutor(
             bank_branch_code=bank_branch_code.strip() or None,
             bank_account_number=bank_account_number.strip() or None,
             bank_account_type=bank_account_type.strip() or None,
+            bank_proof_document_path=bank_proof_path,
             bank_account_note=bank_account_note.strip() or None,
             status="pending_review",
             wants_high_school=wants_high_school,
@@ -1133,6 +1148,7 @@ def list_tutor_applications(status: str | None = None) -> list[dict]:
                 "has_matric_certificate_document": bool(t.matric_certificate_path),
                 "cv_note": t.cv_note,
                 "has_cv_document": bool(t.cv_document_path),
+                "has_bank_proof_document": bool(t.bank_proof_document_path),
                 "availability_note": t.availability_note,
                 "bank_account_holder": t.bank_account_holder,
                 "bank_name": t.bank_name,
@@ -1178,6 +1194,7 @@ def list_tutor_higher_ed_applications(status: str | None = None) -> list[dict]:
                 "has_id_document": bool(t.id_document_path),
                 "cv_note": t.cv_note,
                 "has_cv_document": bool(t.cv_document_path),
+                "has_bank_proof_document": bool(t.bank_proof_document_path),
                 "availability_note": t.availability_note,
                 "bank_account_holder": t.bank_account_holder,
                 "bank_name": t.bank_name,
@@ -1226,9 +1243,10 @@ def list_tutor_higher_ed_applications(status: str | None = None) -> list[dict]:
 def get_tutor_document_url(tutor_id: int, kind: str) -> str:
     """A short-lived signed URL for an admin to view one of a tutor
     applicant's uploaded documents. `kind` is "id", "matric_certificate",
-    "cv", "higher_ed_transcript", or "higher_ed_qualification_certificate"."""
+    "cv", "bank_proof", "higher_ed_transcript", or
+    "higher_ed_qualification_certificate"."""
     if kind not in (
-        "id", "matric_certificate", "cv",
+        "id", "matric_certificate", "cv", "bank_proof",
         "higher_ed_transcript", "higher_ed_qualification_certificate",
     ):
         raise TutoringError("Unknown document kind.")
@@ -1240,6 +1258,7 @@ def get_tutor_document_url(tutor_id: int, kind: str) -> str:
             "id": tutor.id_document_path,
             "matric_certificate": tutor.matric_certificate_path,
             "cv": tutor.cv_document_path,
+            "bank_proof": tutor.bank_proof_document_path,
             "higher_ed_transcript": tutor.higher_ed_transcript_path,
             "higher_ed_qualification_certificate": tutor.higher_ed_qualification_certificate_path,
         }[kind]
@@ -1431,6 +1450,7 @@ def get_tutor_profile(tutor_id: int) -> dict:
     persists here indefinitely, exactly like an employee's record,
     rather than being thrown away once a session ends."""
     _expire_lapsed_payments()
+    _expire_stale_admin_proposals()
     with get_session() as db:
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor:
@@ -1805,6 +1825,60 @@ def _notify_payment_lapsed(
         logger.exception("Failed to notify learner/tutor of a lapsed payment")
 
 
+def _expire_stale_admin_proposals() -> None:
+    """Lazy check (same spirit/pattern as _expire_lapsed_payments above),
+    run at the same call sites: any request still "admin_proposed" more
+    than ADMIN_PROPOSAL_DEADLINE_HOURS after an admin suggested a tutor,
+    with no response either way, automatically reopens - unlike a lapsed
+    payment, this IS reopened for another tutor (or a fresh admin
+    suggestion), since nothing was ever agreed to, just proposed."""
+    to_notify = []
+    with get_session() as db:
+        cutoff = dt.datetime.utcnow() - dt.timedelta(hours=ADMIN_PROPOSAL_DEADLINE_HOURS)
+        overdue = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                TutoringSessionRequest.status == "admin_proposed",
+                TutoringSessionRequest.admin_proposed_at < cutoff,
+            )
+            .all()
+        )
+        for req in overdue:
+            tutor = db.query(TutorAccount).get(req.tutor_id)
+            subject, topic = req.subject, req.topic
+            req.tutor_id = None
+            req.proposed_scheduled_at = None
+            req.admin_proposed_at = None
+            req.status = "requested"
+            if tutor:
+                to_notify.append((tutor.name, tutor.email, subject, topic))
+
+    for tutor_name, tutor_email, subject, topic in to_notify:
+        _notify_admin_proposal_expired(tutor_name=tutor_name, tutor_email=tutor_email, subject=subject, topic=topic)
+
+
+def _notify_admin_proposal_expired(
+    *, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
+) -> None:
+    """Best-effort - tells the tutor their window to respond to an
+    admin-suggested match ran out, same spirit as _notify_payment_lapsed."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        send_email(
+            tutor_email,
+            "An admin-suggested match has expired",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"The {subject}{topic_str} session an admin suggested for you wasn't confirmed within "
+                f"{ADMIN_PROPOSAL_DEADLINE_HOURS} hours, so it's been reopened. No action needed on your end - "
+                "if you're still interested, check your Open Requests.\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify tutor %s of an expired admin proposal", tutor_email)
+
+
 def send_due_reminders() -> None:
     """Time-triggered reminders that can't piggyback on the lazy-check
     pattern used elsewhere in this module (_expire_lapsed_payments,
@@ -1968,6 +2042,7 @@ def _notify_payment_lapsing_soon(
 
 def list_learner_requests(learner_user_id: int) -> list[dict]:
     _expire_lapsed_payments()
+    _expire_stale_admin_proposals()
     with get_session() as db:
         reqs = (
             db.query(TutoringSessionRequest)
@@ -2022,6 +2097,7 @@ def list_all_tutoring_sessions(
     confirmed) and completed ones alike, without digging through each
     tutor's individual profile."""
     _expire_lapsed_payments()
+    _expire_stale_admin_proposals()
     with get_session() as db:
         q = db.query(TutoringSessionRequest).filter(TutoringSessionRequest.tutor_id.isnot(None))
         if upcoming_only:
@@ -2076,6 +2152,7 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
     approved to tutor - so a tutor never sees (or can accept) a request
     outside what they were vetted for on EITHER track."""
     _expire_lapsed_payments()
+    _expire_stale_admin_proposals()
     with get_session() as db:
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor:
@@ -2143,6 +2220,7 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "custom_module_name": r.custom_module_name,
         "custom_module_year_level": r.custom_module_year_level,
         "custom_qualification_name": r.custom_qualification_name,
+        "admin_match_note": r.admin_match_note,
         "is_custom_higher_ed": r.is_custom_higher_ed,
         # Only set for a higher-ed request - lets the mobile edit flow
         # pre-select the Institution/Qualification/Module cascade without
@@ -2417,19 +2495,21 @@ def respond_to_time_proposal(request_id: int, learner_user_id: int, accept: bool
 
 
 def match_tutor_to_request(
-    request_id: int, tutor_id: int, scheduled_at: dt.datetime | None = None,
+    request_id: int, tutor_id: int, admin_note: str = "",
 ) -> dict:
     """Admin override: SUGGESTS an approved tutor for an open (or
-    time_proposed) request at the price the learner already set - does
-    NOT finalize the match immediately. The tutor still has to confirm
-    (see tutor_respond_to_admin_match) before anything is locked in,
-    same as the self-service accept/propose flow, so an admin can never
-    commit a tutor to a session they haven't agreed to. If the admin
-    picks a different time than the learner originally asked for, the
-    tutor's acceptance routes through the existing time_proposed flow so
-    the LEARNER also gets to approve that change before it's final.
-    Still the exception path, not the primary one - see this module's
-    docstring."""
+    time_proposed) request at the price/time the learner already set -
+    does NOT finalize the match immediately. The tutor still has to
+    confirm (see tutor_respond_to_admin_match) before anything is locked
+    in, same as the self-service accept/propose flow, so an admin can
+    never commit a tutor to a session they haven't agreed to.
+    admin_note is optional free-text context/instructions sent to the
+    tutor alongside the suggestion (e.g. why they were picked, anything
+    the learner mentioned) - an admin can no longer propose a different
+    time here; if the learner's own time doesn't work for a tutor, that
+    tutor can still counter-propose through the normal flow once they've
+    responded. Still the exception path, not the primary one - see this
+    module's docstring."""
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
         if not req:
@@ -2441,23 +2521,19 @@ def match_tutor_to_request(
             raise TutoringError("That tutor is not an approved, active tutor.")
 
         req.tutor_id = tutor_id
-        # Only set proposed_scheduled_at if the admin is suggesting a
-        # DIFFERENT time to the learner's own - otherwise leave it unset
-        # so the tutor's acceptance can finalize directly at the
-        # learner's original time with no extra learner approval step.
-        req.proposed_scheduled_at = (
-            scheduled_at if scheduled_at and scheduled_at != req.scheduled_at else None
-        )
         req.status = "admin_proposed"
+        req.admin_proposed_at = dt.datetime.utcnow()
+        req.admin_match_note = admin_note.strip() or None
 
         result = {"id": req.id, "status": req.status}
         tutor_name, tutor_email = tutor.name, tutor.email
         subject, topic = req.subject, req.topic
-        proposed_time = req.proposed_scheduled_at or req.scheduled_at
+        scheduled_at = req.scheduled_at
+        note = req.admin_match_note
 
     _notify_admin_proposed_match(
         tutor_name=tutor_name, tutor_email=tutor_email,
-        subject=subject, topic=topic, scheduled_at=proposed_time,
+        subject=subject, topic=topic, scheduled_at=scheduled_at, admin_note=note,
     )
     return result
 
@@ -2471,6 +2547,8 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
     time, this instead routes into the normal time_proposed state so
     the LEARNER still gets to approve/decline that change, same as a
     tutor's own counter-proposal would."""
+    declined = False
+    time_changed = False
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
         if not req or req.tutor_id != tutor_id:
@@ -2478,47 +2556,61 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
         if req.status != "admin_proposed":
             raise TutoringError(f"This request is '{req.status}', not awaiting your confirmation.")
         tutor = db.query(TutorAccount).get(tutor_id)
+        tutor_name = tutor.name if tutor else "A tutor"
+        subject, topic = req.subject, req.topic
 
         if not accept:
+            declined = True
             req.tutor_id = None
             req.proposed_scheduled_at = None
+            req.admin_proposed_at = None
             req.status = "requested"
-            return {"id": req.id, "status": req.status}
-
-        if not tutor or tutor.status != "approved":
-            raise TutoringError("Your tutor account isn't approved.")
-
-        if req.proposed_scheduled_at:
-            # Admin proposed a different time than the learner's own -
-            # the learner still needs to approve that change.
-            req.status = "time_proposed"
             result = {"id": req.id, "status": req.status}
-            learner = db.query(User).get(req.learner_user_id)
-            learner_name, learner_email = learner.name, learner.email
-            tutor_name = tutor.name
-            subject, topic = req.subject, req.topic
-            proposed_scheduled_at = req.proposed_scheduled_at
+        else:
+            if not tutor or tutor.status != "approved":
+                raise TutoringError("Your tutor account isn't approved.")
 
-            _notify_time_proposed(
-                learner_name=learner_name, learner_email=learner_email, tutor_name=tutor_name,
-                subject=subject, topic=topic, proposed_scheduled_at=proposed_scheduled_at,
-            )
-            return result
+            if req.proposed_scheduled_at:
+                # Admin proposed a different time than the learner's own -
+                # the learner still needs to approve that change.
+                time_changed = True
+                req.status = "time_proposed"
+                req.admin_proposed_at = None
+                result = {"id": req.id, "status": req.status}
+                learner = db.query(User).get(req.learner_user_id)
+                learner_name, learner_email = learner.name, learner.email
+                proposed_scheduled_at = req.proposed_scheduled_at
+            else:
+                # No time change - finalize directly, same as a normal accept.
+                _check_schedule_conflict(
+                    db, kind="tutor", person_id=tutor_id, scheduled_at=req.scheduled_at,
+                    duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
+                )
+                req.admin_proposed_at = None
+                _assign_tutor_to_request(db, req, tutor)
 
-        # No time change - finalize directly, same as a normal accept.
-        _check_schedule_conflict(
-            db, kind="tutor", person_id=tutor_id, scheduled_at=req.scheduled_at,
-            duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
+                result = {
+                    "id": req.id, "status": req.status,
+                    "m_payment_id": req.m_payment_id, "meet_link": req.meet_link,
+                }
+                learner = db.query(User).get(req.learner_user_id)
+                learner_name, learner_email = learner.name, learner.email
+                tutor_email = tutor.email
+                price_zar, duration_minutes, final_scheduled_at = (
+                    req.price_zar, req.duration_minutes, req.scheduled_at
+                )
+
+    if declined:
+        _notify_admins_of_proposal_response(tutor_name=tutor_name, subject=subject, topic=topic, accepted=False)
+        return result
+
+    if time_changed:
+        _notify_time_proposed(
+            learner_name=learner_name, learner_email=learner_email, tutor_name=tutor_name,
+            subject=subject, topic=topic, proposed_scheduled_at=proposed_scheduled_at,
         )
-        _assign_tutor_to_request(db, req, tutor)
-
-        result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
-        learner = db.query(User).get(req.learner_user_id)
-        learner_name, learner_email = learner.name, learner.email
-        tutor_name, tutor_email = tutor.name, tutor.email
-        subject, topic, price_zar, duration_minutes, final_scheduled_at = (
-            req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
-        )
+        _notify_admins_of_proposal_response(tutor_name=tutor_name, subject=subject, topic=topic, accepted=True)
+        return result
 
     _notify_match(
         learner_name=learner_name, learner_email=learner_email,
@@ -2527,7 +2619,33 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
         duration_minutes=duration_minutes, scheduled_at=final_scheduled_at,
         meet_link=result["meet_link"],
     )
+    _notify_admins_of_proposal_response(tutor_name=tutor_name, subject=subject, topic=topic, accepted=True)
     return result
+
+
+def _notify_admins_of_proposal_response(
+    *, tutor_name: str, subject: str, topic: str | None, accepted: bool,
+) -> None:
+    """Best-effort email to every admin (same pattern as
+    _notify_admins_of_custom_claim) - an admin who suggested a tutor
+    currently has no way to know whether that tutor actually confirmed
+    or declined without reopening the request themselves."""
+    try:
+        with get_session() as db:
+            admin_emails = [u.email for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admin_emails:
+            return
+        topic_str = f" ({topic})" if topic else ""
+        verb = "accepted" if accepted else "declined"
+        body = (
+            f"{tutor_name} {verb} your suggested match for {subject}{topic_str}.\n\n"
+            + ("Nothing further needed." if accepted else
+               "It's been reopened - suggest another tutor from the Match Requests tab.")
+        )
+        for email in admin_emails:
+            send_email(email, f"Tutor {verb} your suggested match: {subject}{topic_str}", body)
+    except Exception:
+        logger.exception("Failed to notify admins of a tutor's response to a suggested match")
 
 
 def respond_to_custom_module_claim(request_id: int, approve: bool) -> dict:
@@ -2610,20 +2728,21 @@ def _notify_custom_claim_rejected(
 
 def _notify_admin_proposed_match(
     *, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
-    scheduled_at: dt.datetime | None,
+    scheduled_at: dt.datetime | None, admin_note: str | None = None,
 ) -> None:
     """Best-effort - tells the tutor an admin suggested them for a session
     and that they need to confirm it in the app before anything is final."""
     try:
         topic_str = f" ({topic})" if topic else ""
         when_str = _format_sast(scheduled_at)
+        note_str = f"\nNote from the admin: {admin_note}\n" if admin_note else ""
         send_email(
             tutor_email,
             "An admin suggested you for a tutoring session",
             (
                 f"Hi {tutor_name},\n\n"
                 f"A Malita admin suggested you for a {subject}{topic_str} session, "
-                f"proposed for:\n\n{when_str}\n\n"
+                f"proposed for:\n\n{when_str}\n{note_str}\n"
                 "Open the Malita tutor app to confirm or decline - nothing is "
                 "booked until you confirm.\n\n"
                 "— The Malita team"

@@ -250,8 +250,8 @@ export default function TutorApplyScreen({ navigation }: any) {
         setError("Please enter a transcript note.");
         return;
       }
-      if (isCustomQualification ? customModules.length === 0 : selectedModuleIds.size === 0) {
-        setError("Please select at least one module you're able to tutor.");
+      if (selectedModuleIds.size === 0 && customModules.length === 0) {
+        setError("Please select or add at least one module you're able to tutor.");
         return;
       }
       if (!transcriptDocument) {
@@ -291,8 +291,12 @@ export default function TutorApplyScreen({ navigation }: any) {
         higher_ed_qualification_complete: wantsHigherEd ? qualificationComplete : undefined,
         higher_ed_average: wantsHigherEd ? parseFloat(average) : undefined,
         higher_ed_transcript_note: wantsHigherEd ? transcriptNote.trim() : undefined,
-        higher_ed_module_ids: wantsHigherEd && !isCustomQualification ? Array.from(selectedModuleIds) : undefined,
-        higher_ed_custom_modules: wantsHigherEd && isCustomQualification ? customModules : undefined,
+        // Sent independently of each other - a catalog qualification can
+        // still have extra custom modules added alongside picked-from-
+        // the-list ones (see the merged module section below), not just
+        // when the whole qualification itself is custom.
+        higher_ed_module_ids: wantsHigherEd && selectedModuleIds.size > 0 ? Array.from(selectedModuleIds) : undefined,
+        higher_ed_custom_modules: wantsHigherEd && customModules.length > 0 ? customModules : undefined,
         id_document: idDocument,
         matric_certificate: effectiveWantsHighSchool ? matricCertificate : null,
         cv,
@@ -548,60 +552,76 @@ export default function TutorApplyScreen({ navigation }: any) {
             <Text style={styles.label}>
               Modules you're able to tutor {yearOfStudy ? `(at least one year behind ${YEAR_LEVEL_LABELS[yearOfStudy]})` : ""}
             </Text>
-            {isCustomQualification ? (
-              <>
-                {customModules.map((m, i) => (
-                  <View key={i} style={styles.checkboxRow}>
-                    <Text style={[styles.checkboxLabel, { flex: 1 }]}>
-                      {m.name} ({YEAR_LEVEL_LABELS[m.year_level]})
+            {/* Catalog checklist - only possible when the qualification itself
+                is a real catalog entry (a custom qualification has no catalog
+                Modules to list). Independent of the custom builder below, so
+                a catalog qualification can still have extra modules added by
+                hand if one isn't listed under it. */}
+            {!isCustomQualification &&
+              (!qualificationId ? (
+                <Text style={styles.helperText}>Select a qualification first.</Text>
+              ) : eligibleModules.length === 0 ? (
+                <Text style={styles.helperText}>
+                  No eligible modules yet - either none are listed for this qualification, or none are behind your
+                  selected year of study.
+                </Text>
+              ) : (
+                eligibleModules.map((m) => (
+                  <Pressable key={m.id} style={styles.checkboxRow} onPress={() => toggleModule(m.id)}>
+                    <View style={[styles.checkbox, selectedModuleIds.has(m.id) && styles.checkboxChecked]}>
+                      {selectedModuleIds.has(m.id) ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                    </View>
+                    <Text style={styles.checkboxLabel}>
+                      {m.name} ({m.year_level_label})
                     </Text>
-                    <Pressable onPress={() => removeCustomModule(i)}>
-                      <Text style={styles.removeModuleText}>✕</Text>
-                    </Pressable>
-                  </View>
-                ))}
-                {!yearOfStudy ? (
-                  <Text style={styles.helperText}>Select your year of study first.</Text>
-                ) : eligibleYearLevels.length === 0 ? (
-                  <Text style={styles.helperText}>No year level is behind your selected year of study.</Text>
-                ) : (
-                  <View style={styles.addModuleRow}>
+                  </Pressable>
+                ))
+              ))}
+            {/* Custom ("Other") modules - always available, not just when the
+                whole qualification is custom, so "my qualification is listed
+                but this one module isn't" is covered too. */}
+            {customModules.map((m, i) => (
+              <View key={i} style={styles.checkboxRow}>
+                <Text style={[styles.checkboxLabel, { flex: 1 }]}>
+                  {m.name} ({YEAR_LEVEL_LABELS[m.year_level]})
+                </Text>
+                <Pressable onPress={() => removeCustomModule(i)}>
+                  <Text style={styles.removeModuleText}>✕</Text>
+                </Pressable>
+              </View>
+            ))}
+            {!isCustomQualification && (
+              <Text style={styles.helperText}>Don't see a module you teach? Add it below.</Text>
+            )}
+            {!yearOfStudy ? (
+              <Text style={styles.helperText}>Select your year of study first.</Text>
+            ) : eligibleYearLevels.length === 0 ? (
+              <Text style={styles.helperText}>No year level is behind your selected year of study.</Text>
+            ) : (
+              <>
+                <View style={styles.timeRow}>
+                  <View style={styles.timeCol}>
+                    <Text style={styles.label}>Module</Text>
                     <TextInput
-                      style={[styles.input, styles.addModuleInput]}
+                      style={styles.input}
                       value={newCustomModuleName}
                       onChangeText={setNewCustomModuleName}
                       placeholder="Module name"
                     />
+                  </View>
+                  <View style={styles.timeCol}>
                     <Dropdown
-                      label="Year level"
+                      label="Year"
                       options={eligibleYearLevels.map(([k, v]) => ({ label: v, value: k }))}
                       value={newCustomModuleYear != null ? String(newCustomModuleYear) : null}
                       onChange={(v) => setNewCustomModuleYear(parseInt(v, 10))}
                     />
-                    <Pressable style={styles.addModuleButton} onPress={addCustomModule}>
-                      <Text style={styles.addModuleButtonText}>Add</Text>
-                    </Pressable>
                   </View>
-                )}
-              </>
-            ) : !qualificationId ? (
-              <Text style={styles.helperText}>Select a qualification first.</Text>
-            ) : eligibleModules.length === 0 ? (
-              <Text style={styles.helperText}>
-                No eligible modules yet - either none are listed for this qualification, or none are behind your
-                selected year of study.
-              </Text>
-            ) : (
-              eligibleModules.map((m) => (
-                <Pressable key={m.id} style={styles.checkboxRow} onPress={() => toggleModule(m.id)}>
-                  <View style={[styles.checkbox, selectedModuleIds.has(m.id) && styles.checkboxChecked]}>
-                    {selectedModuleIds.has(m.id) ? <Text style={styles.checkboxMark}>✓</Text> : null}
-                  </View>
-                  <Text style={styles.checkboxLabel}>
-                    {m.name} ({m.year_level_label})
-                  </Text>
+                </View>
+                <Pressable style={styles.addModuleButton} onPress={addCustomModule}>
+                  <Text style={styles.addModuleButtonText}>Add module</Text>
                 </Pressable>
-              ))
+              </>
             )}
           </View>
         )}
@@ -694,13 +714,16 @@ const styles = StyleSheet.create({
   checkboxMark: { color: "#fff", fontWeight: "700", fontSize: 13 },
   checkboxLabel: { fontSize: 14, color: colors.text, flexShrink: 1 },
   removeModuleText: { color: colors.error, fontSize: 18, fontWeight: "700", paddingHorizontal: 8 },
-  addModuleRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
-  addModuleInput: { flex: 1 },
+  // Same paired-column layout as SessionDateTimePicker's Hour/Minute row.
+  timeRow: { flexDirection: "row", gap: 12, marginTop: 10 },
+  timeCol: { flex: 1 },
   addModuleButton: {
     backgroundColor: colors.primary,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 14,
+    alignSelf: "flex-start",
+    marginTop: 10,
   },
   addModuleButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   error: { color: colors.error, marginTop: 4, marginBottom: 8 },

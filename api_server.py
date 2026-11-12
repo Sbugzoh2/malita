@@ -310,6 +310,17 @@ class TutoringRequestRequest(BaseModel):
     # module isn't in the catalog - routed to admin's manual match flow
     # instead of tutor self-accept (see backend/tutoring.py).
     custom_module_name: str = ""
+    # Optional context alongside custom_module_name for whichever admin
+    # ends up manually matching this request.
+    custom_module_year_level: int | None = None
+    # Always set for a higher-ed request (stored directly, not derived
+    # through module_id - see TutoringSessionRequest's docstring).
+    institution_id: int | None = None
+    qualification_id: int | None = None
+    # "Other" escape hatch instead of qualification_id - independent of
+    # custom_module_name, since a listed qualification can still have an
+    # unlisted module and vice versa.
+    custom_qualification_name: str = ""
     # Set when the learner picked a specific tutor from the directory
     # (see GET /tutoring/tutors/directory) instead of broadcasting.
     preferred_tutor_id: int | None = None
@@ -1523,6 +1534,9 @@ def tutoring_create_request(payload: TutoringRequestRequest, authorization: str 
             payload.duration_minutes, payload.topic, payload.preferred_times_note,
             module_id=payload.module_id, preferred_tutor_id=payload.preferred_tutor_id,
             custom_module_name=payload.custom_module_name or None,
+            custom_module_year_level=payload.custom_module_year_level,
+            institution_id=payload.institution_id, qualification_id=payload.qualification_id,
+            custom_qualification_name=payload.custom_qualification_name or None,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1546,6 +1560,9 @@ def tutoring_edit_request(request_id: int, payload: TutoringRequestRequest, auth
             topic=payload.topic, preferred_times_note=payload.preferred_times_note,
             module_id=payload.module_id, preferred_tutor_id=payload.preferred_tutor_id,
             custom_module_name=payload.custom_module_name or None,
+            custom_module_year_level=payload.custom_module_year_level,
+            institution_id=payload.institution_id, qualification_id=payload.qualification_id,
+            custom_qualification_name=payload.custom_qualification_name or None,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))

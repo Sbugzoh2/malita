@@ -1528,7 +1528,9 @@ def request_tutoring_session(
     learner_user_id: int, subject: str, price_zar: float, scheduled_at: dt.datetime,
     duration_minutes: int = 60, topic: str = "", preferred_times_note: str = "",
     module_id: int | None = None, preferred_tutor_id: int | None = None,
-    custom_module_name: str | None = None,
+    custom_module_name: str | None = None, custom_module_year_level: int | None = None,
+    institution_id: int | None = None, qualification_id: int | None = None,
+    custom_qualification_name: str | None = None,
 ) -> dict:
     """A learner asking for a tutor, inDrive-style: the LEARNER sets the
     price, exact date/time, and duration right here, and the request
@@ -1569,7 +1571,11 @@ def request_tutoring_session(
             subject=subject,
             module_id=module_id,
             custom_module_name=custom_module_name.strip() if custom_module_name else None,
+            custom_module_year_level=custom_module_year_level if custom_module_name else None,
             is_custom_higher_ed=bool(custom_module_name),
+            institution_id=institution_id,
+            qualification_id=qualification_id,
+            custom_qualification_name=custom_qualification_name.strip() if custom_qualification_name else None,
             preferred_tutor_id=preferred_tutor_id,
             topic=topic.strip() or None,
             preferred_times_note=preferred_times_note.strip() or None,
@@ -1600,6 +1606,8 @@ def edit_tutoring_request(
     scheduled_at: dt.datetime, duration_minutes: int = 60, topic: str = "",
     preferred_times_note: str = "", module_id: int | None = None,
     preferred_tutor_id: int | None = None, custom_module_name: str | None = None,
+    custom_module_year_level: int | None = None, institution_id: int | None = None,
+    qualification_id: int | None = None, custom_qualification_name: str | None = None,
 ) -> dict:
     """The learner editing their own request while it's still fully open
     (status=="requested", not yet touched by any tutor) - re-runs the
@@ -1621,7 +1629,11 @@ def edit_tutoring_request(
         req.subject = subject
         req.module_id = module_id
         req.custom_module_name = custom_module_name.strip() if custom_module_name else None
+        req.custom_module_year_level = custom_module_year_level if custom_module_name else None
         req.is_custom_higher_ed = bool(custom_module_name)
+        req.institution_id = institution_id
+        req.qualification_id = qualification_id
+        req.custom_qualification_name = custom_qualification_name.strip() if custom_qualification_name else None
         req.preferred_tutor_id = preferred_tutor_id
         req.topic = topic.strip() or None
         req.preferred_times_note = preferred_times_note.strip() or None
@@ -2040,15 +2052,18 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "id": r.id, "learner_user_id": r.learner_user_id, "subject": r.subject,
         "module_id": r.module_id,
         "custom_module_name": r.custom_module_name,
+        "custom_module_year_level": r.custom_module_year_level,
+        "custom_qualification_name": r.custom_qualification_name,
         "is_custom_higher_ed": r.is_custom_higher_ed,
         # Only set for a higher-ed request - lets the mobile edit flow
-        # pre-select the Institution/Qualification/Module cascade
-        # without a separate reverse-lookup endpoint.
-        "qualification_id": r.module.qualification_id if r.module else None,
-        "institution_id": (
-            r.module.qualification.institution_id
-            if r.module and r.module.qualification else None
-        ),
+        # pre-select the Institution/Qualification/Module cascade without
+        # a separate reverse-lookup endpoint. Stored directly on the row
+        # (see TutoringSessionRequest's own docstring) rather than
+        # derived through module_id, since that derivation breaks for a
+        # custom module (module_id NULL) even when the institution/
+        # qualification themselves were real catalog picks.
+        "institution_id": r.institution_id,
+        "qualification_id": r.qualification_id,
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
         "status": r.status,
         "status_label": SESSION_STATUS_LABELS.get(r.status, r.status),

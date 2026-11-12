@@ -14,7 +14,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject } from "../theme";
 import {
   ApiError, requestTutoringSession, editTutoringRequest, TutoringRequest,
-  Institution, Qualification, CatalogModule,
+  Institution, Qualification, CatalogModule, YEAR_LEVEL_LABELS,
   fetchInstitutions, fetchQualifications, fetchModules,
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
@@ -25,6 +25,39 @@ import SessionDateTimePicker, {
 } from "../components/SessionDateTimePicker";
 
 const MIN_DURATION_MINUTES = 60;
+
+// A custom ("Other") module's name + year level, laid out as a paired row
+// the same way SessionDateTimePicker pairs Hour (SAST) and Minute below -
+// that component's own styles aren't exported, so this screen defines the
+// same timeRow/timeCol pattern locally.
+function ModuleNameYearRow({
+  name, onChangeName, yearLevel, onChangeYear,
+}: {
+  name: string; onChangeName: (v: string) => void;
+  yearLevel: number | null; onChangeYear: (v: number) => void;
+}) {
+  return (
+    <View style={styles.timeRow}>
+      <View style={styles.timeCol}>
+        <Text style={styles.label}>Module</Text>
+        <TextInput
+          style={styles.input}
+          value={name}
+          onChangeText={onChangeName}
+          placeholder="e.g. Advanced Data Structures"
+        />
+      </View>
+      <View style={styles.timeCol}>
+        <Dropdown
+          label="Year"
+          options={Object.entries(YEAR_LEVEL_LABELS).map(([k, v]) => ({ label: v, value: k }))}
+          value={yearLevel != null ? String(yearLevel) : null}
+          onChange={(v) => onChangeYear(parseInt(v, 10))}
+        />
+      </View>
+    </View>
+  );
+}
 
 export default function RequestTutorScreen({ navigation, route }: any) {
   const { token, me } = useAuth();
@@ -51,7 +84,11 @@ export default function RequestTutorScreen({ navigation, route }: any) {
   // (inferred from the existing request/prefill), so the toggle below
   // only ever applies to a fresh, undirected request.
   const inferredIsHigherEd = isEdit
-    ? editRequest!.module_id != null
+    ? // institution_id (not module_id) is what's always set for a
+      // higher-ed request, catalog or custom module alike - module_id is
+      // null for a perfectly valid higher-ed request when the module was
+      // "Other", so it can't be what this infers mode from.
+      editRequest!.institution_id != null
     : directoryPrefill
     ? directoryPrefill.moduleId != null || directoryPrefill.institutionId != null
     : me?.user.account_type === "higher_ed";
@@ -73,13 +110,30 @@ export default function RequestTutorScreen({ navigation, route }: any) {
   const [qualificationId, setQualificationId] = useState<number | null>(null);
   const [modules, setModules] = useState<CatalogModule[]>([]);
   const [moduleId, setModuleId] = useState<number | null>(null);
-  // "Other" escape hatch, picked from the Qualification dropdown below,
-  // for when the learner's real qualification/module isn't in the catalog -
-  // a request made this way can't be auto-matched (no catalog Module row
-  // for any tutor to self-accept against), so it's routed to admin's
-  // manual force-match flow instead (see backend/tutoring.py).
-  const [isCustomQualification, setIsCustomQualification] = useState(editRequest?.is_custom_higher_ed ?? false);
+  // "Other" escape hatches - deliberately independent of each other, since
+  // the learner's real qualification might be listed while the specific
+  // module they want isn't (or, when the qualification itself isn't
+  // listed, the module is necessarily custom too - there's no catalog to
+  // pick from in that case). Either way a custom module can't be
+  // auto-matched (no catalog Module row for any tutor to self-accept
+  // against), so it's routed to admin's manual force-match flow instead
+  // (see backend/tutoring.py).
+  const [isCustomQualification, setIsCustomQualification] = useState(
+    !!editRequest && editRequest.institution_id != null && editRequest.qualification_id == null
+  );
+  const [isCustomModule, setIsCustomModule] = useState(
+    !!editRequest && editRequest.module_id == null && !!editRequest.custom_module_name
+  );
+  const [customQualificationName, setCustomQualificationName] = useState(
+    editRequest?.custom_qualification_name ?? ""
+  );
   const [customModuleName, setCustomModuleName] = useState(editRequest?.custom_module_name ?? "");
+  const [customModuleYearLevel, setCustomModuleYearLevel] = useState<number | null>(
+    editRequest?.custom_module_year_level ?? null
+  );
+  // True whenever the MODULE field is in custom mode, whichever of the two
+  // escape hatches put it there.
+  const useCustomModule = isCustomQualification || isCustomModule;
 
   // Cascading dropdowns normally reset their children whenever the parent
   // changes. When pre-filling an edit or a directory pick, we want the
@@ -179,11 +233,23 @@ export default function RequestTutorScreen({ navigation, route }: any) {
       setError("Please enter a topic for this session.");
       return;
     }
-    if (isHigherEd && isCustomQualification && !customModuleName.trim()) {
+    if (isHigherEd && !institutionId) {
+      setError("Please select your institution.");
+      return;
+    }
+    if (isHigherEd && isCustomQualification && !customQualificationName.trim()) {
+      setError("Please enter the name of your qualification.");
+      return;
+    }
+    if (isHigherEd && !isCustomQualification && !qualificationId) {
+      setError("Please select your qualification.");
+      return;
+    }
+    if (isHigherEd && useCustomModule && !customModuleName.trim()) {
       setError("Please enter the name of the module you'd like help with.");
       return;
     }
-    if (isHigherEd && !isCustomQualification && !moduleId) {
+    if (isHigherEd && !useCustomModule && !moduleId) {
       setError("Please select the module you'd like help with.");
       return;
     }
@@ -192,8 +258,13 @@ export default function RequestTutorScreen({ navigation, route }: any) {
     try {
       const params = {
         subject: isHigherEd ? undefined : subject,
-        module_id: isHigherEd && !isCustomQualification ? moduleId! : undefined,
-        custom_module_name: isHigherEd && isCustomQualification ? customModuleName.trim() : undefined,
+        module_id: isHigherEd && !useCustomModule ? moduleId! : undefined,
+        custom_module_name: isHigherEd && useCustomModule ? customModuleName.trim() : undefined,
+        custom_module_year_level: isHigherEd && useCustomModule ? customModuleYearLevel ?? undefined : undefined,
+        institution_id: isHigherEd ? institutionId! : undefined,
+        qualification_id: isHigherEd && !isCustomQualification ? qualificationId! : undefined,
+        custom_qualification_name:
+          isHigherEd && isCustomQualification ? customQualificationName.trim() : undefined,
         price_zar: priceVal,
         scheduled_at: sessionDateTimeToIso(dateTime),
         duration_minutes: durationVal,
@@ -277,29 +348,71 @@ export default function RequestTutorScreen({ navigation, route }: any) {
                 if (v === "other") {
                   setIsCustomQualification(true);
                   setQualificationId(null);
+                  // No catalog to pick a module from either, once the
+                  // qualification itself is custom.
+                  setIsCustomModule(true);
+                  setModuleId(null);
                 } else {
                   setIsCustomQualification(false);
                   setQualificationId(parseInt(v, 10));
+                  // Default back to picking a module from the catalog -
+                  // the learner can still choose "Other" again below if
+                  // the specific module they want isn't listed under it.
+                  setIsCustomModule(false);
+                  setCustomModuleName("");
+                  setCustomModuleYearLevel(null);
+                  setCustomQualificationName("");
                 }
               }}
             />
-            {isCustomQualification ? (
+            {isCustomQualification && (
               <>
-                <Text style={styles.label}>Module name (if not listed above)</Text>
+                <Text style={styles.label}>Your qualification</Text>
                 <TextInput
                   style={styles.input}
-                  value={customModuleName}
-                  onChangeText={setCustomModuleName}
-                  placeholder="e.g. Advanced Data Structures"
+                  value={customQualificationName}
+                  onChangeText={setCustomQualificationName}
+                  placeholder="e.g. BCom Investment Management"
                 />
               </>
-            ) : (
-              <Dropdown
-                label="Module"
-                options={modules.map((m) => ({ label: `${m.name} (${m.year_level_label})`, value: String(m.id) }))}
-                value={moduleId != null ? String(moduleId) : null}
-                onChange={(v) => setModuleId(parseInt(v, 10))}
+            )}
+            {isCustomQualification ? (
+              <ModuleNameYearRow
+                name={customModuleName}
+                onChangeName={setCustomModuleName}
+                yearLevel={customModuleYearLevel}
+                onChangeYear={setCustomModuleYearLevel}
               />
+            ) : (
+              <>
+                <Dropdown
+                  label="Module"
+                  options={[
+                    ...modules.map((m) => ({ label: `${m.name} (${m.year_level_label})`, value: String(m.id) })),
+                    { label: "Other (not listed)", value: "other" },
+                  ]}
+                  value={isCustomModule ? "other" : moduleId != null ? String(moduleId) : null}
+                  onChange={(v) => {
+                    if (v === "other") {
+                      setIsCustomModule(true);
+                      setModuleId(null);
+                    } else {
+                      setIsCustomModule(false);
+                      setModuleId(parseInt(v, 10));
+                      setCustomModuleName("");
+                      setCustomModuleYearLevel(null);
+                    }
+                  }}
+                />
+                {isCustomModule && (
+                  <ModuleNameYearRow
+                    name={customModuleName}
+                    onChangeName={setCustomModuleName}
+                    yearLevel={customModuleYearLevel}
+                    onChangeYear={setCustomModuleYearLevel}
+                  />
+                )}
+              </>
             )}
           </>
         ) : (
@@ -373,6 +486,9 @@ export default function RequestTutorScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
+  // Same paired-column layout as SessionDateTimePicker's Hour/Minute row.
+  timeRow: { flexDirection: "row", gap: 12 },
+  timeCol: { flex: 1 },
   flex: { flex: 1, backgroundColor: colors.background },
   // Generous bottom padding so the submit button and closing note sit
   // well clear of the device's own bottom nav bar/gesture area.

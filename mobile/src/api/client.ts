@@ -359,6 +359,11 @@ export type TutoringRequest = {
   // holds the free-text name instead and is_custom_higher_ed flags it as
   // routed to admin's manual match flow rather than tutor self-accept.
   custom_module_name: string | null;
+  custom_module_year_level: number | null;
+  // Set instead of qualification_id when the qualification itself was
+  // "Other" - independent of custom_module_name (either escape hatch can
+  // be used on its own).
+  custom_qualification_name: string | null;
   is_custom_higher_ed: boolean;
   topic: string | null;
   preferred_times_note: string | null;
@@ -403,8 +408,17 @@ export type TutoringRequestParams = {
   module_id?: number;
   // "Other" escape hatch instead of module_id, when the learner's real
   // module isn't in the catalog - routed to admin's manual match flow
-  // instead of tutor self-accept (see backend/tutoring.py).
+  // instead of tutor self-accept (see backend/tutoring.py). Independent
+  // of custom_qualification_name below - either can be used on its own.
   custom_module_name?: string;
+  custom_module_year_level?: number;
+  // Always sent for a higher-ed request (stored directly server-side,
+  // not derived through module_id - see TutoringSessionRequest's
+  // docstring in backend/db.py).
+  institution_id?: number;
+  qualification_id?: number;
+  // "Other" escape hatch instead of qualification_id.
+  custom_qualification_name?: string;
   // Set when the learner picked a specific tutor from the directory
   // (see fetchTutorsDirectory) instead of broadcasting the request.
   preferred_tutor_id?: number;
@@ -420,6 +434,10 @@ function tutoringRequestBody(params: TutoringRequestParams) {
     preferred_times_note: params.preferred_times_note ?? "",
     module_id: params.module_id,
     custom_module_name: params.custom_module_name,
+    custom_module_year_level: params.custom_module_year_level,
+    institution_id: params.institution_id,
+    qualification_id: params.qualification_id,
+    custom_qualification_name: params.custom_qualification_name,
     preferred_tutor_id: params.preferred_tutor_id,
   };
 }

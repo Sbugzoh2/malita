@@ -623,6 +623,16 @@ class TutoringSessionRequest(Base):
     # backend/tutoring.py's list_open_requests_for_tutor/
     # accept_tutoring_request for the branch.
     module_id = Column(Integer, ForeignKey("modules.id"), nullable=True)
+    # institution_id/qualification_id are stored directly (not just
+    # derived through module_id -> Module.qualification_id ->
+    # Qualification.institution_id) because that chain breaks the moment
+    # module_id is NULL - which is exactly the case for a custom module,
+    # even when the institution/qualification themselves were real catalog
+    # picks (the "Other" escape hatches on Qualification and Module are
+    # independent - see mobile/src/screens/RequestTutorScreen.tsx). Always
+    # set for a higher-ed request; both NULL for a high-school one.
+    institution_id = Column(Integer, ForeignKey("institutions.id"), nullable=True)
+    qualification_id = Column(Integer, ForeignKey("qualifications.id"), nullable=True)
     # Set when the learner picked "Other" for their qualification/module
     # (no catalog Module row exists to self-accept-match against) - routed
     # to admin's manual force-match flow instead of the normal tutor
@@ -631,6 +641,12 @@ class TutoringSessionRequest(Base):
     # subject-string display/notification code path keeps working
     # unchanged.
     custom_module_name = Column(String(200), nullable=True)
+    # Optional - just context for whichever admin ends up manually
+    # matching this request, same meaning as Module.year_level.
+    custom_module_year_level = Column(Integer, nullable=True)
+    # Set instead of qualification_id when the qualification itself was
+    # "Other" (institution stays a required catalog pick either way).
+    custom_qualification_name = Column(String(200), nullable=True)
     is_custom_higher_ed = Column(Boolean, default=False, nullable=False)
     topic = Column(String(60), nullable=True)
     # Free-text extra context (e.g. "need help with proofs specifically")
@@ -861,7 +877,11 @@ def init_db():
     _ensure_column("tutoring_session_requests", "lapse_reminder_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "recording_link", "VARCHAR")
     _ensure_column("tutoring_session_requests", "recording_shared_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "institution_id", "INTEGER")
+    _ensure_column("tutoring_session_requests", "qualification_id", "INTEGER")
     _ensure_column("tutoring_session_requests", "custom_module_name", "VARCHAR(200)")
+    _ensure_column("tutoring_session_requests", "custom_module_year_level", "INTEGER")
+    _ensure_column("tutoring_session_requests", "custom_qualification_name", "VARCHAR(200)")
     _ensure_column("tutoring_session_requests", "is_custom_higher_ed", "BOOLEAN DEFAULT FALSE")
     _ensure_column("users", "account_type", "VARCHAR(20) DEFAULT 'high_school'")
     _ensure_column("users", "higher_ed_institution_id", "INTEGER")

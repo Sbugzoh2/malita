@@ -2263,7 +2263,10 @@ elif mode == "🛠️ Tutoring Admin":
                         # eligibility to filter on automatically, so every
                         # approved tutor is listed and an admin has to
                         # judge suitability by eye instead.
-                        st.warning("⚠️ Custom module — not in catalog, review carefully before matching.")
+                        qual_str = (
+                            f" — qualification: {r['custom_qualification_name']}" if r.get("custom_qualification_name") else ""
+                        )
+                        st.warning(f"⚠️ Custom module — not in catalog, review carefully before matching.{qual_str}")
                         candidates = list_approved_tutors()
                     else:
                         candidates = list_approved_tutors(r["subject"])

@@ -9,10 +9,12 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => ({
+// Exported for reuse anywhere else that needs the same Hour/Minute pair
+// (e.g. TutorApplyScreen's weekly availability picker).
+export const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => ({
   label: String(i).padStart(2, "0"), value: String(i),
 }));
-const MINUTE_OPTIONS = ["00", "15", "30", "45"].map((m) => ({ label: m, value: m }));
+export const MINUTE_OPTIONS = ["00", "15", "30", "45"].map((m) => ({ label: m, value: m }));
 
 export type SessionDateTimeValue = {
   year: number; month: number; day: number; hour: number; minute: number;

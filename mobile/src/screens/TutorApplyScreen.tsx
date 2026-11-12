@@ -11,8 +11,12 @@ import {
   Platform,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject, SA_BANKS, BANK_ACCOUNT_TYPES } from "../theme";
+import {
+  colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject,
+  SA_BANKS, BANK_ACCOUNT_TYPES, DAYS_OF_WEEK,
+} from "../theme";
 import Dropdown from "../components/Dropdown";
+import { HOUR_OPTIONS, MINUTE_OPTIONS } from "../components/SessionDateTimePicker";
 import {
   ApiError, applyAsTutor, YEAR_LEVEL_LABELS,
   Institution, Qualification, CatalogModule,
@@ -22,6 +26,35 @@ import {
 type PickedDoc = { uri: string; name: string; type: string } | null;
 
 type SubjectRow = { selected: boolean; matric: string; topics: string; rate: string };
+
+type AvailabilitySlot = {
+  day: (typeof DAYS_OF_WEEK)[number];
+  startHour: number; startMinute: number;
+  endHour: number; endMinute: number;
+};
+
+function formatSlotTime(hour: number, minute: number): string {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+// The backend (apply_as_tutor's availability_note) and every existing
+// admin display/email that reads it are untouched - still a plain
+// string - this just builds that string from structured slots instead
+// of asking the tutor to type it themselves. Grouped by day so
+// "Monday 12:00-13:00 and 22:00-00:00" reads the way the day was asked
+// for, not as two separate unrelated lines.
+function formatAvailabilitySummary(slots: AvailabilitySlot[]): string {
+  const byDay = new Map<string, string[]>();
+  for (const day of DAYS_OF_WEEK) {
+    const dayRanges = slots
+      .filter((s) => s.day === day)
+      .map((s) => `${formatSlotTime(s.startHour, s.startMinute)}-${formatSlotTime(s.endHour, s.endMinute)}`);
+    if (dayRanges.length > 0) byDay.set(day, dayRanges);
+  }
+  return Array.from(byDay.entries())
+    .map(([day, ranges]) => `${day}: ${ranges.join(", ")}`)
+    .join(" · ");
+}
 
 async function pickDocument(): Promise<PickedDoc> {
   const result = await DocumentPicker.getDocumentAsync({
@@ -61,7 +94,12 @@ export default function TutorApplyScreen({ navigation }: any) {
   const [phone, setPhone] = useState("");
   const [bio, setBio] = useState("");
   const [idNumber, setIdNumber] = useState("");
-  const [availabilityNote, setAvailabilityNote] = useState("");
+  const [availabilitySlots, setAvailabilitySlots] = useState<AvailabilitySlot[]>([]);
+  const [newSlotDay, setNewSlotDay] = useState<(typeof DAYS_OF_WEEK)[number] | null>(null);
+  const [newSlotStartHour, setNewSlotStartHour] = useState<number | null>(null);
+  const [newSlotStartMinute, setNewSlotStartMinute] = useState<number | null>(null);
+  const [newSlotEndHour, setNewSlotEndHour] = useState<number | null>(null);
+  const [newSlotEndMinute, setNewSlotEndMinute] = useState<number | null>(null);
   const [bankAccountHolder, setBankAccountHolder] = useState("");
   const [bankName, setBankName] = useState<string | null>(null);
   const [bankNameOther, setBankNameOther] = useState("");
@@ -183,6 +221,33 @@ export default function TutorApplyScreen({ navigation }: any) {
     setCustomModules((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function addAvailabilitySlot() {
+    if (
+      !newSlotDay || newSlotStartHour == null || newSlotStartMinute == null ||
+      newSlotEndHour == null || newSlotEndMinute == null
+    ) {
+      return;
+    }
+    setAvailabilitySlots((prev) => [
+      ...prev,
+      {
+        day: newSlotDay, startHour: newSlotStartHour, startMinute: newSlotStartMinute,
+        endHour: newSlotEndHour, endMinute: newSlotEndMinute,
+      },
+    ]);
+    // Keep the day selected (adding several ranges for the same day is
+    // the common case, e.g. a morning slot and an evening slot) - just
+    // clear the times for the next range.
+    setNewSlotStartHour(null);
+    setNewSlotStartMinute(null);
+    setNewSlotEndHour(null);
+    setNewSlotEndMinute(null);
+  }
+
+  function removeAvailabilitySlot(index: number) {
+    setAvailabilitySlots((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleSubmit() {
     setError(null);
     if (!wantsHighSchool && !wantsHigherEd) {
@@ -202,7 +267,10 @@ export default function TutorApplyScreen({ navigation }: any) {
     }
     if (!bio.trim()) { setError("Please enter a short bio."); return; }
     if (!idNumber.trim()) { setError("Please enter your ID number."); return; }
-    if (!availabilityNote.trim()) { setError("Please enter your availability."); return; }
+    if (availabilitySlots.length === 0) {
+      setError("Please add at least one day/time you're available.");
+      return;
+    }
     if (!bankAccountHolder.trim()) { setError("Please enter the bank account holder's name."); return; }
     if (!bankName) { setError("Please select your bank."); return; }
     if (bankName === "Other" && !bankNameOther.trim()) { setError("Please enter your bank's name."); return; }
@@ -288,7 +356,7 @@ export default function TutorApplyScreen({ navigation }: any) {
         phone: phone.trim(),
         bio: bio.trim(),
         id_number: idNumber.trim(),
-        availability_note: availabilityNote.trim(),
+        availability_note: formatAvailabilitySummary(availabilitySlots),
         bank_account_holder: bankAccountHolder.trim(),
         bank_name: bankName === "Other" ? bankNameOther.trim() : bankName ?? "",
         bank_branch_code: bankBranchCode.trim(),
@@ -435,12 +503,61 @@ export default function TutorApplyScreen({ navigation }: any) {
           <TextInput style={styles.input} value={idNumber} onChangeText={setIdNumber} maxLength={13} keyboardType="number-pad" />
 
           <Text style={styles.label}>Availability</Text>
-          <TextInput
-            style={styles.input}
-            value={availabilityNote}
-            onChangeText={setAvailabilityNote}
-            placeholder="e.g. Weekdays after 16:00, Saturday mornings"
+          {availabilitySlots.map((slot, i) => (
+            <View key={i} style={styles.checkboxRow}>
+              <Text style={[styles.checkboxLabel, { flex: 1 }]}>
+                {slot.day}: {formatSlotTime(slot.startHour, slot.startMinute)}–{formatSlotTime(slot.endHour, slot.endMinute)}
+              </Text>
+              <Pressable onPress={() => removeAvailabilitySlot(i)}>
+                <Text style={styles.removeModuleText}>✕</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Dropdown
+            label="Day"
+            options={DAYS_OF_WEEK.map((d) => ({ label: d, value: d }))}
+            value={newSlotDay}
+            onChange={(v) => setNewSlotDay(v as (typeof DAYS_OF_WEEK)[number])}
           />
+          <View style={styles.timeRow}>
+            <View style={styles.timeCol}>
+              <Dropdown
+                label="Start hour"
+                options={HOUR_OPTIONS}
+                value={newSlotStartHour != null ? String(newSlotStartHour) : null}
+                onChange={(v) => setNewSlotStartHour(parseInt(v, 10))}
+              />
+            </View>
+            <View style={styles.timeCol}>
+              <Dropdown
+                label="Start minute"
+                options={MINUTE_OPTIONS}
+                value={newSlotStartMinute != null ? String(newSlotStartMinute).padStart(2, "0") : null}
+                onChange={(v) => setNewSlotStartMinute(parseInt(v, 10))}
+              />
+            </View>
+          </View>
+          <View style={styles.timeRow}>
+            <View style={styles.timeCol}>
+              <Dropdown
+                label="End hour"
+                options={HOUR_OPTIONS}
+                value={newSlotEndHour != null ? String(newSlotEndHour) : null}
+                onChange={(v) => setNewSlotEndHour(parseInt(v, 10))}
+              />
+            </View>
+            <View style={styles.timeCol}>
+              <Dropdown
+                label="End minute"
+                options={MINUTE_OPTIONS}
+                value={newSlotEndMinute != null ? String(newSlotEndMinute).padStart(2, "0") : null}
+                onChange={(v) => setNewSlotEndMinute(parseInt(v, 10))}
+              />
+            </View>
+          </View>
+          <Pressable style={styles.addModuleButton} onPress={addAvailabilitySlot}>
+            <Text style={styles.addModuleButtonText}>Add availability</Text>
+          </Pressable>
 
           <Text style={styles.sectionTitle}>Bank Account Details (for payouts)</Text>
           <Text style={styles.label}>Account holder name</Text>

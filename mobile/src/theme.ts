@@ -108,6 +108,13 @@ export const BANK_ACCOUNT_TYPES = [
   "Other",
 ] as const;
 
+// A tutor's weekly availability (TutorApplyScreen) is built from one or
+// more {day, start, end} slots rather than free text - this is just the
+// day picker's own option list.
+export const DAYS_OF_WEEK = [
+  "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+] as const;
+
 export const PAPER_TOPICS_BY_SUBJECT: Record<Subject, Record<string, string[]>> = {
   Mathematics: {
     "Paper 1": ["Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs"],

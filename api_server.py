@@ -197,6 +197,7 @@ class RegisterRequest(BaseModel):
     account_type: str = "high_school"  # "high_school" | "higher_ed"
     higher_ed_institution_id: int | None = None
     higher_ed_qualification_id: int | None = None
+    higher_ed_qualification_custom_name: str = ""
     higher_ed_year_of_study: int | None = None
     student_number: str = ""
 
@@ -305,6 +306,10 @@ class TutoringRequestRequest(BaseModel):
     # A higher-ed catalog Module id - set this INSTEAD OF subject for a
     # university/college tutoring request.
     module_id: int | None = None
+    # "Other" escape hatch instead of module_id, when the learner's real
+    # module isn't in the catalog - routed to admin's manual match flow
+    # instead of tutor self-accept (see backend/tutoring.py).
+    custom_module_name: str = ""
     # Set when the learner picked a specific tutor from the directory
     # (see GET /tutoring/tutors/directory) instead of broadcasting.
     preferred_tutor_id: int | None = None
@@ -412,6 +417,7 @@ def register(body: RegisterRequest):
             account_type=body.account_type,
             higher_ed_institution_id=body.higher_ed_institution_id,
             higher_ed_qualification_id=body.higher_ed_qualification_id,
+            higher_ed_qualification_custom_name=body.higher_ed_qualification_custom_name,
             higher_ed_year_of_study=body.higher_ed_year_of_study,
             student_number=body.student_number,
         )
@@ -1364,6 +1370,8 @@ async def tutoring_apply(
     subjects: str = Form("[]"),
     higher_ed_institution_id: int | None = Form(None),
     higher_ed_qualification_id: int | None = Form(None),
+    higher_ed_qualification_custom_name: str = Form(""),
+    higher_ed_custom_modules: str = Form("[]"),
     higher_ed_year_of_study: int | None = Form(None),
     higher_ed_qualification_complete: bool = Form(False),
     higher_ed_average: float | None = Form(None),
@@ -1404,6 +1412,14 @@ async def tutoring_apply(
         module_ids = [int(m) for m in module_ids]
     except Exception:
         raise HTTPException(status_code=400, detail="'higher_ed_module_ids' must be a JSON-encoded list of integers.")
+    try:
+        custom_modules = json.loads(higher_ed_custom_modules) if higher_ed_custom_modules else []
+        custom_modules = [{"name": m["name"], "year_level": int(m["year_level"])} for m in custom_modules]
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="'higher_ed_custom_modules' must be a JSON-encoded list of {name, year_level} objects.",
+        )
 
     id_document_tuple = None
     if id_document is not None:
@@ -1440,6 +1456,8 @@ async def tutoring_apply(
             subjects=[s.model_dump() for s in parsed_subjects],
             higher_ed_institution_id=higher_ed_institution_id,
             higher_ed_qualification_id=higher_ed_qualification_id,
+            higher_ed_qualification_custom_name=higher_ed_qualification_custom_name,
+            higher_ed_custom_modules=custom_modules,
             higher_ed_year_of_study=higher_ed_year_of_study,
             higher_ed_qualification_complete=higher_ed_qualification_complete,
             higher_ed_average=higher_ed_average,
@@ -1468,11 +1486,15 @@ def admin_tutoring_document_url(tutor_id: int, kind: str, authorization: str = H
         raise HTTPException(status_code=400, detail=str(e))
 
 
-def _resolve_tutoring_subject(module_id: int | None, subject: str) -> str:
+def _resolve_tutoring_subject(module_id: int | None, subject: str, custom_module_name: str = "") -> str:
     """Shared by create and edit - a higher-ed request (module_id set)
     looks up the module's own name server-side so `subject` always
     reflects it, even if the client sent something else or nothing at
-    all; a high-school request just requires a non-empty subject."""
+    all; a custom ("Other") higher-ed request uses the learner's own
+    typed-in module name instead (no catalog row to look up); a
+    high-school request just requires a non-empty subject."""
+    if custom_module_name.strip():
+        return custom_module_name.strip()
     if module_id is not None:
         with get_session() as db:
             mod = db.query(Module).get(module_id)
@@ -1493,13 +1515,14 @@ def tutoring_create_request(payload: TutoringRequestRequest, authorization: str 
         scheduled_at = _parse_iso_datetime(payload.scheduled_at)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date/time format.")
-    subject = _resolve_tutoring_subject(payload.module_id, payload.subject)
+    subject = _resolve_tutoring_subject(payload.module_id, payload.subject, payload.custom_module_name)
 
     try:
         return request_tutoring_session(
             user["id"], subject, payload.price_zar, scheduled_at,
             payload.duration_minutes, payload.topic, payload.preferred_times_note,
             module_id=payload.module_id, preferred_tutor_id=payload.preferred_tutor_id,
+            custom_module_name=payload.custom_module_name or None,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1514,7 +1537,7 @@ def tutoring_edit_request(request_id: int, payload: TutoringRequestRequest, auth
         scheduled_at = _parse_iso_datetime(payload.scheduled_at)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date/time format.")
-    subject = _resolve_tutoring_subject(payload.module_id, payload.subject)
+    subject = _resolve_tutoring_subject(payload.module_id, payload.subject, payload.custom_module_name)
 
     try:
         return edit_tutoring_request(
@@ -1522,6 +1545,7 @@ def tutoring_edit_request(request_id: int, payload: TutoringRequestRequest, auth
             scheduled_at=scheduled_at, duration_minutes=payload.duration_minutes,
             topic=payload.topic, preferred_times_note=payload.preferred_times_note,
             module_id=payload.module_id, preferred_tutor_id=payload.preferred_tutor_id,
+            custom_module_name=payload.custom_module_name or None,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))

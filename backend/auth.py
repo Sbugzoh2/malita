@@ -79,6 +79,9 @@ def register_user(
     account_type: str = "high_school",
     higher_ed_institution_id: int | None = None,
     higher_ed_qualification_id: int | None = None,
+    # "Other" escape hatch instead of higher_ed_qualification_id, for when
+    # the learner's real qualification isn't in the catalog.
+    higher_ed_qualification_custom_name: str = "",
     higher_ed_year_of_study: int | None = None,
     student_number: str = "",
 ) -> dict:
@@ -94,6 +97,7 @@ def register_user(
     id_number = (id_number or "").strip()
     account_type = (account_type or "high_school").strip()
     student_number = (student_number or "").strip()
+    higher_ed_qualification_custom_name = (higher_ed_qualification_custom_name or "").strip()
 
     if not name:
         raise AuthError("Please enter your name.")
@@ -112,7 +116,7 @@ def register_user(
     date_of_birth = parse_sa_id_number(id_number)
 
     if account_type == "higher_ed":
-        if not higher_ed_institution_id or not higher_ed_qualification_id:
+        if not higher_ed_institution_id or not (higher_ed_qualification_id or higher_ed_qualification_custom_name):
             raise AuthError("Please select your institution and qualification.")
         if not higher_ed_year_of_study or not (1 <= higher_ed_year_of_study <= max(YEAR_LEVEL_LABELS)):
             raise AuthError("Please select your year of study.")
@@ -127,7 +131,7 @@ def register_user(
         if existing_id:
             raise AuthError("An account with this ID number already exists. Try logging in instead.")
 
-        if account_type == "higher_ed":
+        if account_type == "higher_ed" and higher_ed_qualification_id:
             qual = db.query(Qualification).get(higher_ed_qualification_id)
             if not qual or qual.institution_id != higher_ed_institution_id:
                 raise AuthError("That qualification doesn't belong to the selected institution.")
@@ -143,7 +147,12 @@ def register_user(
             date_of_birth=date_of_birth,
             account_type=account_type,
             higher_ed_institution_id=higher_ed_institution_id if account_type == "higher_ed" else None,
-            higher_ed_qualification_id=higher_ed_qualification_id if account_type == "higher_ed" else None,
+            higher_ed_qualification_id=(
+                higher_ed_qualification_id if account_type == "higher_ed" and not higher_ed_qualification_custom_name else None
+            ),
+            higher_ed_qualification_custom_name=(
+                higher_ed_qualification_custom_name if account_type == "higher_ed" else None
+            ) or None,
             higher_ed_year_of_study=higher_ed_year_of_study if account_type == "higher_ed" else None,
             student_number=student_number if account_type == "higher_ed" else None,
         )

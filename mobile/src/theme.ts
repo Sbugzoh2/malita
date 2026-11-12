@@ -44,6 +44,44 @@ export const topicColors: Record<string, string> = {
 export const SUBJECTS = ["Mathematics", "Physical Sciences"] as const;
 export type Subject = (typeof SUBJECTS)[number];
 
+// Deliberately separate from SUBJECTS above - the AI Tutor/AI Teacher/
+// Practice Questions/Past Papers features only have real deterministic
+// content for Mathematics and Physical Sciences, but the human tutoring
+// marketplace (RequestTutorScreen/TutorApplyScreen/BrowseTutorsScreen) is
+// just a human-matching system with no per-subject content requirement -
+// the backend's subject columns are plain unvalidated strings, so any
+// CAPS subject can go here without touching the AI-feature subject list.
+export const HIGH_SCHOOL_TUTORING_SUBJECTS = [
+  "Mathematics",
+  "Mathematical Literacy",
+  "Physical Sciences",
+  "Life Sciences",
+  "English Home Language",
+  "English First Additional Language",
+  "Afrikaans Home Language",
+  "Afrikaans First Additional Language",
+  "isiZulu Home Language",
+  "isiZulu First Additional Language",
+  "Life Orientation",
+  "Accounting",
+  "Business Studies",
+  "Economics",
+  "Geography",
+  "History",
+  "Agricultural Sciences",
+  "Consumer Studies",
+  "Computer Applications Technology",
+  "Information Technology",
+  "Tourism",
+  "Hospitality Studies",
+  "Visual Arts",
+  "Dramatic Arts",
+  "Music",
+  "Engineering Graphics and Design",
+  "Religion Studies",
+] as const;
+export type HighSchoolTutoringSubject = (typeof HIGH_SCHOOL_TUTORING_SUBJECTS)[number];
+
 export const PAPER_TOPICS_BY_SUBJECT: Record<Subject, Record<string, string[]>> = {
   Mathematics: {
     "Paper 1": ["Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs"],

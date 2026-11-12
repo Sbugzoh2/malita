@@ -11,7 +11,7 @@ import {
   Platform,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
-import { colors, SUBJECTS, Subject } from "../theme";
+import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject } from "../theme";
 import {
   ApiError, requestTutoringSession, editTutoringRequest, TutoringRequest,
   Institution, Qualification, CatalogModule,
@@ -59,8 +59,10 @@ export default function RequestTutorScreen({ navigation, route }: any) {
   const isHigherEd = hasCrossAccess && modeOverride != null ? modeOverride : inferredIsHigherEd;
   const showModeToggle = hasCrossAccess && !isEdit && !directoryPrefill;
 
-  const [subject, setSubject] = useState<Subject>(
-    (editRequest?.subject as Subject) || (directoryPrefill?.subject as Subject) || "Mathematics"
+  const [subject, setSubject] = useState<HighSchoolTutoringSubject>(
+    (editRequest?.subject as HighSchoolTutoringSubject) ||
+      (directoryPrefill?.subject as HighSchoolTutoringSubject) ||
+      "Mathematics"
   );
 
   const [institutions, setInstitutions] = useState<Institution[]>([]);
@@ -71,6 +73,13 @@ export default function RequestTutorScreen({ navigation, route }: any) {
   const [qualificationId, setQualificationId] = useState<number | null>(null);
   const [modules, setModules] = useState<CatalogModule[]>([]);
   const [moduleId, setModuleId] = useState<number | null>(null);
+  // "Other" escape hatch, picked from the Qualification dropdown below,
+  // for when the learner's real qualification/module isn't in the catalog -
+  // a request made this way can't be auto-matched (no catalog Module row
+  // for any tutor to self-accept against), so it's routed to admin's
+  // manual force-match flow instead (see backend/tutoring.py).
+  const [isCustomQualification, setIsCustomQualification] = useState(editRequest?.is_custom_higher_ed ?? false);
+  const [customModuleName, setCustomModuleName] = useState(editRequest?.custom_module_name ?? "");
 
   // Cascading dropdowns normally reset their children whenever the parent
   // changes. When pre-filling an edit or a directory pick, we want the
@@ -131,7 +140,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
   }, [institutionId]);
 
   useEffect(() => {
-    if (!qualificationId) {
+    if (!qualificationId || isCustomQualification) {
       setModules([]);
       setModuleId(null);
       return;
@@ -166,7 +175,15 @@ export default function RequestTutorScreen({ navigation, route }: any) {
       setError("Please select a date and time for your session.");
       return;
     }
-    if (isHigherEd && !moduleId) {
+    if (!topic.trim()) {
+      setError("Please enter a topic for this session.");
+      return;
+    }
+    if (isHigherEd && isCustomQualification && !customModuleName.trim()) {
+      setError("Please enter the name of the module you'd like help with.");
+      return;
+    }
+    if (isHigherEd && !isCustomQualification && !moduleId) {
       setError("Please select the module you'd like help with.");
       return;
     }
@@ -175,7 +192,8 @@ export default function RequestTutorScreen({ navigation, route }: any) {
     try {
       const params = {
         subject: isHigherEd ? undefined : subject,
-        module_id: isHigherEd ? moduleId! : undefined,
+        module_id: isHigherEd && !isCustomQualification ? moduleId! : undefined,
+        custom_module_name: isHigherEd && isCustomQualification ? customModuleName.trim() : undefined,
         price_zar: priceVal,
         scheduled_at: sessionDateTimeToIso(dateTime),
         duration_minutes: durationVal,
@@ -250,23 +268,46 @@ export default function RequestTutorScreen({ navigation, route }: any) {
             />
             <Dropdown
               label="Qualification"
-              options={qualifications.map((q) => ({ label: q.name, value: String(q.id) }))}
-              value={qualificationId != null ? String(qualificationId) : null}
-              onChange={(v) => setQualificationId(parseInt(v, 10))}
+              options={[
+                ...qualifications.map((q) => ({ label: q.name, value: String(q.id) })),
+                { label: "Other (not listed)", value: "other" },
+              ]}
+              value={isCustomQualification ? "other" : qualificationId != null ? String(qualificationId) : null}
+              onChange={(v) => {
+                if (v === "other") {
+                  setIsCustomQualification(true);
+                  setQualificationId(null);
+                } else {
+                  setIsCustomQualification(false);
+                  setQualificationId(parseInt(v, 10));
+                }
+              }}
             />
-            <Dropdown
-              label="Module"
-              options={modules.map((m) => ({ label: `${m.name} (${m.year_level_label})`, value: String(m.id) }))}
-              value={moduleId != null ? String(moduleId) : null}
-              onChange={(v) => setModuleId(parseInt(v, 10))}
-            />
+            {isCustomQualification ? (
+              <>
+                <Text style={styles.label}>Module name (if not listed above)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={customModuleName}
+                  onChangeText={setCustomModuleName}
+                  placeholder="e.g. Advanced Data Structures"
+                />
+              </>
+            ) : (
+              <Dropdown
+                label="Module"
+                options={modules.map((m) => ({ label: `${m.name} (${m.year_level_label})`, value: String(m.id) }))}
+                value={moduleId != null ? String(moduleId) : null}
+                onChange={(v) => setModuleId(parseInt(v, 10))}
+              />
+            )}
           </>
         ) : (
           <Dropdown
             label="Subject"
-            options={SUBJECTS.map((s) => ({ label: s, value: s }))}
+            options={HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => ({ label: s, value: s }))}
             value={subject}
-            onChange={(v) => setSubject(v as Subject)}
+            onChange={(v) => setSubject(v as HighSchoolTutoringSubject)}
           />
         )}
 
@@ -290,7 +331,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
 
         <SessionDateTimePicker label="Session date & time" value={dateTime} onChange={setDateTime} />
 
-        <Text style={styles.label}>Topic (optional)</Text>
+        <Text style={styles.label}>Topic</Text>
         <TextInput
           style={styles.input}
           value={topic}

@@ -302,10 +302,19 @@ if st.session_state.auth_user is None:
             qual_labels = {q["name"]: q["id"] for q in quals}
             if higher_ed_institution_id and not quals:
                 st.caption("No qualifications listed for this institution yet - contact Malita support.")
+            OTHER_QUALIFICATION = "Other (not listed)"
             chosen_qual = st.selectbox(
-                "Qualification", list(qual_labels.keys()) or ["—"], key="reg_qualification",
+                "Qualification", (list(qual_labels.keys()) or ["—"]) + [OTHER_QUALIFICATION],
+                key="reg_qualification",
             )
-            higher_ed_qualification_id = qual_labels.get(chosen_qual)
+            higher_ed_qualification_custom_name = ""
+            if chosen_qual == OTHER_QUALIFICATION:
+                higher_ed_qualification_custom_name = st.text_input(
+                    "Your qualification", key="reg_qualification_custom",
+                    placeholder="e.g. BCom Investment Management",
+                )
+            else:
+                higher_ed_qualification_id = qual_labels.get(chosen_qual)
 
             year_labels = {v: k for k, v in YEAR_LEVEL_LABELS.items()}
             chosen_year = st.selectbox("Year of study", list(year_labels.keys()), key="reg_year")
@@ -330,6 +339,7 @@ if st.session_state.auth_user is None:
                         account_type=account_type,
                         higher_ed_institution_id=higher_ed_institution_id,
                         higher_ed_qualification_id=higher_ed_qualification_id,
+                        higher_ed_qualification_custom_name=higher_ed_qualification_custom_name,
                         higher_ed_year_of_study=higher_ed_year_of_study,
                         student_number=reg_student_number,
                     )
@@ -2247,7 +2257,16 @@ elif mode == "🛠️ Tutoring Admin":
                         st.write(f"**Learner requested:** {to_sast_str(r['scheduled_at'])}")
                     if r["preferred_times_note"]:
                         st.write(f"**Notes:** {r['preferred_times_note']}")
-                    candidates = list_approved_tutors(r["subject"])
+                    if r.get("is_custom_higher_ed"):
+                        # No catalog Module row exists for this one (the
+                        # learner picked "Other") - there's no tutor
+                        # eligibility to filter on automatically, so every
+                        # approved tutor is listed and an admin has to
+                        # judge suitability by eye instead.
+                        st.warning("⚠️ Custom module — not in catalog, review carefully before matching.")
+                        candidates = list_approved_tutors()
+                    else:
+                        candidates = list_approved_tutors(r["subject"])
                     if not candidates:
                         st.warning(f"No approved tutors for {r['subject']} yet.")
                     else:

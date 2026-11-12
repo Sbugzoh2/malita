@@ -11,7 +11,7 @@ import {
   Platform,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-import { colors, SUBJECTS, Subject } from "../theme";
+import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject } from "../theme";
 import Dropdown from "../components/Dropdown";
 import {
   ApiError, applyAsTutor, YEAR_LEVEL_LABELS,
@@ -64,11 +64,10 @@ export default function TutorApplyScreen({ navigation }: any) {
   const [availabilityNote, setAvailabilityNote] = useState("");
   const [bankAccountNote, setBankAccountNote] = useState("");
 
-  const [subjectRows, setSubjectRows] = useState<Record<Subject, SubjectRow>>(
-    Object.fromEntries(SUBJECTS.map((s) => [s, { selected: false, matric: "", topics: "", rate: "" }])) as Record<
-      Subject,
-      SubjectRow
-    >
+  const [subjectRows, setSubjectRows] = useState<Record<HighSchoolTutoringSubject, SubjectRow>>(
+    Object.fromEntries(
+      HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => [s, { selected: false, matric: "", topics: "", rate: "" }])
+    ) as Record<HighSchoolTutoringSubject, SubjectRow>
   );
 
   const [institutions, setInstitutions] = useState<Institution[]>([]);
@@ -81,6 +80,15 @@ export default function TutorApplyScreen({ navigation }: any) {
   const [transcriptNote, setTranscriptNote] = useState("");
   const [modules, setModules] = useState<CatalogModule[]>([]);
   const [selectedModuleIds, setSelectedModuleIds] = useState<Set<number>>(new Set());
+  // "Other" escape hatch for when the applicant's real qualification isn't
+  // in the catalog - modules then have no catalog Module row to point at,
+  // so they're entered as free-text name + year instead of picked from a
+  // list (see TutorCustomHigherEdModule in backend/db.py).
+  const [isCustomQualification, setIsCustomQualification] = useState(false);
+  const [customQualificationName, setCustomQualificationName] = useState("");
+  const [customModules, setCustomModules] = useState<{ name: string; year_level: number }[]>([]);
+  const [newCustomModuleName, setNewCustomModuleName] = useState("");
+  const [newCustomModuleYear, setNewCustomModuleYear] = useState<number | null>(null);
 
   const [idDocument, setIdDocument] = useState<PickedDoc>(null);
   const [matricCertificate, setMatricCertificate] = useState<PickedDoc>(null);
@@ -127,19 +135,23 @@ export default function TutorApplyScreen({ navigation }: any) {
   // Only modules at least one year behind the applicant's own year of
   // study are eligible to tutor - same rule enforced server-side, shown
   // here so an applicant never picks something that will just get
-  // rejected on submit.
+  // rejected on submit. Eligible YEAR_LEVEL_LABELS entries for the custom
+  // module builder below apply the identical rule.
   const eligibleModules = modules.filter(
     (m) => qualificationComplete || (yearOfStudy != null && m.year_level < yearOfStudy)
   );
+  const eligibleYearLevels = Object.entries(YEAR_LEVEL_LABELS).filter(
+    ([k]) => qualificationComplete || (yearOfStudy != null && parseInt(k, 10) < yearOfStudy)
+  );
 
-  function toggleSubject(subject: Subject) {
+  function toggleSubject(subject: HighSchoolTutoringSubject) {
     setSubjectRows((prev) => ({
       ...prev,
       [subject]: { ...prev[subject], selected: !prev[subject].selected },
     }));
   }
 
-  function updateSubjectField(subject: Subject, field: keyof SubjectRow, value: string) {
+  function updateSubjectField(subject: HighSchoolTutoringSubject, field: keyof SubjectRow, value: string) {
     setSubjectRows((prev) => ({ ...prev, [subject]: { ...prev[subject], [field]: value } }));
   }
 
@@ -150,6 +162,17 @@ export default function TutorApplyScreen({ navigation }: any) {
       else next.add(moduleId);
       return next;
     });
+  }
+
+  function addCustomModule() {
+    if (!newCustomModuleName.trim() || newCustomModuleYear == null) return;
+    setCustomModules((prev) => [...prev, { name: newCustomModuleName.trim(), year_level: newCustomModuleYear }]);
+    setNewCustomModuleName("");
+    setNewCustomModuleYear(null);
+  }
+
+  function removeCustomModule(index: number) {
+    setCustomModules((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit() {
@@ -176,7 +199,7 @@ export default function TutorApplyScreen({ navigation }: any) {
     if (!idDocument) { setError("Please upload your ID document."); return; }
     if (!cv) { setError("Please upload your CV."); return; }
 
-    const chosenSubjects = SUBJECTS.filter((s) => subjectRows[s].selected);
+    const chosenSubjects = HIGH_SCHOOL_TUTORING_SUBJECTS.filter((s) => subjectRows[s].selected);
     // Selecting "Both" with no high-school subject chosen isn't an error -
     // the profile just defaults to a university/college-only application.
     const isBothMode = wantsHighSchool && wantsHigherEd;
@@ -206,8 +229,12 @@ export default function TutorApplyScreen({ navigation }: any) {
     }
 
     if (wantsHigherEd) {
-      if (!institutionId || !qualificationId) {
+      if (!institutionId || (!isCustomQualification && !qualificationId)) {
         setError("Please select your institution and qualification.");
+        return;
+      }
+      if (isCustomQualification && !customQualificationName.trim()) {
+        setError("Please enter the name of your qualification.");
         return;
       }
       if (!yearOfStudy) {
@@ -223,7 +250,7 @@ export default function TutorApplyScreen({ navigation }: any) {
         setError("Please enter a transcript note.");
         return;
       }
-      if (selectedModuleIds.size === 0) {
+      if (isCustomQualification ? customModules.length === 0 : selectedModuleIds.size === 0) {
         setError("Please select at least one module you're able to tutor.");
         return;
       }
@@ -257,12 +284,15 @@ export default function TutorApplyScreen({ navigation }: any) {
           hourly_rate_zar: subjectRows[s].rate ? parseFloat(subjectRows[s].rate) : undefined,
         })),
         higher_ed_institution_id: wantsHigherEd ? institutionId : undefined,
-        higher_ed_qualification_id: wantsHigherEd ? qualificationId : undefined,
+        higher_ed_qualification_id: wantsHigherEd && !isCustomQualification ? qualificationId : undefined,
+        higher_ed_qualification_custom_name:
+          wantsHigherEd && isCustomQualification ? customQualificationName.trim() : undefined,
         higher_ed_year_of_study: wantsHigherEd ? yearOfStudy : undefined,
         higher_ed_qualification_complete: wantsHigherEd ? qualificationComplete : undefined,
         higher_ed_average: wantsHigherEd ? parseFloat(average) : undefined,
         higher_ed_transcript_note: wantsHigherEd ? transcriptNote.trim() : undefined,
-        higher_ed_module_ids: wantsHigherEd ? Array.from(selectedModuleIds) : undefined,
+        higher_ed_module_ids: wantsHigherEd && !isCustomQualification ? Array.from(selectedModuleIds) : undefined,
+        higher_ed_custom_modules: wantsHigherEd && isCustomQualification ? customModules : undefined,
         id_document: idDocument,
         matric_certificate: effectiveWantsHighSchool ? matricCertificate : null,
         cv,
@@ -394,7 +424,7 @@ export default function TutorApplyScreen({ navigation }: any) {
             label="Matric certificate"
             value={matricCertificate}
             onPick={setMatricCertificate}
-            required={SUBJECTS.some((s) => subjectRows[s].selected)}
+            required={HIGH_SCHOOL_TUTORING_SUBJECTS.some((s) => subjectRows[s].selected)}
           />
           <DocumentField label="CV" value={cv} onPick={setCv} />
         </View>
@@ -402,10 +432,8 @@ export default function TutorApplyScreen({ navigation }: any) {
         {wantsHighSchool && (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>High School Subjects</Text>
-            <Text style={styles.helperText}>
-              Malita currently only offers high-school tutoring in: {SUBJECTS.join(", ")}.
-            </Text>
-            {SUBJECTS.map((s) => (
+            <Text style={styles.helperText}>Select every subject you're able to tutor:</Text>
+            {HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => (
               <View key={s} style={styles.subjectBlock}>
                 <Pressable style={styles.checkboxRow} onPress={() => toggleSubject(s)}>
                   <View style={[styles.checkbox, subjectRows[s].selected && styles.checkboxChecked]}>
@@ -453,11 +481,32 @@ export default function TutorApplyScreen({ navigation }: any) {
             />
             <Dropdown
               label="Highest completed qualification, or the one you're currently studying towards"
-              options={qualifications.map((q) => ({ label: q.name, value: String(q.id) }))}
-              value={qualificationId != null ? String(qualificationId) : null}
-              onChange={(v) => setQualificationId(parseInt(v, 10))}
+              options={[
+                ...qualifications.map((q) => ({ label: q.name, value: String(q.id) })),
+                { label: "Other (not listed)", value: "other" },
+              ]}
+              value={isCustomQualification ? "other" : qualificationId != null ? String(qualificationId) : null}
+              onChange={(v) => {
+                if (v === "other") {
+                  setIsCustomQualification(true);
+                  setQualificationId(null);
+                } else {
+                  setIsCustomQualification(false);
+                  setQualificationId(parseInt(v, 10));
+                }
+              }}
             />
-            {institutionId && qualifications.length === 0 ? (
+            {isCustomQualification ? (
+              <>
+                <Text style={styles.label}>Your qualification</Text>
+                <TextInput
+                  style={styles.input}
+                  value={customQualificationName}
+                  onChangeText={setCustomQualificationName}
+                  placeholder="e.g. BCom Investment Management"
+                />
+              </>
+            ) : institutionId && qualifications.length === 0 ? (
               <Text style={styles.helperText}>
                 No qualifications listed yet for this institution - ask an admin to add it to the catalog.
               </Text>
@@ -499,7 +548,43 @@ export default function TutorApplyScreen({ navigation }: any) {
             <Text style={styles.label}>
               Modules you're able to tutor {yearOfStudy ? `(at least one year behind ${YEAR_LEVEL_LABELS[yearOfStudy]})` : ""}
             </Text>
-            {!qualificationId ? (
+            {isCustomQualification ? (
+              <>
+                {customModules.map((m, i) => (
+                  <View key={i} style={styles.checkboxRow}>
+                    <Text style={[styles.checkboxLabel, { flex: 1 }]}>
+                      {m.name} ({YEAR_LEVEL_LABELS[m.year_level]})
+                    </Text>
+                    <Pressable onPress={() => removeCustomModule(i)}>
+                      <Text style={styles.removeModuleText}>✕</Text>
+                    </Pressable>
+                  </View>
+                ))}
+                {!yearOfStudy ? (
+                  <Text style={styles.helperText}>Select your year of study first.</Text>
+                ) : eligibleYearLevels.length === 0 ? (
+                  <Text style={styles.helperText}>No year level is behind your selected year of study.</Text>
+                ) : (
+                  <View style={styles.addModuleRow}>
+                    <TextInput
+                      style={[styles.input, styles.addModuleInput]}
+                      value={newCustomModuleName}
+                      onChangeText={setNewCustomModuleName}
+                      placeholder="Module name"
+                    />
+                    <Dropdown
+                      label="Year level"
+                      options={eligibleYearLevels.map(([k, v]) => ({ label: v, value: k }))}
+                      value={newCustomModuleYear != null ? String(newCustomModuleYear) : null}
+                      onChange={(v) => setNewCustomModuleYear(parseInt(v, 10))}
+                    />
+                    <Pressable style={styles.addModuleButton} onPress={addCustomModule}>
+                      <Text style={styles.addModuleButtonText}>Add</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </>
+            ) : !qualificationId ? (
               <Text style={styles.helperText}>Select a qualification first.</Text>
             ) : eligibleModules.length === 0 ? (
               <Text style={styles.helperText}>
@@ -608,6 +693,16 @@ const styles = StyleSheet.create({
   checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
   checkboxMark: { color: "#fff", fontWeight: "700", fontSize: 13 },
   checkboxLabel: { fontSize: 14, color: colors.text, flexShrink: 1 },
+  removeModuleText: { color: colors.error, fontSize: 18, fontWeight: "700", paddingHorizontal: 8 },
+  addModuleRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
+  addModuleInput: { flex: 1 },
+  addModuleButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  addModuleButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   error: { color: colors.error, marginTop: 4, marginBottom: 8 },
   button: {
     backgroundColor: colors.primary,

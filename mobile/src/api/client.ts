@@ -174,6 +174,9 @@ export type RegisterParams = {
   account_type?: "high_school" | "higher_ed";
   higher_ed_institution_id?: number | null;
   higher_ed_qualification_id?: number | null;
+  // "Other" escape hatch instead of higher_ed_qualification_id, when the
+  // learner's real qualification isn't in the catalog.
+  higher_ed_qualification_custom_name?: string;
   higher_ed_year_of_study?: number | null;
   student_number?: string;
 };
@@ -351,6 +354,12 @@ export type TutoringRequest = {
   // cascade without an extra lookup.
   qualification_id: number | null;
   institution_id: number | null;
+  // Set when the learner picked "Other" for their qualification/module -
+  // module_id is null in that case (no catalog Module row exists), so this
+  // holds the free-text name instead and is_custom_higher_ed flags it as
+  // routed to admin's manual match flow rather than tutor self-accept.
+  custom_module_name: string | null;
+  is_custom_higher_ed: boolean;
   topic: string | null;
   preferred_times_note: string | null;
   status:
@@ -386,12 +395,16 @@ export type TutoringRequestParams = {
   price_zar: number;
   scheduled_at: string; // ISO 8601, required, at least 24h ahead
   duration_minutes?: number;
-  topic?: string;
+  topic: string;
   preferred_times_note?: string;
   // A higher-ed catalog Module id - set this INSTEAD OF subject for a
   // university/college tutoring request (the server looks up the
   // module's own name).
   module_id?: number;
+  // "Other" escape hatch instead of module_id, when the learner's real
+  // module isn't in the catalog - routed to admin's manual match flow
+  // instead of tutor self-accept (see backend/tutoring.py).
+  custom_module_name?: string;
   // Set when the learner picked a specific tutor from the directory
   // (see fetchTutorsDirectory) instead of broadcasting the request.
   preferred_tutor_id?: number;
@@ -406,6 +419,7 @@ function tutoringRequestBody(params: TutoringRequestParams) {
     topic: params.topic ?? "",
     preferred_times_note: params.preferred_times_note ?? "",
     module_id: params.module_id,
+    custom_module_name: params.custom_module_name,
     preferred_tutor_id: params.preferred_tutor_id,
   };
 }
@@ -590,6 +604,11 @@ export type TutorApplyParams = {
   subjects?: TutorApplySubjectInput[];
   higher_ed_institution_id?: number | null;
   higher_ed_qualification_id?: number | null;
+  // "Other" escape hatch instead of higher_ed_qualification_id/
+  // higher_ed_module_ids, when the applicant's real qualification isn't
+  // in the catalog (see backend/db.py's TutorCustomHigherEdModule).
+  higher_ed_qualification_custom_name?: string;
+  higher_ed_custom_modules?: { name: string; year_level: number }[];
   higher_ed_year_of_study?: number | null;
   higher_ed_qualification_complete?: boolean;
   higher_ed_average?: number | null;
@@ -639,12 +658,16 @@ export async function applyAsTutor(params: TutorApplyParams): Promise<TutorApply
     higher_ed_qualification_complete: String(params.higher_ed_qualification_complete ?? false),
     higher_ed_transcript_note: params.higher_ed_transcript_note ?? "",
     higher_ed_module_ids: JSON.stringify(params.higher_ed_module_ids ?? []),
+    higher_ed_custom_modules: JSON.stringify(params.higher_ed_custom_modules ?? []),
   };
   if (params.higher_ed_institution_id != null) {
     textFields.higher_ed_institution_id = String(params.higher_ed_institution_id);
   }
   if (params.higher_ed_qualification_id != null) {
     textFields.higher_ed_qualification_id = String(params.higher_ed_qualification_id);
+  }
+  if (params.higher_ed_qualification_custom_name) {
+    textFields.higher_ed_qualification_custom_name = params.higher_ed_qualification_custom_name;
   }
   if (params.higher_ed_year_of_study != null) {
     textFields.higher_ed_year_of_study = String(params.higher_ed_year_of_study);

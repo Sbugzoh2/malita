@@ -78,6 +78,11 @@ class User(Base):
     # first and (year_of_study) for the tutor-matching eligibility rule.
     higher_ed_institution_id = Column(Integer, ForeignKey("institutions.id"), nullable=True)
     higher_ed_qualification_id = Column(Integer, ForeignKey("qualifications.id"), nullable=True)
+    # "Other" escape hatch instead of higher_ed_qualification_id, for when
+    # the learner's real qualification isn't in the catalog - set means
+    # higher_ed_qualification_id is NULL (custom path); NULL means
+    # behavior is exactly the catalog-FK path above, unchanged.
+    higher_ed_qualification_custom_name = Column(String(200), nullable=True)
     higher_ed_year_of_study = Column(Integer, nullable=True)
     student_number = Column(String(50), nullable=True)
     is_admin = Column(Boolean, default=False)
@@ -460,6 +465,11 @@ class TutorAccount(Base):
     higher_ed_status = Column(String(20), nullable=True)
     higher_ed_institution_id = Column(Integer, ForeignKey("institutions.id"), nullable=True)
     higher_ed_qualification_id = Column(Integer, ForeignKey("qualifications.id"), nullable=True)
+    # "Other" escape hatch instead of higher_ed_qualification_id, for when
+    # the tutor's real qualification isn't in the catalog - set means
+    # higher_ed_qualification_id is NULL and higher_ed_modules below holds
+    # nothing (see TutorCustomHigherEdModule instead).
+    higher_ed_qualification_custom_name = Column(String(200), nullable=True)
     # The tutor's OWN year of study (or, if higher_ed_qualification_complete,
     # the year they finished in) - gates which modules they're allowed to
     # add in TutorHigherEdModule (must be strictly ahead of the module's
@@ -487,6 +497,9 @@ class TutorAccount(Base):
     )
     higher_ed_modules = relationship(
         "TutorHigherEdModule", back_populates="tutor", cascade="all, delete-orphan"
+    )
+    higher_ed_custom_modules = relationship(
+        "TutorCustomHigherEdModule", back_populates="tutor", cascade="all, delete-orphan"
     )
     # Explicit foreign_keys needed on both sides of this relationship
     # now that TutoringSessionRequest has a second FK to tutor_accounts
@@ -532,6 +545,26 @@ class TutorHigherEdModule(Base):
 
     tutor = relationship("TutorAccount", back_populates="higher_ed_modules")
     module = relationship("Module")
+
+
+class TutorCustomHigherEdModule(Base):
+    """A tutor's own free-text module entry when their qualification isn't
+    in the catalog (see TutorAccount.higher_ed_qualification_custom_name) -
+    same purpose as TutorHigherEdModule but for a module that has no
+    catalog Module row to point at, so name/year_level are stored directly
+    rather than as a foreign key. A request matched against one of these
+    can't go through the normal tutor self-accept broadcast (see
+    TutoringSessionRequest.is_custom_higher_ed) - it's admin-matched."""
+    __tablename__ = "tutor_custom_higher_ed_modules"
+    __table_args__ = (UniqueConstraint("tutor_id", "name", "year_level", name="uq_tutor_custom_module"),)
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    year_level = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    tutor = relationship("TutorAccount", back_populates="higher_ed_custom_modules")
 
 
 class TutoringSessionRequest(Base):
@@ -590,6 +623,15 @@ class TutoringSessionRequest(Base):
     # backend/tutoring.py's list_open_requests_for_tutor/
     # accept_tutoring_request for the branch.
     module_id = Column(Integer, ForeignKey("modules.id"), nullable=True)
+    # Set when the learner picked "Other" for their qualification/module
+    # (no catalog Module row exists to self-accept-match against) - routed
+    # to admin's manual force-match flow instead of the normal tutor
+    # self-accept broadcast. subject still holds this module's display
+    # name per the existing convention above, so every existing
+    # subject-string display/notification code path keeps working
+    # unchanged.
+    custom_module_name = Column(String(200), nullable=True)
+    is_custom_higher_ed = Column(Boolean, default=False, nullable=False)
     topic = Column(String(60), nullable=True)
     # Free-text extra context (e.g. "need help with proofs specifically")
     # - NOT where the learner's actual time goes anymore, that's the
@@ -819,9 +861,12 @@ def init_db():
     _ensure_column("tutoring_session_requests", "lapse_reminder_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "recording_link", "VARCHAR")
     _ensure_column("tutoring_session_requests", "recording_shared_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "custom_module_name", "VARCHAR(200)")
+    _ensure_column("tutoring_session_requests", "is_custom_higher_ed", "BOOLEAN DEFAULT FALSE")
     _ensure_column("users", "account_type", "VARCHAR(20) DEFAULT 'high_school'")
     _ensure_column("users", "higher_ed_institution_id", "INTEGER")
     _ensure_column("users", "higher_ed_qualification_id", "INTEGER")
+    _ensure_column("users", "higher_ed_qualification_custom_name", "VARCHAR(200)")
     _ensure_column("users", "higher_ed_year_of_study", "INTEGER")
     _ensure_column("users", "student_number", "VARCHAR(50)")
     _ensure_column("users", "cross_segment_access", "BOOLEAN DEFAULT FALSE")
@@ -830,6 +875,7 @@ def init_db():
     _ensure_column("tutor_accounts", "higher_ed_status", "VARCHAR(20)")
     _ensure_column("tutor_accounts", "higher_ed_institution_id", "INTEGER")
     _ensure_column("tutor_accounts", "higher_ed_qualification_id", "INTEGER")
+    _ensure_column("tutor_accounts", "higher_ed_qualification_custom_name", "VARCHAR(200)")
     _ensure_column("tutor_accounts", "higher_ed_year_of_study", "INTEGER")
     _ensure_column("tutor_accounts", "higher_ed_qualification_complete", "BOOLEAN DEFAULT FALSE")
     _ensure_column("tutor_accounts", "higher_ed_average", "FLOAT")

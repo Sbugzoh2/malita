@@ -64,7 +64,7 @@ import sqlalchemy as sa
 from .db import (
     get_session, User, TutorAccount, TutorSubject, TutoringSessionRequest,
     TutoringPayout, TutorApiToken, TutorPasswordReset,
-    Institution, Qualification, Module, TutorHigherEdModule, YEAR_LEVEL_LABELS,
+    Institution, Qualification, Module, TutorHigherEdModule, TutorCustomHigherEdModule, YEAR_LEVEL_LABELS,
 )
 from . import storage as _storage
 from . import google_calendar as _google_calendar
@@ -797,6 +797,13 @@ def apply_as_tutor(
     subjects: list[dict] | None = None,
     higher_ed_institution_id: int | None = None,
     higher_ed_qualification_id: int | None = None,
+    # "Other" escape hatch instead of higher_ed_qualification_id/
+    # higher_ed_module_ids, for when the applicant's real qualification
+    # isn't in the catalog - higher_ed_custom_modules is a list of
+    # {"name": str, "year_level": int}, stored as TutorCustomHigherEdModule
+    # rows instead of catalog-FK TutorHigherEdModule rows.
+    higher_ed_qualification_custom_name: str = "",
+    higher_ed_custom_modules: list[dict] | None = None,
     higher_ed_year_of_study: int | None = None,
     higher_ed_qualification_complete: bool = False,
     higher_ed_average: float | None = None,
@@ -881,14 +888,18 @@ def apply_as_tutor(
 
     if wants_high_school and not subjects:
         raise TutoringError("Please apply for at least one subject.")
+    is_custom_qualification = bool((higher_ed_qualification_custom_name or "").strip())
     if wants_higher_ed:
-        if not higher_ed_institution_id or not higher_ed_qualification_id:
+        if not higher_ed_institution_id or not (higher_ed_qualification_id or is_custom_qualification):
             raise TutoringError("Please select your institution and qualification.")
         if not higher_ed_year_of_study or not (1 <= higher_ed_year_of_study <= max(YEAR_LEVEL_LABELS)):
             raise TutoringError("Please select your year of study.")
         if higher_ed_average is None:
             raise TutoringError("Please enter your semester/final average.")
-        if not higher_ed_module_ids:
+        if is_custom_qualification:
+            if not higher_ed_custom_modules:
+                raise TutoringError("Please select at least one module you're able to tutor.")
+        elif not higher_ed_module_ids:
             raise TutoringError("Please select at least one module you're able to tutor.")
 
     # Per-subject/per-module qualification is checked independently below
@@ -913,6 +924,7 @@ def apply_as_tutor(
             raise TutoringError("A tutor application with this email already exists.")
 
         qualifying_modules: list = []
+        qualifying_custom_modules: list[dict] = []
         excluded_modules: list[dict] = []
         higher_ed_excluded_reason: str | None = None
         if wants_higher_ed:
@@ -921,10 +933,11 @@ def apply_as_tutor(
                     f"A semester/final average of at least {MIN_HIGHER_ED_AVERAGE:.0f}% "
                     f"is required to apply to tutor university/college modules."
                 )
-            qual = db.query(Qualification).get(higher_ed_qualification_id)
-            if higher_ed_excluded_reason is None and (not qual or qual.institution_id != higher_ed_institution_id):
-                higher_ed_excluded_reason = "That qualification doesn't belong to the selected institution."
-            if higher_ed_excluded_reason is None:
+            if not is_custom_qualification:
+                qual = db.query(Qualification).get(higher_ed_qualification_id)
+                if higher_ed_excluded_reason is None and (not qual or qual.institution_id != higher_ed_institution_id):
+                    higher_ed_excluded_reason = "That qualification doesn't belong to the selected institution."
+            if higher_ed_excluded_reason is None and not is_custom_qualification:
                 for module_id in higher_ed_module_ids:
                     mod = db.query(Module).get(module_id)
                     if not mod:
@@ -944,9 +957,33 @@ def apply_as_tutor(
                         qualifying_modules.append(mod)
                 if not qualifying_modules and higher_ed_excluded_reason is None:
                     higher_ed_excluded_reason = "None of the selected modules were eligible to tutor."
+            elif higher_ed_excluded_reason is None and is_custom_qualification:
+                # Same "at least one year ahead" eligibility rule as the
+                # catalog path above, applied to each free-text entry
+                # instead of a catalog Module row.
+                for entry in higher_ed_custom_modules:
+                    entry_name = (entry.get("name") or "").strip()
+                    entry_year = entry.get("year_level")
+                    if not entry_name or entry_year is None:
+                        continue
+                    if not higher_ed_qualification_complete and entry_year >= higher_ed_year_of_study:
+                        excluded_modules.append({
+                            "name": entry_name, "year_level": entry_year,
+                            "reason": (
+                                f"You must be at least one year ahead of \"{entry_name}\" "
+                                f"({YEAR_LEVEL_LABELS.get(entry_year)}) to tutor it."
+                            ),
+                        })
+                    else:
+                        qualifying_custom_modules.append({"name": entry_name, "year_level": entry_year})
+                if not qualifying_custom_modules and higher_ed_excluded_reason is None:
+                    higher_ed_excluded_reason = "None of the selected modules were eligible to tutor."
 
         effective_wants_high_school = wants_high_school and bool(qualifying_subjects)
-        effective_wants_higher_ed = wants_higher_ed and higher_ed_excluded_reason is None and bool(qualifying_modules)
+        effective_wants_higher_ed = (
+            wants_higher_ed and higher_ed_excluded_reason is None
+            and bool(qualifying_modules or qualifying_custom_modules)
+        )
 
         if not effective_wants_high_school and not effective_wants_higher_ed:
             reasons = []
@@ -1023,7 +1060,12 @@ def apply_as_tutor(
             wants_higher_ed=wants_higher_ed,
             higher_ed_status="pending_review" if wants_higher_ed else None,
             higher_ed_institution_id=higher_ed_institution_id if wants_higher_ed else None,
-            higher_ed_qualification_id=higher_ed_qualification_id if wants_higher_ed else None,
+            higher_ed_qualification_id=(
+                higher_ed_qualification_id if wants_higher_ed and not is_custom_qualification else None
+            ),
+            higher_ed_qualification_custom_name=(
+                higher_ed_qualification_custom_name.strip() if wants_higher_ed and is_custom_qualification else None
+            ),
             higher_ed_year_of_study=higher_ed_year_of_study if wants_higher_ed else None,
             higher_ed_qualification_complete=higher_ed_qualification_complete if wants_higher_ed else False,
             higher_ed_average=higher_ed_average if wants_higher_ed else None,
@@ -1049,6 +1091,10 @@ def apply_as_tutor(
         if wants_higher_ed:
             for mod in higher_ed_modules:
                 db.add(TutorHigherEdModule(tutor_id=tutor.id, module_id=mod.id))
+            for entry in qualifying_custom_modules:
+                db.add(TutorCustomHigherEdModule(
+                    tutor_id=tutor.id, name=entry["name"], year_level=entry["year_level"],
+                ))
 
         return {
             "id": tutor.id, "status": tutor.status, "higher_ed_status": tutor.higher_ed_status,
@@ -1125,7 +1171,7 @@ def list_tutor_higher_ed_applications(status: str | None = None) -> list[dict]:
                 "higher_ed_status": t.higher_ed_status,
                 "higher_ed_status_label": TUTOR_STATUS_LABELS.get(t.higher_ed_status, t.higher_ed_status),
                 "higher_ed_institution": inst.name if inst else None,
-                "higher_ed_qualification": qual.name if qual else None,
+                "higher_ed_qualification": qual.name if qual else t.higher_ed_qualification_custom_name,
                 "higher_ed_year_of_study": t.higher_ed_year_of_study,
                 "higher_ed_year_of_study_label": YEAR_LEVEL_LABELS.get(t.higher_ed_year_of_study),
                 "higher_ed_qualification_complete": t.higher_ed_qualification_complete,
@@ -1143,6 +1189,17 @@ def list_tutor_higher_ed_applications(status: str | None = None) -> list[dict]:
                         "is_active": m.is_active,
                     }
                     for m in t.higher_ed_modules
+                ] + [
+                    # "Other" entries - no catalog Module row, so id is
+                    # None (can't be deactivated the same way a catalog
+                    # module can - see TutorCustomHigherEdModule).
+                    {
+                        "id": None, "name": m.name,
+                        "year_level": m.year_level,
+                        "year_level_label": YEAR_LEVEL_LABELS.get(m.year_level),
+                        "is_active": True,
+                    }
+                    for m in t.higher_ed_custom_modules
                 ],
             })
         return out
@@ -1393,10 +1450,13 @@ def _validate_request_fields(
     db, *, learner_user_id: int, subject: str, price_zar: float,
     scheduled_at: dt.datetime, duration_minutes: int, module_id: int | None,
     preferred_tutor_id: int | None, exclude_request_id: int | None = None,
+    is_custom_higher_ed: bool = False, topic: str = "",
 ) -> None:
     """Shared validation for request_tutoring_session (new) and
     edit_tutoring_request (in place) - raises TutoringError on any
     problem, otherwise returns None."""
+    if not topic or not topic.strip():
+        raise TutoringError("Please enter a topic for this session.")
     if price_zar is None or price_zar <= 0:
         raise TutoringError("Please set a price greater than R0 for this session.")
     if not duration_minutes or duration_minutes < MIN_SESSION_DURATION_MINUTES:
@@ -1407,6 +1467,16 @@ def _validate_request_fields(
         raise TutoringError(f"Sessions must be requested at least {MIN_REQUEST_LEAD_HOURS} hours in advance.")
     if module_id is not None and not db.query(Module).get(module_id):
         raise TutoringError("That module no longer exists.")
+    # A custom ("Other") module has no catalog Module row for any tutor to
+    # match against - it can't be directed at one specific tutor via
+    # preferred_tutor_id (which relies on checking that tutor's own
+    # catalog subjects/modules), only broadcast for an admin to manually
+    # match (see list_open_requests/match_tutor_to_request).
+    if is_custom_higher_ed and preferred_tutor_id is not None:
+        raise TutoringError(
+            "A specific tutor can't be requested directly for a module that's not in the catalog yet - "
+            "submit this request and an admin will match it to a suitable tutor."
+        )
     if preferred_tutor_id is not None:
         tutor = db.query(TutorAccount).get(preferred_tutor_id)
         if not tutor:
@@ -1458,6 +1528,7 @@ def request_tutoring_session(
     learner_user_id: int, subject: str, price_zar: float, scheduled_at: dt.datetime,
     duration_minutes: int = 60, topic: str = "", preferred_times_note: str = "",
     module_id: int | None = None, preferred_tutor_id: int | None = None,
+    custom_module_name: str | None = None,
 ) -> dict:
     """A learner asking for a tutor, inDrive-style: the LEARNER sets the
     price, exact date/time, and duration right here, and the request
@@ -1491,11 +1562,14 @@ def request_tutoring_session(
             db, learner_user_id=learner_user_id, subject=subject, price_zar=price_zar,
             scheduled_at=scheduled_at, duration_minutes=duration_minutes,
             module_id=module_id, preferred_tutor_id=preferred_tutor_id,
+            is_custom_higher_ed=bool(custom_module_name), topic=topic,
         )
         req = TutoringSessionRequest(
             learner_user_id=learner_user_id,
             subject=subject,
             module_id=module_id,
+            custom_module_name=custom_module_name.strip() if custom_module_name else None,
+            is_custom_higher_ed=bool(custom_module_name),
             preferred_tutor_id=preferred_tutor_id,
             topic=topic.strip() or None,
             preferred_times_note=preferred_times_note.strip() or None,
@@ -1525,7 +1599,7 @@ def edit_tutoring_request(
     request_id: int, learner_user_id: int, *, subject: str, price_zar: float,
     scheduled_at: dt.datetime, duration_minutes: int = 60, topic: str = "",
     preferred_times_note: str = "", module_id: int | None = None,
-    preferred_tutor_id: int | None = None,
+    preferred_tutor_id: int | None = None, custom_module_name: str | None = None,
 ) -> dict:
     """The learner editing their own request while it's still fully open
     (status=="requested", not yet touched by any tutor) - re-runs the
@@ -1542,10 +1616,12 @@ def edit_tutoring_request(
             db, learner_user_id=learner_user_id, subject=subject, price_zar=price_zar,
             scheduled_at=scheduled_at, duration_minutes=duration_minutes,
             module_id=module_id, preferred_tutor_id=preferred_tutor_id,
-            exclude_request_id=req.id,
+            exclude_request_id=req.id, is_custom_higher_ed=bool(custom_module_name), topic=topic,
         )
         req.subject = subject
         req.module_id = module_id
+        req.custom_module_name = custom_module_name.strip() if custom_module_name else None
+        req.is_custom_higher_ed = bool(custom_module_name)
         req.preferred_tutor_id = preferred_tutor_id
         req.topic = topic.strip() or None
         req.preferred_times_note = preferred_times_note.strip() or None
@@ -1944,6 +2020,14 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
                     TutoringSessionRequest.preferred_tutor_id.is_(None),
                     TutoringSessionRequest.preferred_tutor_id == tutor_id,
                 ),
+                # A custom ("Other") module has no catalog Module row for
+                # any tutor to validly self-accept against - it has
+                # module_id NULL like a high-school request, so without
+                # this it could otherwise accidentally match a tutor whose
+                # high-school subject happens to share the same string.
+                # These are routed to admin's manual match flow instead
+                # (see list_open_requests/match_tutor_to_request).
+                TutoringSessionRequest.is_custom_higher_ed.is_(False),
             )
             .order_by(TutoringSessionRequest.created_at.asc())
             .all()
@@ -1955,6 +2039,8 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
     return {
         "id": r.id, "learner_user_id": r.learner_user_id, "subject": r.subject,
         "module_id": r.module_id,
+        "custom_module_name": r.custom_module_name,
+        "is_custom_higher_ed": r.is_custom_higher_ed,
         # Only set for a higher-ed request - lets the mobile edit flow
         # pre-select the Institution/Qualification/Module cascade
         # without a separate reverse-lookup endpoint.

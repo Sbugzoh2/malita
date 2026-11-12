@@ -40,6 +40,11 @@ export default function RegisterScreen({ navigation }: any) {
   const [qualificationId, setQualificationId] = useState<number | null>(null);
   const [yearOfStudy, setYearOfStudy] = useState<number | null>(null);
   const [studentNumber, setStudentNumber] = useState("");
+  // "Other" escape hatch for when the learner's real qualification isn't
+  // in the catalog yet - see backend/db.py's
+  // User.higher_ed_qualification_custom_name.
+  const [isCustomQualification, setIsCustomQualification] = useState(false);
+  const [customQualificationName, setCustomQualificationName] = useState("");
 
   useEffect(() => {
     fetchProvinces()
@@ -82,8 +87,12 @@ export default function RegisterScreen({ navigation }: any) {
       return;
     }
     if (accountType === "higher_ed") {
-      if (!institutionId || !qualificationId) {
+      if (!institutionId || (!isCustomQualification && !qualificationId)) {
         setError("Please select your institution and qualification.");
+        return;
+      }
+      if (isCustomQualification && !customQualificationName.trim()) {
+        setError("Please enter the name of your qualification.");
         return;
       }
       if (!yearOfStudy) {
@@ -107,7 +116,10 @@ export default function RegisterScreen({ navigation }: any) {
         school: school.trim(),
         account_type: accountType,
         higher_ed_institution_id: accountType === "higher_ed" ? institutionId : undefined,
-        higher_ed_qualification_id: accountType === "higher_ed" ? qualificationId : undefined,
+        higher_ed_qualification_id:
+          accountType === "higher_ed" && !isCustomQualification ? qualificationId : undefined,
+        higher_ed_qualification_custom_name:
+          accountType === "higher_ed" && isCustomQualification ? customQualificationName.trim() : undefined,
         higher_ed_year_of_study: accountType === "higher_ed" ? yearOfStudy : undefined,
         student_number: accountType === "higher_ed" ? studentNumber.trim() : undefined,
       });
@@ -195,10 +207,32 @@ export default function RegisterScreen({ navigation }: any) {
               ) : null}
               <Dropdown
                 label="Qualification"
-                options={qualifications.map((q) => ({ label: q.name, value: String(q.id) }))}
-                value={qualificationId != null ? String(qualificationId) : null}
-                onChange={(v) => setQualificationId(parseInt(v, 10))}
+                options={[
+                  ...qualifications.map((q) => ({ label: q.name, value: String(q.id) })),
+                  { label: "Other (not listed)", value: "other" },
+                ]}
+                value={isCustomQualification ? "other" : qualificationId != null ? String(qualificationId) : null}
+                onChange={(v) => {
+                  if (v === "other") {
+                    setIsCustomQualification(true);
+                    setQualificationId(null);
+                  } else {
+                    setIsCustomQualification(false);
+                    setQualificationId(parseInt(v, 10));
+                  }
+                }}
               />
+              {isCustomQualification && (
+                <>
+                  <Text style={styles.label}>Your qualification</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={customQualificationName}
+                    onChangeText={setCustomQualificationName}
+                    placeholder="e.g. BCom Investment Management"
+                  />
+                </>
+              )}
               <Dropdown
                 label="Year of study"
                 options={Object.entries(YEAR_LEVEL_LABELS).map(([k, v]) => ({ label: v, value: k }))}

@@ -2,7 +2,7 @@ import React, { useCallback, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
-import { colors, SUBJECTS, Subject } from "../theme";
+import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject } from "../theme";
 import { ApiError, DirectoryTutor, fetchTutorsDirectory } from "../api/client";
 import Dropdown from "../components/Dropdown";
 
@@ -16,7 +16,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
   const showSubjects = hasCrossAccess || !isHigherEd;
   const showModules = hasCrossAccess || isHigherEd;
 
-  const [subjectFilter, setSubjectFilter] = useState<Subject | null>(null);
+  const [subjectFilter, setSubjectFilter] = useState<HighSchoolTutoringSubject | null>(null);
   const [tutors, setTutors] = useState<DirectoryTutor[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,9 +79,9 @@ export default function BrowseTutorsScreen({ navigation }: any) {
       {showSubjects && (
         <Dropdown
           label="Filter by subject (optional)"
-          options={[{ label: "All subjects", value: "" }, ...SUBJECTS.map((s) => ({ label: s, value: s }))]}
+          options={[{ label: "All subjects", value: "" }, ...HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => ({ label: s, value: s }))]}
           value={subjectFilter ?? ""}
-          onChange={(v) => setSubjectFilter((v || null) as Subject | null)}
+          onChange={(v) => setSubjectFilter((v || null) as HighSchoolTutoringSubject | null)}
         />
       )}
 

@@ -1,11 +1,13 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
 import { View, ActivityIndicator, Pressable, Text, StyleSheet } from "react-native";
 import Constants from "expo-constants";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, useFocusEffect, useNavigation } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
+import NotificationBell from "../components/NotificationBell";
+import { fetchNotificationsUnreadCount, fetchTutorNotificationsUnreadCount } from "../api/client";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import TutorLoginScreen from "../screens/TutorLoginScreen";
@@ -25,6 +27,8 @@ import RequestTutorScreen from "../screens/RequestTutorScreen";
 import MyTutoringRequestsScreen from "../screens/MyTutoringRequestsScreen";
 import BrowseTutorsScreen from "../screens/BrowseTutorsScreen";
 import TutoringAdminScreen from "../screens/TutoringAdminScreen";
+import NotificationsScreen from "../screens/NotificationsScreen";
+import TutorNotificationsScreen from "../screens/TutorNotificationsScreen";
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
@@ -53,7 +57,16 @@ function TutorAppNavigator() {
         headerTintColor: colors.primary,
       }}
     >
-      <TutorStack.Screen name="TutorHome" component={TutorHomeScreen} options={{ title: "Malita Tutor" }} />
+      <TutorStack.Screen
+        name="TutorHome"
+        component={TutorHomeScreen}
+        options={{ title: "Malita Tutor", headerRight: TutorNotificationBellButton }}
+      />
+      <TutorStack.Screen
+        name="TutorNotifications"
+        component={TutorNotificationsScreen}
+        options={{ title: "Notifications" }}
+      />
     </TutorStack.Navigator>
   );
 }
@@ -65,6 +78,41 @@ function LogoutHeaderButton() {
       <Text style={styles.headerButtonText}>Log Out</Text>
     </Pressable>
   );
+}
+
+// Live unread count refreshed on focus only (no polling/websocket) - see
+// backend/tutoring.py's Notification model and api_server.py's
+// /notifications* endpoints. NotificationBell itself stays presentational;
+// this is the "screen" that owns the count, same idea as a list screen's
+// own load()/useFocusEffect, just living in the header instead of the body.
+function HomeNotificationBellButton() {
+  const { token } = useAuth();
+  const navigation = useNavigation();
+  const [count, setCount] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      fetchNotificationsUnreadCount(token).then((res) => setCount(res.count)).catch(() => {});
+    }, [token])
+  );
+
+  return <NotificationBell count={count} onPress={() => navigation.navigate("Notifications" as never)} />;
+}
+
+function TutorNotificationBellButton() {
+  const { token } = useTutorAuth();
+  const navigation = useNavigation();
+  const [count, setCount] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      fetchTutorNotificationsUnreadCount(token).then((res) => setCount(res.count)).catch(() => {});
+    }, [token])
+  );
+
+  return <NotificationBell count={count} onPress={() => navigation.navigate("TutorNotifications" as never)} />;
 }
 
 function AppNavigator() {
@@ -85,7 +133,12 @@ function AppNavigator() {
         headerTintColor: colors.primary,
       }}
     >
-      <AppStack.Screen name="Home" component={HomeScreen} options={{ title: "Malita Learner" }} />
+      <AppStack.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{ title: "Malita Learner", headerRight: HomeNotificationBellButton }}
+      />
+      <AppStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
       <AppStack.Screen name="BrowseTutors" component={BrowseTutorsScreen} options={{ title: "Browse Tutors" }} />
       <AppStack.Screen

@@ -836,6 +836,26 @@ class GoogleCalendarCredentials(Base):
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
 
+class Notification(Base):
+    """An in-app notification - created alongside (not instead of) every
+    existing best-effort email this app sends, as a parallel delivery
+    channel a learner/tutor/admin can check without their inbox. See
+    backend/tutoring.py's create_notification, called from every existing
+    _notify_* function right next to its send_email call(s)."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True)
+    # "user" covers both a learner AND an admin (both are User rows,
+    # distinguished only by User.is_admin) - "tutor" is a TutorAccount
+    # row. recipient_id is that row's own primary key either way.
+    recipient_kind = Column(String(10), nullable=False)  # "user" | "tutor"
+    recipient_id = Column(Integer, nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    body = Column(String, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    read_at = Column(DateTime, nullable=True)
+
+
 def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
     """Add one column to an already-existing table if it's missing.
 

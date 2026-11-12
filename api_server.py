@@ -89,6 +89,7 @@ from backend.tutoring import (
     list_tutor_higher_ed_applications, approve_tutor_higher_ed, reject_tutor_higher_ed,
     edit_tutoring_request, withdraw_tutoring_request, cancel_accepted_session,
     send_due_reminders, submit_session_recording,
+    list_notifications, count_unread_notifications, mark_notification_read, mark_all_notifications_read,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -1349,6 +1350,34 @@ def tutor_submit_session_recording(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/tutor/notifications")
+def tutor_list_notifications(authorization: str = Header(None)):
+    """A tutor's own in-app notifications - same pattern as the learner
+    side's /notifications, against the "tutor" recipient_kind instead."""
+    tutor = _auth_tutor(authorization)
+    return {"notifications": list_notifications("tutor", tutor["id"])}
+
+
+@app.get("/tutor/notifications/unread-count")
+def tutor_notifications_unread_count(authorization: str = Header(None)):
+    tutor = _auth_tutor(authorization)
+    return {"count": count_unread_notifications("tutor", tutor["id"])}
+
+
+@app.post("/tutor/notifications/{notification_id}/read")
+def tutor_mark_notification_read(notification_id: int, authorization: str = Header(None)):
+    tutor = _auth_tutor(authorization)
+    mark_notification_read(notification_id, "tutor", tutor["id"])
+    return {"status": "ok"}
+
+
+@app.post("/tutor/notifications/read-all")
+def tutor_mark_all_notifications_read(authorization: str = Header(None)):
+    tutor = _auth_tutor(authorization)
+    mark_all_notifications_read("tutor", tutor["id"])
+    return {"status": "ok"}
+
+
 @app.get("/catalog/institutions")
 def catalog_institutions():
     """Public, unauthenticated - needed at registration and tutor-application
@@ -1695,6 +1724,35 @@ def tutoring_confirm_session(request_id: int, payload: SessionConfirmRequest, au
         return confirm_session_by_learner(request_id, user["id"], payload.rating, payload.comment)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/notifications")
+def learner_list_notifications(authorization: str = Header(None)):
+    """A learner's own in-app notifications - the same events that
+    already email them (see every _notify_* function in
+    backend/tutoring.py), newest first, for the bell icon's dropdown."""
+    user = _auth_user(authorization)
+    return {"notifications": list_notifications("user", user["id"])}
+
+
+@app.get("/notifications/unread-count")
+def learner_notifications_unread_count(authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    return {"count": count_unread_notifications("user", user["id"])}
+
+
+@app.post("/notifications/{notification_id}/read")
+def learner_mark_notification_read(notification_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    mark_notification_read(notification_id, "user", user["id"])
+    return {"status": "ok"}
+
+
+@app.post("/notifications/read-all")
+def learner_mark_all_notifications_read(authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    mark_all_notifications_read("user", user["id"])
+    return {"status": "ok"}
 
 
 @app.get("/admin/tutoring/applications")

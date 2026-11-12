@@ -63,7 +63,7 @@ import sqlalchemy as sa
 
 from .db import (
     get_session, User, TutorAccount, TutorSubject, TutoringSessionRequest,
-    TutoringPayout, TutorApiToken, TutorPasswordReset,
+    TutoringPayout, TutorApiToken, TutorPasswordReset, Notification,
     Institution, Qualification, Module, TutorHigherEdModule, TutorCustomHigherEdModule, YEAR_LEVEL_LABELS,
 )
 from . import storage as _storage
@@ -179,6 +179,68 @@ def _iso_utc(d: dt.datetime | None) -> str | None:
     this module hands back to a client, here, rather than relying on
     FastAPI's default encoder to get it right."""
     return d.isoformat() + "Z" if d else None
+
+
+def create_notification(*, recipient_kind: str, recipient_id: int, title: str, body: str = "") -> None:
+    """Best-effort, same philosophy as every _notify_* email function
+    below - a failed/unexpected error here must never break the action
+    that triggered it. Called right alongside (not instead of) the
+    matching send_email call in each of those functions, as a parallel
+    in-app delivery channel - see the Notification model's own
+    docstring. recipient_kind is "user" (covers both a learner and an
+    admin - see Notification) or "tutor"."""
+    try:
+        with get_session() as db:
+            db.add(Notification(
+                recipient_kind=recipient_kind, recipient_id=recipient_id, title=title, body=body or None,
+            ))
+    except Exception:
+        logger.exception("Failed to create a notification (kind=%s, id=%s)", recipient_kind, recipient_id)
+
+
+def list_notifications(recipient_kind: str, recipient_id: int, limit: int = 50) -> list[dict]:
+    with get_session() as db:
+        rows = (
+            db.query(Notification)
+            .filter(Notification.recipient_kind == recipient_kind, Notification.recipient_id == recipient_id)
+            .order_by(Notification.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": n.id, "title": n.title, "body": n.body,
+                "created_at": _iso_utc(n.created_at), "read": n.read_at is not None,
+            }
+            for n in rows
+        ]
+
+
+def count_unread_notifications(recipient_kind: str, recipient_id: int) -> int:
+    with get_session() as db:
+        return (
+            db.query(Notification)
+            .filter(
+                Notification.recipient_kind == recipient_kind, Notification.recipient_id == recipient_id,
+                Notification.read_at.is_(None),
+            )
+            .count()
+        )
+
+
+def mark_notification_read(notification_id: int, recipient_kind: str, recipient_id: int) -> None:
+    with get_session() as db:
+        n = db.query(Notification).get(notification_id)
+        if n and n.recipient_kind == recipient_kind and n.recipient_id == recipient_id and not n.read_at:
+            n.read_at = dt.datetime.utcnow()
+
+
+def mark_all_notifications_read(recipient_kind: str, recipient_id: int) -> None:
+    with get_session() as db:
+        db.query(Notification).filter(
+            Notification.recipient_kind == recipient_kind, Notification.recipient_id == recipient_id,
+            Notification.read_at.is_(None),
+        ).update({"read_at": dt.datetime.utcnow()})
 
 
 class TutoringError(Exception):
@@ -1278,7 +1340,7 @@ def approve_tutor(tutor_id: int) -> None:
         tutor.status = "approved"
         tutor.reviewed_at = dt.datetime.utcnow()
         name, email = tutor.name, tutor.email
-    _notify_tutor_of_decision(email, name, approved=True)
+    _notify_tutor_of_decision(tutor_id, email, name, approved=True)
 
 
 def reject_tutor(tutor_id: int, reason: str = "") -> None:
@@ -1290,7 +1352,7 @@ def reject_tutor(tutor_id: int, reason: str = "") -> None:
         tutor.admin_notes = reason.strip() or None
         tutor.reviewed_at = dt.datetime.utcnow()
         name, email = tutor.name, tutor.email
-    _notify_tutor_of_decision(email, name, approved=False, reason=reason)
+    _notify_tutor_of_decision(tutor_id, email, name, approved=False, reason=reason)
 
 
 def approve_tutor_higher_ed(tutor_id: int) -> None:
@@ -1305,7 +1367,7 @@ def approve_tutor_higher_ed(tutor_id: int) -> None:
         tutor.higher_ed_status = "approved"
         tutor.higher_ed_reviewed_at = dt.datetime.utcnow()
         name, email = tutor.name, tutor.email
-    _notify_tutor_of_decision(email, name, approved=True)
+    _notify_tutor_of_decision(tutor_id, email, name, approved=True)
 
 
 def reject_tutor_higher_ed(tutor_id: int, reason: str = "") -> None:
@@ -1319,10 +1381,12 @@ def reject_tutor_higher_ed(tutor_id: int, reason: str = "") -> None:
         tutor.admin_notes = reason.strip() or None
         tutor.higher_ed_reviewed_at = dt.datetime.utcnow()
         name, email = tutor.name, tutor.email
-    _notify_tutor_of_decision(email, name, approved=False, reason=reason)
+    _notify_tutor_of_decision(tutor_id, email, name, approved=False, reason=reason)
 
 
-def _notify_tutor_of_decision(email: str, name: str, *, approved: bool, reason: str = "") -> None:
+def _notify_tutor_of_decision(
+    tutor_id: int, email: str, name: str, *, approved: bool, reason: str = "",
+) -> None:
     """Best-effort - an unconfigured or failed email send (see
     backend/email_util.py) must never break the admin's approve/reject
     action itself, same pattern as backend/collab.py's report-outcome
@@ -1336,6 +1400,8 @@ def _notify_tutor_of_decision(email: str, name: str, *, approved: bool, reason: 
                 "We'll be in touch as learners request sessions in your subject(s).\n\n"
                 "— The Malita team"
             )
+            notif_title = "Application approved!"
+            notif_body = "Your tutor application has been approved."
         else:
             subject = "Update on your Malita tutor application"
             body = (
@@ -1347,7 +1413,10 @@ def _notify_tutor_of_decision(email: str, name: str, *, approved: bool, reason: 
             if reason:
                 body += f"\n\nReason given: {reason}"
             body += "\n\n— The Malita team"
+            notif_title = "Application update"
+            notif_body = "Your tutor application wasn't approved." + (f" Reason: {reason}" if reason else "")
         send_email(email, subject, body)
+        create_notification(recipient_kind="tutor", recipient_id=tutor_id, title=notif_title, body=notif_body)
     except Exception:
         logger.exception("Failed to notify tutor applicant %s of application decision", email)
 
@@ -1566,7 +1635,7 @@ def _validate_request_fields(
 
 
 def _notify_directed_request(
-    *, tutor_name: str, tutor_email: str, learner_name: str,
+    *, tutor_id: int, tutor_name: str, tutor_email: str, learner_name: str,
     subject: str, topic: str | None, price_zar: float, duration_minutes: int,
     scheduled_at: dt.datetime | None,
 ) -> None:
@@ -1592,6 +1661,10 @@ def _notify_directed_request(
                 "only you can see this request.\n\n"
                 "— The Malita team"
             ),
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="A learner requested you directly",
+            body=f"{learner_name} requested you for {subject}{topic_str} at R{price_zar:.2f} ({duration_minutes} min).",
         )
     except Exception:
         logger.exception("Failed to notify tutor %s of a directed request", tutor_email)
@@ -1667,7 +1740,7 @@ def request_tutoring_session(
     if preferred_tutor_notify:
         tutor_name, tutor_email = preferred_tutor_notify
         _notify_directed_request(
-            tutor_name=tutor_name, tutor_email=tutor_email, learner_name=learner_name,
+            tutor_id=preferred_tutor_id, tutor_name=tutor_name, tutor_email=tutor_email, learner_name=learner_name,
             subject=subject, topic=topic, price_zar=price_zar,
             duration_minutes=duration_minutes, scheduled_at=scheduled_at,
         )
@@ -1736,7 +1809,7 @@ def withdraw_tutoring_request(request_id: int, learner_user_id: int) -> dict:
         if req.status == "time_proposed" and req.tutor_id:
             tutor = db.query(TutorAccount).get(req.tutor_id)
             if tutor:
-                notify_tutor = (tutor.name, tutor.email)
+                notify_tutor = (tutor.id, tutor.name, tutor.email)
         learner = db.query(User).get(learner_user_id)
         learner_name = learner.name
         subject, topic = req.subject, req.topic
@@ -1748,7 +1821,7 @@ def withdraw_tutoring_request(request_id: int, learner_user_id: int) -> dict:
 
     if notify_tutor:
         _notify_request_withdrawn(
-            tutor_name=notify_tutor[0], tutor_email=notify_tutor[1],
+            tutor_id=notify_tutor[0], tutor_name=notify_tutor[1], tutor_email=notify_tutor[2],
             learner_name=learner_name, subject=subject, topic=topic,
         )
     return result
@@ -1781,18 +1854,22 @@ def _expire_lapsed_payments() -> None:
             learner = db.query(User).get(req.learner_user_id)
             tutor = db.query(TutorAccount).get(req.tutor_id)
             if learner and tutor:
-                to_notify.append((learner.name, learner.email, tutor.name, tutor.email, req.subject, req.topic))
+                to_notify.append((
+                    learner.id, learner.name, learner.email,
+                    tutor.id, tutor.name, tutor.email, req.subject, req.topic,
+                ))
 
-    for learner_name, learner_email, tutor_name, tutor_email, subject, topic in to_notify:
+    for learner_id, learner_name, learner_email, tutor_id, tutor_name, tutor_email, subject, topic in to_notify:
         _notify_payment_lapsed(
-            learner_name=learner_name, learner_email=learner_email,
-            tutor_name=tutor_name, tutor_email=tutor_email,
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
             subject=subject, topic=topic,
         )
 
 
 def _notify_payment_lapsed(
-    *, learner_name: str, learner_email: str, tutor_name: str, tutor_email: str,
+    *, learner_id: int, learner_name: str, learner_email: str,
+    tutor_id: int, tutor_name: str, tutor_email: str,
     subject: str, topic: str | None,
 ) -> None:
     """Best-effort - tells both sides a match lapsed because the learner
@@ -1820,6 +1897,14 @@ def _notify_payment_lapsed(
                 "No action needed on your end.\n\n"
                 "— The Malita team"
             ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Session request lapsed",
+            body=f"Your match with {tutor_name} for {subject}{topic_str} lapsed - payment wasn't completed in time.",
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="A matched session lapsed",
+            body=f"Your match with {learner_name} for {subject}{topic_str} lapsed - no action needed.",
         )
     except Exception:
         logger.exception("Failed to notify learner/tutor of a lapsed payment")
@@ -1851,14 +1936,16 @@ def _expire_stale_admin_proposals() -> None:
             req.admin_proposed_at = None
             req.status = "requested"
             if tutor:
-                to_notify.append((tutor.name, tutor.email, subject, topic))
+                to_notify.append((tutor.id, tutor.name, tutor.email, subject, topic))
 
-    for tutor_name, tutor_email, subject, topic in to_notify:
-        _notify_admin_proposal_expired(tutor_name=tutor_name, tutor_email=tutor_email, subject=subject, topic=topic)
+    for tutor_id, tutor_name, tutor_email, subject, topic in to_notify:
+        _notify_admin_proposal_expired(
+            tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email, subject=subject, topic=topic,
+        )
 
 
 def _notify_admin_proposal_expired(
-    *, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
+    *, tutor_id: int, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
 ) -> None:
     """Best-effort - tells the tutor their window to respond to an
     admin-suggested match ran out, same spirit as _notify_payment_lapsed."""
@@ -1874,6 +1961,10 @@ def _notify_admin_proposal_expired(
                 "if you're still interested, check your Open Requests.\n\n"
                 "— The Malita team"
             ),
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="Admin-suggested match expired",
+            body=f"The {subject}{topic_str} session wasn't confirmed in time, so it's been reopened.",
         )
     except Exception:
         logger.exception("Failed to notify tutor %s of an expired admin proposal", tutor_email)
@@ -1912,7 +2003,7 @@ def send_due_reminders() -> None:
             tutor = db.query(TutorAccount).get(req.tutor_id)
             if learner and tutor:
                 to_notify_upcoming.append((
-                    learner.name, learner.email, tutor.name, tutor.email,
+                    learner.id, learner.name, learner.email, tutor.id, tutor.name, tutor.email,
                     req.subject, req.topic, req.scheduled_at, req.meet_link, "in about 24 hours",
                 ))
 
@@ -1933,7 +2024,7 @@ def send_due_reminders() -> None:
             tutor = db.query(TutorAccount).get(req.tutor_id)
             if learner and tutor:
                 to_notify_upcoming.append((
-                    learner.name, learner.email, tutor.name, tutor.email,
+                    learner.id, learner.name, learner.email, tutor.id, tutor.name, tutor.email,
                     req.subject, req.topic, req.scheduled_at, req.meet_link, "in about 15 minutes",
                 ))
 
@@ -1960,27 +2051,31 @@ def send_due_reminders() -> None:
                     round((req.matched_at + dt.timedelta(hours=PAYMENT_DEADLINE_HOURS) - now).total_seconds() / 3600),
                 )
                 to_notify_lapsing.append((
-                    learner.name, learner.email, tutor.name if tutor else "your tutor",
+                    learner.id, learner.name, learner.email, tutor.name if tutor else "your tutor",
                     req.subject, req.topic, hours_left,
                 ))
 
-    for learner_name, learner_email, tutor_name, tutor_email, subject, topic, scheduled_at, meet_link, when_label in to_notify_upcoming:
+    for (
+        learner_id, learner_name, learner_email, tutor_id, tutor_name, tutor_email,
+        subject, topic, scheduled_at, meet_link, when_label,
+    ) in to_notify_upcoming:
         _notify_session_upcoming(
-            learner_name=learner_name, learner_email=learner_email,
-            tutor_name=tutor_name, tutor_email=tutor_email,
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
             subject=subject, topic=topic, scheduled_at=scheduled_at,
             meet_link=meet_link, when_label=when_label,
         )
-    for learner_name, learner_email, tutor_name, subject, topic, hours_left in to_notify_lapsing:
+    for learner_id, learner_name, learner_email, tutor_name, subject, topic, hours_left in to_notify_lapsing:
         _notify_payment_lapsing_soon(
-            learner_name=learner_name, learner_email=learner_email,
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
             tutor_name=tutor_name,
             subject=subject, topic=topic, hours_left=hours_left,
         )
 
 
 def _notify_session_upcoming(
-    *, learner_name: str, learner_email: str, tutor_name: str, tutor_email: str,
+    *, learner_id: int, learner_name: str, learner_email: str,
+    tutor_id: int, tutor_name: str, tutor_email: str,
     subject: str, topic: str | None, scheduled_at: dt.datetime | None,
     meet_link: str | None, when_label: str,
 ) -> None:
@@ -2012,12 +2107,20 @@ def _notify_session_upcoming(
                 "— The Malita team"
             ),
         )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title=f"Session {when_label}",
+            body=f"Your {subject}{topic_str} session with {tutor_name} is {when_label}.",
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title=f"Session {when_label}",
+            body=f"Your {subject}{topic_str} session with {learner_name} is {when_label}.",
+        )
     except Exception:
         logger.exception("Failed to send an upcoming-session reminder")
 
 
 def _notify_payment_lapsing_soon(
-    *, learner_name: str, learner_email: str, tutor_name: str,
+    *, learner_id: int, learner_name: str, learner_email: str, tutor_name: str,
     subject: str, topic: str | None, hours_left: int,
 ) -> None:
     """Best-effort - warns the LEARNER only (they're the one who owes the
@@ -2035,6 +2138,10 @@ def _notify_payment_lapsing_soon(
                 "lapses you'll need to submit a new request.\n\n"
                 "— The Malita team"
             ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Payment due soon",
+            body=f"Your match with {tutor_name} for {subject}{topic_str} lapses in about {hours_str}.",
         )
     except Exception:
         logger.exception("Failed to send a payment-lapsing-soon reminder to %s", learner_email)
@@ -2363,7 +2470,7 @@ def accept_tutoring_request(request_id: int, tutor_id: int) -> dict:
             _assign_tutor_to_request(db, req, tutor)
             result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
             learner = db.query(User).get(req.learner_user_id)
-            learner_name, learner_email = learner.name, learner.email
+            learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
             tutor_name, tutor_email = tutor.name, tutor.email
             subject, topic, price_zar, duration_minutes, scheduled_at = (
                 req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
@@ -2376,8 +2483,8 @@ def accept_tutoring_request(request_id: int, tutor_id: int) -> dict:
         )
     else:
         _notify_match(
-            learner_name=learner_name, learner_email=learner_email,
-            tutor_name=tutor_name, tutor_email=tutor_email,
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
             subject=subject, topic=topic, price_zar=price_zar,
             duration_minutes=duration_minutes, scheduled_at=scheduled_at,
             meet_link=result["meet_link"],
@@ -2415,12 +2522,12 @@ def propose_new_time(request_id: int, tutor_id: int, proposed_scheduled_at: dt.d
 
         result = {"id": req.id, "status": req.status}
         learner = db.query(User).get(req.learner_user_id)
-        learner_name, learner_email = learner.name, learner.email
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
         tutor_name = tutor.name
         subject, topic = req.subject, req.topic
 
     _notify_time_proposed(
-        learner_name=learner_name, learner_email=learner_email, tutor_name=tutor_name,
+        learner_id=learner_id, learner_name=learner_name, learner_email=learner_email, tutor_name=tutor_name,
         subject=subject, topic=topic, proposed_scheduled_at=proposed_scheduled_at,
     )
     return result
@@ -2445,7 +2552,7 @@ def respond_to_time_proposal(request_id: int, learner_user_id: int, accept: bool
             learner = db.query(User).get(req.learner_user_id)
             if tutor:
                 decline_notice = dict(
-                    tutor_name=tutor.name, tutor_email=tutor.email, learner_name=learner.name,
+                    tutor_id=tutor.id, tutor_name=tutor.name, tutor_email=tutor.email, learner_name=learner.name,
                     subject=req.subject, topic=req.topic, proposed_scheduled_at=req.proposed_scheduled_at,
                 )
 
@@ -2478,15 +2585,15 @@ def respond_to_time_proposal(request_id: int, learner_user_id: int, accept: bool
 
         result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
         learner = db.query(User).get(req.learner_user_id)
-        learner_name, learner_email = learner.name, learner.email
-        tutor_name, tutor_email = tutor.name, tutor.email
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+        tutor_id, tutor_name, tutor_email = tutor.id, tutor.name, tutor.email
         subject, topic, price_zar, duration_minutes, scheduled_at = (
             req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
         )
 
     _notify_match(
-        learner_name=learner_name, learner_email=learner_email,
-        tutor_name=tutor_name, tutor_email=tutor_email,
+        learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+        tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, price_zar=price_zar,
         duration_minutes=duration_minutes, scheduled_at=scheduled_at,
         meet_link=result["meet_link"],
@@ -2532,7 +2639,7 @@ def match_tutor_to_request(
         note = req.admin_match_note
 
     _notify_admin_proposed_match(
-        tutor_name=tutor_name, tutor_email=tutor_email,
+        tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, scheduled_at=scheduled_at, admin_note=note,
     )
     return result
@@ -2578,7 +2685,7 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
                 req.admin_proposed_at = None
                 result = {"id": req.id, "status": req.status}
                 learner = db.query(User).get(req.learner_user_id)
-                learner_name, learner_email = learner.name, learner.email
+                learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
                 proposed_scheduled_at = req.proposed_scheduled_at
             else:
                 # No time change - finalize directly, same as a normal accept.
@@ -2594,7 +2701,7 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
                     "m_payment_id": req.m_payment_id, "meet_link": req.meet_link,
                 }
                 learner = db.query(User).get(req.learner_user_id)
-                learner_name, learner_email = learner.name, learner.email
+                learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
                 tutor_email = tutor.email
                 price_zar, duration_minutes, final_scheduled_at = (
                     req.price_zar, req.duration_minutes, req.scheduled_at
@@ -2606,15 +2713,15 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
 
     if time_changed:
         _notify_time_proposed(
-            learner_name=learner_name, learner_email=learner_email, tutor_name=tutor_name,
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email, tutor_name=tutor_name,
             subject=subject, topic=topic, proposed_scheduled_at=proposed_scheduled_at,
         )
         _notify_admins_of_proposal_response(tutor_name=tutor_name, subject=subject, topic=topic, accepted=True)
         return result
 
     _notify_match(
-        learner_name=learner_name, learner_email=learner_email,
-        tutor_name=tutor_name, tutor_email=tutor_email,
+        learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+        tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, price_zar=price_zar,
         duration_minutes=duration_minutes, scheduled_at=final_scheduled_at,
         meet_link=result["meet_link"],
@@ -2632,8 +2739,8 @@ def _notify_admins_of_proposal_response(
     or declined without reopening the request themselves."""
     try:
         with get_session() as db:
-            admin_emails = [u.email for u in db.query(User).filter(User.is_admin.is_(True)).all()]
-        if not admin_emails:
+            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admins:
             return
         topic_str = f" ({topic})" if topic else ""
         verb = "accepted" if accepted else "declined"
@@ -2642,8 +2749,12 @@ def _notify_admins_of_proposal_response(
             + ("Nothing further needed." if accepted else
                "It's been reopened - suggest another tutor from the Match Requests tab.")
         )
-        for email in admin_emails:
+        for admin_id, email in admins:
             send_email(email, f"Tutor {verb} your suggested match: {subject}{topic_str}", body)
+            create_notification(
+                recipient_kind="user", recipient_id=admin_id,
+                title=f"Tutor {verb} your suggested match", body=f"{tutor_name} {verb} the {subject}{topic_str} match.",
+            )
     except Exception:
         logger.exception("Failed to notify admins of a tutor's response to a suggested match")
 
@@ -2677,7 +2788,7 @@ def respond_to_custom_module_claim(request_id: int, approve: bool) -> dict:
             req.status = "requested"
             result = {"id": req.id, "status": req.status}
             _notify_custom_claim_rejected(
-                tutor_name=tutor_name, tutor_email=tutor_email, subject=subject, topic=topic,
+                tutor_id=tutor.id, tutor_name=tutor_name, tutor_email=tutor_email, subject=subject, topic=topic,
             )
             return result
 
@@ -2691,12 +2802,13 @@ def respond_to_custom_module_claim(request_id: int, approve: bool) -> dict:
 
         result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
         learner = db.query(User).get(req.learner_user_id)
-        learner_name, learner_email = learner.name, learner.email
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+        tutor_id = tutor.id
         price_zar, duration_minutes, final_scheduled_at = req.price_zar, req.duration_minutes, req.scheduled_at
 
     _notify_match(
-        learner_name=learner_name, learner_email=learner_email,
-        tutor_name=tutor_name, tutor_email=tutor_email,
+        learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+        tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, price_zar=price_zar,
         duration_minutes=duration_minutes, scheduled_at=final_scheduled_at,
         meet_link=result["meet_link"],
@@ -2705,7 +2817,7 @@ def respond_to_custom_module_claim(request_id: int, approve: bool) -> dict:
 
 
 def _notify_custom_claim_rejected(
-    *, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
+    *, tutor_id: int, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
 ) -> None:
     """Best-effort - tells the tutor their claim on a custom module
     request wasn't approved, same spirit as _notify_tutor_of_decision for
@@ -2722,12 +2834,16 @@ def _notify_custom_claim_rejected(
                 "— The Malita team"
             ),
         )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="Claim not approved",
+            body=f"Your claim on the {subject}{topic_str} request wasn't approved - it's been reopened.",
+        )
     except Exception:
         logger.exception("Failed to notify tutor %s of a rejected custom module claim", tutor_email)
 
 
 def _notify_admin_proposed_match(
-    *, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
+    *, tutor_id: int, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
     scheduled_at: dt.datetime | None, admin_note: str | None = None,
 ) -> None:
     """Best-effort - tells the tutor an admin suggested them for a session
@@ -2748,12 +2864,16 @@ def _notify_admin_proposed_match(
                 "— The Malita team"
             ),
         )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="An admin suggested you for a session",
+            body=f"You've been suggested for a {subject}{topic_str} session - confirm or decline in the app.",
+        )
     except Exception:
         logger.exception("Failed to notify tutor %s of an admin-suggested match", tutor_email)
 
 
 def _notify_request_withdrawn(
-    *, tutor_name: str, tutor_email: str, learner_name: str,
+    *, tutor_id: int, tutor_name: str, tutor_email: str, learner_name: str,
     subject: str, topic: str | None,
 ) -> None:
     """Best-effort - tells a tutor whose time proposal was pending that
@@ -2772,12 +2892,16 @@ def _notify_request_withdrawn(
                 "— The Malita team"
             ),
         )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="A request was withdrawn",
+            body=f"{learner_name} withdrew their {subject}{topic_str} request before you responded.",
+        )
     except Exception:
         logger.exception("Failed to notify tutor %s of a withdrawn request", tutor_email)
 
 
 def _notify_proposal_declined(
-    *, tutor_name: str, tutor_email: str, learner_name: str,
+    *, tutor_id: int, tutor_name: str, tutor_email: str, learner_name: str,
     subject: str, topic: str | None, proposed_scheduled_at: dt.datetime | None,
 ) -> None:
     """Best-effort, same pattern as _notify_match - tells the tutor their
@@ -2798,12 +2922,16 @@ def _notify_proposal_declined(
                 "— The Malita team"
             ),
         )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="Proposed time declined",
+            body=f"{learner_name} declined your proposed time for {subject}{topic_str} - it's open again.",
+        )
     except Exception:
         logger.exception("Failed to notify tutor %s of a declined time proposal", tutor_email)
 
 
 def _notify_time_proposed(
-    *, learner_name: str, learner_email: str, tutor_name: str,
+    *, learner_id: int, learner_name: str, learner_email: str, tutor_name: str,
     subject: str, topic: str | None, proposed_scheduled_at: dt.datetime,
 ) -> None:
     """Best-effort, same pattern as _notify_match - a failed or
@@ -2822,6 +2950,10 @@ def _notify_time_proposed(
                 "— The Malita team"
             ),
         )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Tutor proposed a new time",
+            body=f"{tutor_name} proposed a new time for {subject}{topic_str} - approve or decline in the app.",
+        )
     except Exception:
         logger.exception("Failed to notify learner %s of a proposed time change", learner_email)
 
@@ -2839,8 +2971,8 @@ def _notify_admins_of_custom_claim(
     actually prompts someone to go look."""
     try:
         with get_session() as db:
-            admin_emails = [u.email for u in db.query(User).filter(User.is_admin.is_(True)).all()]
-        if not admin_emails:
+            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admins:
             return
         topic_str = f" ({topic})" if topic else ""
         when_str = _format_sast(scheduled_at)
@@ -2851,14 +2983,19 @@ def _notify_admins_of_custom_claim(
             "learner sees it as accepted - open the admin console's Tutoring tab to review and "
             "approve or reject it.\n"
         )
-        for email in admin_emails:
+        for admin_id, email in admins:
             send_email(email, f"Tutor claim needs approval: {subject}{topic_str}", body)
+            create_notification(
+                recipient_kind="user", recipient_id=admin_id, title="Tutor claim needs approval",
+                body=f"{tutor_name} claimed request #{request_id} - {subject}{topic_str}.",
+            )
     except Exception:
         logger.exception("Failed to notify admins of request %s's custom module claim", request_id)
 
 
 def _notify_match(
-    *, learner_name: str, learner_email: str, tutor_name: str, tutor_email: str,
+    *, learner_id: int, learner_name: str, learner_email: str,
+    tutor_id: int, tutor_name: str, tutor_email: str,
     subject: str, topic: str | None, price_zar: float, duration_minutes: int,
     scheduled_at: dt.datetime | None, meet_link: str | None = None,
 ) -> None:
@@ -2897,6 +3034,14 @@ def _notify_match(
                 f"{RECORDING_REMINDER_NOTE}\n\n"
                 "— The Malita team"
             ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="You've been matched with a tutor!",
+            body=f"{tutor_name} - {subject}{topic_str} - pay in the app to confirm the session.",
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="You've been matched to a new session",
+            body=f"{learner_name} - {subject}{topic_str}, scheduled {when_str}.",
         )
     except Exception:
         logger.exception(
@@ -3048,8 +3193,8 @@ def _notify_admins_of_recording(
     separately to file it away."""
     try:
         with get_session() as db:
-            admin_emails = [u.email for u in db.query(User).filter(User.is_admin.is_(True)).all()]
-        if not admin_emails:
+            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admins:
             return
         topic_str = f" ({topic})" if topic else ""
         when_str = _format_sast(scheduled_at)
@@ -3065,8 +3210,12 @@ def _notify_admins_of_recording(
             f"Price: {price_str}\n\n"
             f"Recording: {recording_link}\n"
         )
-        for email in admin_emails:
+        for admin_id, email in admins:
             send_email(email, f"Session recording: {subject}{topic_str}", body)
+            create_notification(
+                recipient_kind="user", recipient_id=admin_id, title="Session recording shared",
+                body=f"{tutor_name} shared the recording for session #{request_id} - {subject}{topic_str}.",
+            )
     except Exception:
         logger.exception("Failed to notify admins of session %s's recording", request_id)
 
@@ -3132,13 +3281,13 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
 
         learner = db.query(User).get(req.learner_user_id)
         tutor = db.query(TutorAccount).get(req.tutor_id)
-        learner_name, learner_email = learner.name, learner.email
-        tutor_name, tutor_email = tutor.name, tutor.email
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+        tutor_id, tutor_name, tutor_email = tutor.id, tutor.name, tutor.email
         subject, topic, scheduled_at = req.subject, req.topic, req.scheduled_at
 
     _notify_session_cancelled(
-        learner_name=learner_name, learner_email=learner_email,
-        tutor_name=tutor_name, tutor_email=tutor_email,
+        learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+        tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, scheduled_at=scheduled_at,
         cancelled_by=by, reason=reason, was_paid=was_paid,
     )
@@ -3146,7 +3295,8 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
 
 
 def _notify_session_cancelled(
-    *, learner_name: str, learner_email: str, tutor_name: str, tutor_email: str,
+    *, learner_id: int, learner_name: str, learner_email: str,
+    tutor_id: int, tutor_name: str, tutor_email: str,
     subject: str, topic: str | None, scheduled_at: dt.datetime | None,
     cancelled_by: str, reason: str, was_paid: bool,
 ) -> None:
@@ -3182,6 +3332,14 @@ def _notify_session_cancelled(
                 f"{when_str} was cancelled by {who}.{reason_str}\n\n"
                 "— The Malita team"
             ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Your tutoring session was cancelled",
+            body=f"{subject}{topic_str} session scheduled for {when_str} was cancelled by {who}.",
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="A tutoring session was cancelled",
+            body=f"{subject}{topic_str} session with {learner_name} scheduled for {when_str} was cancelled by {who}.",
         )
     except Exception:
         logger.exception("Failed to notify learner/tutor of a cancelled session")

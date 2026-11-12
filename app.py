@@ -67,6 +67,7 @@ from backend.tutoring import (
     list_tutor_higher_ed_applications,
     approve_tutor_higher_ed, reject_tutor_higher_ed, list_learner_requests,
     list_pending_custom_claims, respond_to_custom_module_claim,
+    list_notifications, count_unread_notifications, mark_all_notifications_read,
 )
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -734,6 +735,24 @@ if is_admin_user:
     if st.sidebar.button("🔄 Reset my daily usage"):
         reset_today_usage(auth_user["id"])
         st.sidebar.success("Usage reset — refresh to see it take effect.")
+
+# Same events that already email an admin (every _notify_admins_* call in
+# backend/tutoring.py) also land here - a quick place to check without an
+# inbox. recipient_kind "user" covers admins too (see Notification model).
+if is_admin_user:
+    _admin_unread = count_unread_notifications("user", auth_user["id"])
+    with st.sidebar.expander(f"🔔 Notifications{f' ({_admin_unread})' if _admin_unread else ''}"):
+        _admin_notifs = list_notifications("user", auth_user["id"])
+        if not _admin_notifs:
+            st.caption("No notifications yet.")
+        else:
+            if st.button("Mark all as read", key="admin_notif_mark_all"):
+                mark_all_notifications_read("user", auth_user["id"])
+                st.rerun()
+            for _n in _admin_notifs:
+                st.markdown(("🔵 " if not _n["read"] else "") + f"**{_n['title']}**")
+                if _n["body"]:
+                    st.caption(_n["body"])
 
 with st.sidebar.expander("💳 Upgrade / Manage Plan"):
     for tier_key in TIER_ORDER:

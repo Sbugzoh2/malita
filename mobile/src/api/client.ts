@@ -1257,3 +1257,46 @@ export function fetchAITeacherLesson(token: string, subject: string, topic: stri
   });
 }
 
+// --- In-app notifications - the same events that already email a
+// learner/tutor (see backend/tutoring.py's _notify_* functions) also
+// land here, so the bell icon has something to show without an inbox.
+export type AppNotification = {
+  id: number;
+  title: string;
+  body: string | null;
+  created_at: string | null;
+  read: boolean;
+};
+
+export function fetchNotifications(token: string) {
+  return request<{ notifications: AppNotification[] }>("/notifications", { token });
+}
+
+export function fetchNotificationsUnreadCount(token: string) {
+  return request<{ count: number }>("/notifications/unread-count", { token });
+}
+
+export function markNotificationRead(token: string, notificationId: number) {
+  return request<{ status: string }>(`/notifications/${notificationId}/read`, { method: "POST", token });
+}
+
+export function markAllNotificationsRead(token: string) {
+  return request<{ status: string }>("/notifications/read-all", { method: "POST", token });
+}
+
+export function fetchTutorNotifications(token: string) {
+  return request<{ notifications: AppNotification[] }>("/tutor/notifications", { token });
+}
+
+export function fetchTutorNotificationsUnreadCount(token: string) {
+  return request<{ count: number }>("/tutor/notifications/unread-count", { token });
+}
+
+export function markTutorNotificationRead(token: string, notificationId: number) {
+  return request<{ status: string }>(`/tutor/notifications/${notificationId}/read`, { method: "POST", token });
+}
+
+export function markAllTutorNotificationsRead(token: string) {
+  return request<{ status: string }>("/tutor/notifications/read-all", { method: "POST", token });
+}
+

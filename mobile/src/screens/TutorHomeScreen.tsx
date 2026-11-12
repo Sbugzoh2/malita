@@ -40,6 +40,66 @@ function payoutPreview(priceZar: number, cutPercent: number): string {
   return `R${(priceZar * (1 - cutPercent / 100)).toFixed(2)}`;
 }
 
+// "3h ago" / "2d ago" for a job card's request timestamp - coarser than
+// formatScheduled on purpose, this is just a freshness signal, not a time
+// someone needs to act on.
+function timeAgo(iso: string | null): string {
+  if (!iso) return "";
+  const hours = Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60));
+  if (hours < 1) return "just now";
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// Compact "Tue 18:00" (SAST) for a job card row - formatScheduled's full
+// "12 Nov 2026, 18:00" is reserved for the Accept button/expanded detail,
+// where the exact date actually matters.
+function formatScheduledShort(iso: string): string {
+  const d = new Date(iso);
+  const weekday = d.toLocaleString("en-ZA", { weekday: "short", timeZone: "Africa/Johannesburg" });
+  const time = d.toLocaleString("en-ZA", {
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Johannesburg",
+  });
+  return `${weekday} ${time}`;
+}
+
+// Same 8-hue palette as theme.ts's topicColors, but hashed by subject name
+// instead of hand-mapped - open requests can carry any subject string
+// (including higher-ed modules), so there's no fixed catalog to map from.
+const JOB_GROUP_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+function colorForGroup(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return JOB_GROUP_PALETTE[hash % JOB_GROUP_PALETTE.length];
+}
+
+// A custom ("Other") higher-ed module always falls into the "Other"
+// bucket regardless of its real subject text - those requests need admin
+// sign-off before they're even a real match (see acceptTutoringRequest's
+// pending_admin_approval path), so they don't belong grouped in with a
+// catalog subject's ordinary jobs.
+function groupKeyFor(r: TutoringRequest): string {
+  if (r.is_custom_higher_ed) return "Other";
+  return r.subject && r.subject.trim() ? r.subject : "Other";
+}
+
+type JobGroup = { name: string; items: TutoringRequest[] };
+
+function buildJobGroups(requests: TutoringRequest[]): JobGroup[] {
+  const map = new Map<string, TutoringRequest[]>();
+  for (const r of requests) {
+    const key = groupKeyFor(r);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(r);
+  }
+  const otherItems = map.get("Other") ?? [];
+  map.delete("Other");
+  const groups = Array.from(map.entries()).map(([name, items]) => ({ name, items }));
+  groups.sort((a, b) => b.items.length - a.items.length);
+  if (otherItems.length > 0) groups.push({ name: "Other", items: otherItems });
+  return groups;
+}
+
 const STATUS_COLOR: Record<string, string> = {
   pending_review: colors.textSecondary,
   approved: colors.success,
@@ -106,6 +166,8 @@ export default function TutorHomeScreen() {
   const [recordingDraft, setRecordingDraft] = useState<Record<number, string>>({});
   const [submittingRecordingId, setSubmittingRecordingId] = useState<number | null>(null);
   const [sessionGroup, setSessionGroup] = useState<SessionGroup>("active");
+  const [jobFilter, setJobFilter] = useState<string>("All");
+  const [expandedJobId, setExpandedJobId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -296,7 +358,7 @@ export default function TutorHomeScreen() {
         <>
           <View style={styles.sectionRow}>
             {([
-              { key: "open", label: "Open Requests" },
+              { key: "open", label: "Jobs" },
               { key: "sessions", label: "My Sessions" },
               { key: "payouts", label: "My Payouts" },
             ] as { key: Section; label: string }[]).map((s) => (
@@ -317,73 +379,160 @@ export default function TutorHomeScreen() {
               <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
             ) : openRequests.length === 0 ? (
               <Text style={styles.empty}>No open requests for your subjects right now.</Text>
-            ) : (
-              openRequests.map((r) => (
-                <View key={r.id} style={styles.card}>
-                  <Text style={styles.cardTitle}>
-                    {r.subject}
-                    {r.topic ? ` · ${r.topic}` : ""}
-                  </Text>
-                  <Text style={styles.cardMeta}>
-                    R{r.price_zar}{r.duration_minutes ? ` · ${r.duration_minutes} min` : ""}
-                  </Text>
-                  <Text style={styles.payoutNote}>
-                    Estimated payout: ~{r.price_zar != null ? payoutPreview(r.price_zar, openCutPercent) : "—"} after
-                    Malita's {openCutPercent}% cut — the amount above is not your final payout.
-                  </Text>
-                  {r.scheduled_at ? (
-                    <Text style={styles.cardMeta}>Requested time: {formatScheduled(r.scheduled_at)}</Text>
-                  ) : null}
-                  {r.preferred_times_note ? (
-                    <Text style={styles.cardMeta}>Notes: {r.preferred_times_note}</Text>
-                  ) : null}
-
-                  <Pressable
-                    style={styles.acceptButton}
-                    onPress={() => handleAccept(r.id)}
-                    disabled={acceptingId === r.id}
-                  >
-                    {acceptingId === r.id ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.acceptButtonText}>
-                        Accept{r.scheduled_at ? ` at ${formatScheduled(r.scheduled_at)}` : ""}
-                      </Text>
-                    )}
-                  </Pressable>
-
-                  <Pressable
-                    style={styles.proposeLinkButton}
-                    onPress={() => setProposingId(proposingId === r.id ? null : r.id)}
-                  >
-                    <Text style={styles.proposeLinkText}>
-                      {proposingId === r.id ? "Cancel" : "Can't make that time? Propose a different one"}
-                    </Text>
-                  </Pressable>
-
-                  {proposingId === r.id && (
-                    <View style={styles.confirmBox}>
-                      <SessionDateTimePicker
-                        label="Propose a new date & time"
-                        value={proposeDateTime[r.id] || null}
-                        onChange={(v) => setProposeDateTime((prev) => ({ ...prev, [r.id]: v }))}
-                      />
-                      <Pressable
-                        style={styles.acceptButton}
-                        onPress={() => handleSendProposal(r.id)}
-                        disabled={sendingProposalId === r.id}
-                      >
-                        {sendingProposalId === r.id ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <Text style={styles.acceptButtonText}>Send Proposal</Text>
-                        )}
-                      </Pressable>
+            ) : (() => {
+              const jobGroups = buildJobGroups(openRequests);
+              const totalRaw = openRequests.reduce((sum, r) => sum + (r.price_zar ?? 0), 0);
+              const totalAfterCut = totalRaw * (1 - openCutPercent / 100);
+              const visibleGroups = jobFilter === "All" ? jobGroups : jobGroups.filter((g) => g.name === jobFilter);
+              return (
+                <>
+                  <View style={styles.statCard}>
+                    <View style={styles.statCardRow}>
+                      <View>
+                        <Text style={styles.statLabel}>Open right now</Text>
+                        <Text style={styles.statValue}>{openRequests.length} job{openRequests.length === 1 ? "" : "s"}</Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={styles.statLabel}>Your est. payout</Text>
+                        <Text style={styles.statValuePayout}>R{totalAfterCut.toFixed(0)}</Text>
+                      </View>
                     </View>
-                  )}
-                </View>
-              ))
-            )
+                    <View style={styles.statCardFooterRow}>
+                      <Text style={styles.statFooterText}>R{totalRaw.toFixed(0)} total if all accepted</Text>
+                      <Text style={styles.statFooterText}>after Malita's {openCutPercent}% fee</Text>
+                    </View>
+                  </View>
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                    <Pressable
+                      style={[styles.filterChip, jobFilter === "All" && styles.filterChipActive]}
+                      onPress={() => setJobFilter("All")}
+                    >
+                      <Text style={[styles.filterChipText, jobFilter === "All" && styles.filterChipTextActive]}>
+                        All · {openRequests.length}
+                      </Text>
+                    </Pressable>
+                    {jobGroups.map((g) => (
+                      <Pressable
+                        key={g.name}
+                        style={[styles.filterChip, jobFilter === g.name && styles.filterChipActive]}
+                        onPress={() => setJobFilter(g.name)}
+                      >
+                        <Text style={[styles.filterChipText, jobFilter === g.name && styles.filterChipTextActive]}>
+                          {g.name} · {g.items.length}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+
+                  {visibleGroups.length === 0 ? (
+                    <Text style={styles.empty}>No open jobs in this filter right now.</Text>
+                  ) : null}
+                  {visibleGroups.map((group) => (
+                    <View key={group.name} style={styles.jobGroupBlock}>
+                      <View style={styles.groupHeaderRow}>
+                        <View
+                          style={[
+                            styles.groupAvatar,
+                            { backgroundColor: group.name === "Other" ? colors.textSecondary : colorForGroup(group.name) },
+                          ]}
+                        >
+                          <Text style={styles.groupAvatarText}>
+                            {group.name === "Other" ? "•••" : group.name.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                        <Text style={styles.groupName}>{group.name}</Text>
+                        <Text style={styles.groupCount}>{group.items.length}</Text>
+                      </View>
+
+                      {group.items.map((r) => (
+                        <View key={r.id} style={[styles.jobCard, group.name === "Other" && styles.jobCardOther]}>
+                          <Pressable
+                            style={styles.jobCardRow}
+                            onPress={() => setExpandedJobId(expandedJobId === r.id ? null : r.id)}
+                          >
+                            <View style={styles.jobCardInfo}>
+                              <Text style={styles.jobTitle}>{r.topic || r.custom_module_name || r.subject}</Text>
+                              {(r.duration_minutes || r.scheduled_at) ? (
+                                <Text style={styles.jobMetaText}>
+                                  {r.duration_minutes ? `${r.duration_minutes} min` : ""}
+                                  {r.duration_minutes && r.scheduled_at ? " · " : ""}
+                                  {r.scheduled_at ? formatScheduledShort(r.scheduled_at) : ""}
+                                </Text>
+                              ) : null}
+                              <Text style={styles.jobRequestedAgo}>
+                                {r.is_custom_higher_ed ? "Custom module · " : ""}
+                                {r.created_at ? `Requested ${timeAgo(r.created_at)}` : ""}
+                              </Text>
+                            </View>
+                            <View style={styles.jobPriceCol}>
+                              <Text style={styles.jobPrice}>{r.price_zar != null ? `R${r.price_zar}` : "—"}</Text>
+                              <Text style={styles.jobChevron}>{expandedJobId === r.id ? "⌄" : "›"}</Text>
+                            </View>
+                          </Pressable>
+
+                          {expandedJobId === r.id && (
+                            <View style={styles.jobCardExpanded}>
+                              <Text style={styles.payoutNote}>
+                                Estimated payout: ~{r.price_zar != null ? payoutPreview(r.price_zar, openCutPercent) : "—"} after
+                                Malita's {openCutPercent}% cut — the amount above is not your final payout.
+                              </Text>
+                              {r.preferred_times_note ? (
+                                <Text style={styles.cardMeta}>Notes: {r.preferred_times_note}</Text>
+                              ) : null}
+
+                              <Pressable
+                                style={styles.acceptButton}
+                                onPress={() => handleAccept(r.id)}
+                                disabled={acceptingId === r.id}
+                              >
+                                {acceptingId === r.id ? (
+                                  <ActivityIndicator color="#fff" />
+                                ) : (
+                                  <Text style={styles.acceptButtonText}>
+                                    Accept{r.scheduled_at ? ` at ${formatScheduled(r.scheduled_at)}` : ""}
+                                  </Text>
+                                )}
+                              </Pressable>
+
+                              <Pressable
+                                style={styles.proposeLinkButton}
+                                onPress={() => setProposingId(proposingId === r.id ? null : r.id)}
+                              >
+                                <Text style={styles.proposeLinkText}>
+                                  {proposingId === r.id ? "Cancel" : "Can't make that time? Propose a different one"}
+                                </Text>
+                              </Pressable>
+
+                              {proposingId === r.id && (
+                                <View style={styles.confirmBox}>
+                                  <SessionDateTimePicker
+                                    label="Propose a new date & time"
+                                    value={proposeDateTime[r.id] || null}
+                                    onChange={(v) => setProposeDateTime((prev) => ({ ...prev, [r.id]: v }))}
+                                  />
+                                  <Pressable
+                                    style={styles.acceptButton}
+                                    onPress={() => handleSendProposal(r.id)}
+                                    disabled={sendingProposalId === r.id}
+                                  >
+                                    {sendingProposalId === r.id ? (
+                                      <ActivityIndicator color="#fff" />
+                                    ) : (
+                                      <Text style={styles.acceptButtonText}>Send Proposal</Text>
+                                    )}
+                                  </Pressable>
+                                </View>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  ))}
+                </>
+              );
+            })()
           ) : section === "sessions" ? (
             !profile ? (
               <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
@@ -671,6 +820,79 @@ const styles = StyleSheet.create({
   sectionChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   sectionChipText: { color: colors.text, fontSize: 13, fontWeight: "600" },
   sectionChipTextActive: { color: "#fff" },
+  statCard: {
+    backgroundColor: "#0b0b0b",
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 16,
+  },
+  statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  statLabel: { fontSize: 12, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  statValue: { fontSize: 28, color: "#fff", fontWeight: "800", marginTop: 4 },
+  statValuePayout: { fontSize: 22, color: colors.success, fontWeight: "800", marginTop: 4 },
+  statCardFooterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#2b2b29",
+  },
+  statFooterText: { fontSize: 11, color: "#8a8984", fontWeight: "500" },
+  filterRow: { flexGrow: 0, marginBottom: 16 },
+  filterRowContent: { gap: 8, paddingRight: 8 },
+  filterChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#fff",
+  },
+  filterChipActive: { backgroundColor: "#0b0b0b", borderColor: "transparent" },
+  filterChipText: { fontSize: 13, fontWeight: "600", color: colors.text },
+  filterChipTextActive: { color: "#fff" },
+  jobGroupBlock: { marginBottom: 22 },
+  groupHeaderRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
+  groupAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupAvatarText: { fontSize: 13, fontWeight: "800", color: "#fff" },
+  groupName: { flex: 1, fontSize: 15, fontWeight: "700", color: colors.text },
+  groupCount: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textSecondary,
+    backgroundColor: "#efeeea",
+    borderRadius: 999,
+    paddingVertical: 3,
+    paddingHorizontal: 9,
+  },
+  jobCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    marginBottom: 10,
+    shadowColor: "#0b0b0b",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  jobCardOther: { borderWidth: 1, borderColor: "#d8d7d1", borderStyle: "dashed" },
+  jobCardRow: { flexDirection: "row", alignItems: "center", gap: 14, padding: 14 },
+  jobCardInfo: { flex: 1, minWidth: 0 },
+  jobTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
+  jobMetaText: { fontSize: 12, color: colors.textSecondary, marginTop: 5 },
+  jobRequestedAgo: { fontSize: 11, color: "#8a8984", marginTop: 2 },
+  jobPriceCol: { alignItems: "flex-end" },
+  jobPrice: { fontSize: 17, fontWeight: "800", color: colors.success },
+  jobChevron: { fontSize: 16, color: "#8a8984", marginTop: 6 },
+  jobCardExpanded: { paddingHorizontal: 14, paddingBottom: 14, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 16,

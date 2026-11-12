@@ -1,12 +1,20 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, TextInput } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
-import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject } from "../theme";
+import { colors } from "../theme";
 import { ApiError, DirectoryTutor, fetchNotificationsUnreadCount, fetchTutorsDirectory } from "../api/client";
-import Dropdown from "../components/Dropdown";
 import NotificationBell from "../components/NotificationBell";
+
+// Plain case-insensitive substring match - a free-text search box over
+// several fields of different shapes (subject names, module names,
+// institutions, tutor names) is simpler and more forgiving than trying
+// to keep a single-subject dropdown in sync with two unrelated catalogs
+// (high-school subjects vs higher-ed modules).
+function textMatches(haystack: string | null | undefined, query: string): boolean {
+  return !!haystack && haystack.toLowerCase().includes(query);
+}
 
 // Same hash-by-name palette as the other redesigned screens' subject/
 // tutor avatars - a tutor's name has no fixed catalog to hand-map a
@@ -30,20 +38,20 @@ export default function BrowseTutorsScreen({ navigation }: any) {
   const showSubjects = hasCrossAccess || !isHigherEd;
   const showModules = hasCrossAccess || isHigherEd;
 
-  const [subjectFilter, setSubjectFilter] = useState<HighSchoolTutoringSubject | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [tutors, setTutors] = useState<DirectoryTutor[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Search is free-text and client-side now (below), so the full
+  // directory is always fetched unfiltered - the API's subject param
+  // only ever did an exact-value match anyway, which can't support a
+  // keyword search across subjects, modules, and tutor names at once.
   const load = useCallback(() => {
     if (!token) return;
-    // With cross access the subject filter is applied client-side below
-    // instead (the API's subject param would otherwise hide a tutor who
-    // only offers higher-ed modules, since it's an AND-filter server-side).
-    const serverSubjectFilter = !hasCrossAccess && !isHigherEd ? subjectFilter ?? undefined : undefined;
-    fetchTutorsDirectory(token, { subject: serverSubjectFilter })
+    fetchTutorsDirectory(token)
       .then((res) => setTutors(res.tutors))
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load the tutor directory."));
-  }, [token, isHigherEd, hasCrossAccess, subjectFilter]);
+  }, [token]);
 
   useFocusEffect(
     useCallback(() => {
@@ -80,14 +88,39 @@ export default function BrowseTutorsScreen({ navigation }: any) {
     });
   }
 
-  const visibleTutors = (tutors ?? []).filter((t) => {
-    const matchingSubjects = showSubjects
-      ? t.subjects.filter((s) => !subjectFilter || s.subject === subjectFilter)
-      : [];
-    const hasQualifyingSubject = matchingSubjects.length > 0;
-    const hasQualifyingModule = showModules && t.higher_ed_modules.length > 0;
-    return hasQualifyingSubject || hasQualifyingModule;
-  });
+  const query = searchQuery.trim().toLowerCase();
+
+  // A tutor-name (or bio) match means the search was for THIS tutor, so
+  // every one of their offerings shows, not just the ones whose own text
+  // happens to contain the query - otherwise searching "Sibusiso" would
+  // hide his own subjects/modules for not containing the word "Sibusiso".
+  function tutorNameMatches(t: DirectoryTutor): boolean {
+    return !query || textMatches(t.name, query) || textMatches(t.bio, query);
+  }
+
+  function matchingSubjectsFor(t: DirectoryTutor) {
+    if (!showSubjects) return [];
+    return t.subjects.filter(
+      (s) => !query || tutorNameMatches(t) || textMatches(s.subject, query) || textMatches(s.topics, query)
+    );
+  }
+
+  function matchingModulesFor(t: DirectoryTutor) {
+    if (!showModules) return [];
+    return t.higher_ed_modules.filter(
+      (m) =>
+        !query ||
+        tutorNameMatches(t) ||
+        textMatches(m.name, query) ||
+        textMatches(m.year_level_label, query) ||
+        textMatches(m.qualification, query) ||
+        textMatches(m.institution, query)
+    );
+  }
+
+  const visibleTutors = (tutors ?? []).filter(
+    (t) => matchingSubjectsFor(t).length > 0 || matchingModulesFor(t).length > 0
+  );
 
   return (
     <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}>
@@ -108,21 +141,23 @@ export default function BrowseTutorsScreen({ navigation }: any) {
         flow — a Google Meet link is created and you'll be asked to pay before the session is confirmed.
       </Text>
 
-      {showSubjects && (
-        <Dropdown
-          label="Filter by subject (optional)"
-          options={[{ label: "All subjects", value: "" }, ...HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => ({ label: s, value: s }))]}
-          value={subjectFilter ?? ""}
-          onChange={(v) => setSubjectFilter((v || null) as HighSchoolTutoringSubject | null)}
-        />
-      )}
+      <Text style={styles.label}>Search (optional)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Subject, tutor name, qualification, university…"
+        placeholderTextColor={colors.textSecondary}
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+      />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {!tutors ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
       ) : visibleTutors.length === 0 ? (
-        <Text style={styles.empty}>No approved tutors match that filter right now.</Text>
+        <Text style={styles.empty}>
+          {query ? "No approved tutors match that search." : "No approved tutors right now."}
+        </Text>
       ) : (
         visibleTutors.map((tutor) => (
           <View key={tutor.id} style={styles.card}>
@@ -140,10 +175,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
               <Text style={styles.cardMeta}>Availability: {tutor.availability_note}</Text>
             ) : null}
 
-            {showSubjects &&
-              tutor.subjects
-                .filter((s) => !subjectFilter || s.subject === subjectFilter)
-                .map((s) => (
+            {matchingSubjectsFor(tutor).map((s) => (
                 <View key={s.subject} style={styles.offerRow}>
                   <View style={[styles.offerDot, { backgroundColor: colorForName(s.subject) }]} />
                   <View style={styles.offerTextCol}>
@@ -160,8 +192,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
                 </View>
               ))}
 
-            {showModules &&
-              tutor.higher_ed_modules.map((m) => (
+            {matchingModulesFor(tutor).map((m) => (
                 <View key={m.id} style={styles.offerRow}>
                   <View style={[styles.offerDot, { backgroundColor: colorForName(m.name) }]} />
                   <View style={styles.offerTextCol}>
@@ -191,6 +222,18 @@ const styles = StyleSheet.create({
   backLinkText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
   title: { fontSize: 22, fontWeight: "800", color: colors.text, marginTop: 4 },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4, marginBottom: 14 },
+  label: { fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginBottom: 6 },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text,
+    backgroundColor: "#fff",
+    marginBottom: 16,
+  },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 16 },
   card: {

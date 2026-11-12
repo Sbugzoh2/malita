@@ -59,7 +59,8 @@ from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
 from backend.tutoring import (
     TutoringError, list_tutor_applications, approve_tutor, reject_tutor,
     list_approved_tutors, list_open_requests, match_tutor_to_request,
-    list_pending_payouts, mark_payout_paid, get_tutor_document_url,
+    list_pending_payouts, mark_payout_paid, summarize_pending_payouts, settle_all_pending_payouts,
+    get_tutor_document_url,
     get_tutor_profile, TUTOR_STATUS_LABELS, list_all_tutoring_sessions,
     list_institutions, add_institution, list_qualifications, add_qualification,
     list_modules, add_module, seed_default_higher_ed_catalog,
@@ -2514,6 +2515,42 @@ elif mode == "🛠️ Tutoring Admin":
 
         # ---- Pending payouts (manual EFT, see backend/tutoring.py) ----
         with tab_payouts:
+            summary = summarize_pending_payouts()
+            next_pay_day_str = dt.date.fromisoformat(summary["next_pay_day"]).strftime("%d %b %Y")
+
+            st.subheader(f"Expected next payday — {next_pay_day_str}")
+            col1, col2 = st.columns(2)
+            col1.metric("Net to pay out (after Malita's cut)", f"R{summary['overall']['net_zar']:.2f}")
+            col2.metric("Gross (before Malita's cut)", f"R{summary['overall']['gross_zar']:.2f}")
+            st.caption(f"{summary['overall']['count']} session(s) pending across all tutors.")
+
+            if summary["by_tutor"]:
+                st.write("**By tutor:**")
+                for t in summary["by_tutor"]:
+                    tutor_label = t["tutor_name"] or f"Tutor #{t['tutor_id']}"
+                    st.write(
+                        f"- {tutor_label}: R{t['net_zar']:.2f} net "
+                        f"(R{t['gross_zar']:.2f} gross) — {t['count']} session(s)"
+                    )
+
+            if summary["overall"]["count"] > 0:
+                with st.form("settle_all_payouts_form"):
+                    st.write(
+                        f"**Settle this payday** — marks all {summary['overall']['count']} pending payout(s) "
+                        f"(R{summary['overall']['net_zar']:.2f} total) as paid at once. "
+                        "Only do this once you've actually sent every tutor their EFT."
+                    )
+                    batch_ref = st.text_input("Batch payment reference (optional)", key="settle_all_ref")
+                    if st.form_submit_button("Settle This Payday", type="primary"):
+                        result = settle_all_pending_payouts(auth_user["id"], batch_ref)
+                        st.success(
+                            f"Settled {result['settled_count']} payout(s) — "
+                            f"R{result['settled_net_zar']:.2f} total."
+                        )
+                        st.rerun()
+
+            st.divider()
+
             payouts = list_pending_payouts()
             st.caption(f"{len(payouts)} payout(s) pending.")
             for p in payouts:

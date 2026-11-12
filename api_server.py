@@ -79,6 +79,7 @@ from backend.tutoring import (
     match_tutor_to_request, tutor_respond_to_admin_match, accept_tutoring_request, propose_new_time,
     respond_to_time_proposal, confirm_session_by_learner, confirm_session_by_tutor,
     cancel_session, complete_session, list_pending_payouts, mark_payout_paid,
+    summarize_pending_payouts, settle_all_pending_payouts,
     get_tutor_document_url, get_tutor_profile, login_tutor,
     create_tutor_api_token, get_tutor_by_token, revoke_tutor_api_token,
     list_tutor_own_payouts, create_tutor_password_reset, reset_tutor_password,
@@ -367,6 +368,10 @@ class SessionRecordingRequest(BaseModel):
 
 
 class PayoutMarkPaidRequest(BaseModel):
+    payment_reference: str = ""
+
+
+class PayoutsSettleAllRequest(BaseModel):
     payment_reference: str = ""
 
 
@@ -2068,6 +2073,26 @@ def admin_tutoring_payouts(authorization: str = Header(None)):
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
     return {"payouts": list_pending_payouts()}
+
+
+@app.get("/admin/tutoring/payouts/summary")
+def admin_tutoring_payouts_summary(authorization: str = Header(None)):
+    """Overall + per-tutor expected payout (gross and net of Malita's cut)
+    for the next payday, so admin can see what's owed before settling."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return summarize_pending_payouts()
+
+
+@app.post("/admin/tutoring/payouts/settle-all")
+def admin_tutoring_payouts_settle_all(payload: PayoutsSettleAllRequest, authorization: str = Header(None)):
+    """Bulk 'this payday is settled' action - marks every currently
+    pending payout as paid at once, instead of one at a time."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return settle_all_pending_payouts(user["id"], payload.payment_reference)
 
 
 @app.post("/admin/tutoring/payouts/{payout_id}/mark-paid")

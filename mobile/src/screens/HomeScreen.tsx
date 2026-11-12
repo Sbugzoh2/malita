@@ -7,7 +7,9 @@ import { colors } from "../theme";
 import { fetchNotificationsUnreadCount } from "../api/client";
 import NotificationBell from "../components/NotificationBell";
 
-type Tile = { key: string; icon: string; title: string; desc: string; tierNote?: string; color: string; disabled?: boolean };
+// `group` only matters for the Explore list (quick-action tiles don't use
+// it) - it's how the list gets sub-headers instead of one long flat stack.
+type Tile = { key: string; icon: string; title: string; desc: string; tierNote?: string; color: string; disabled?: boolean; group?: string };
 
 const TILES: Tile[] = [
   {
@@ -24,6 +26,7 @@ const TILES: Tile[] = [
     desc: "A narrated, live-style lesson on any topic you choose.",
     tierNote: "Premium",
     color: "#eda100",
+    group: "Learning Tools",
   },
   {
     key: "PracticeQuestions",
@@ -39,6 +42,7 @@ const TILES: Tile[] = [
     desc: "Browse curated past exam papers by year and subject.",
     tierNote: "Premium",
     color: "#4a3aa7",
+    group: "Learning Tools",
   },
   {
     key: "Collab",
@@ -47,6 +51,7 @@ const TILES: Tile[] = [
     desc: "Ask a question or help another learner.",
     tierNote: "Learner & Premium",
     color: "#1baf7a",
+    group: "Learning Tools",
   },
   {
     key: "LearnerProfile",
@@ -54,6 +59,7 @@ const TILES: Tile[] = [
     title: "Learner Profile",
     desc: "Track your progress, badges, and solved-question history.",
     color: "#c0392b",
+    group: "Your Account",
   },
   {
     key: "RequestTutor",
@@ -77,7 +83,13 @@ const ADMIN_TILE: Tile = {
   title: "Tutoring Admin",
   desc: "Review tutor applications, match requests, and process payouts.",
   color: "#4a3aa7",
+  group: "Admin",
 };
+
+// Fixed display order for the Explore list's sub-headers - a tile with no
+// group (e.g. Practice Questions, already a quick action) never reaches
+// this list, so every entry here is expected to match a group above.
+const EXPLORE_GROUP_ORDER = ["Learning Tools", "Your Account", "Admin"];
 
 // The 4 most-used actions get a quick-action square instead of a full list
 // row - everything else (including the admin tile, appended below) lives in
@@ -238,10 +250,81 @@ function TileIcon({ name, size = 20, color = "#fff" }: { name: string; size?: nu
       );
     case "chevron":
       return <Text style={{ fontSize: size * 0.95, fontWeight: "700", color, lineHeight: size }}>{"›"}</Text>;
+    case "home":
+      return (
+        <View style={[box, { position: "relative" }]}>
+          <View
+            style={{
+              position: "absolute",
+              bottom: 0,
+              width: size * 0.82,
+              height: size * 0.56,
+              borderWidth: 1.6,
+              borderColor: color,
+              borderRadius: 2,
+            }}
+          />
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              width: 0,
+              height: 0,
+              borderLeftWidth: size * 0.48,
+              borderRightWidth: size * 0.48,
+              borderBottomWidth: size * 0.38,
+              borderLeftColor: "transparent",
+              borderRightColor: "transparent",
+              borderBottomColor: color,
+            }}
+          />
+        </View>
+      );
+    case "person":
+      return (
+        <View style={[box, { position: "relative" }]}>
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              width: size * 0.4,
+              height: size * 0.4,
+              borderRadius: 999,
+              borderWidth: 1.6,
+              borderColor: color,
+            }}
+          />
+          <View
+            style={{
+              position: "absolute",
+              bottom: 0,
+              width: size * 0.78,
+              height: size * 0.4,
+              borderTopLeftRadius: size * 0.4,
+              borderTopRightRadius: size * 0.4,
+              borderWidth: 1.6,
+              borderColor: color,
+              borderBottomWidth: 0,
+            }}
+          />
+        </View>
+      );
     default:
       return null;
   }
 }
+
+// Quick-nav bar fixed at the bottom of Home - same custom-icon, no-SVG
+// approach as the Jobs/My Requests bottom tab bars, but navigates across
+// top-level screens (stack pushes) rather than switching an in-screen
+// section, since Home/Requests/Browse/Account are separate registered
+// routes, not sections of one screen.
+const HOME_BOTTOM_TABS: { key: string; label: string; icon: string; route?: string }[] = [
+  { key: "home", label: "Home", icon: "home" },
+  { key: "requests", label: "Requests", icon: "calendarCheck", route: "MyTutoringRequests" },
+  { key: "browse", label: "Browse", icon: "search", route: "BrowseTutors" },
+  { key: "profile", label: "Profile", icon: "person", route: "Account" },
+];
 
 export default function HomeScreen({ navigation }: any) {
   const { token, me, logout } = useAuth();
@@ -306,7 +389,8 @@ export default function HomeScreen({ navigation }: any) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={styles.screen}>
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View>
           <Text style={styles.greetingLabel}>{greeting()}</Text>
@@ -372,11 +456,20 @@ export default function HomeScreen({ navigation }: any) {
             </View>
 
             <Text style={styles.sectionLabel}>Explore</Text>
-            <View style={styles.listCol}>
-              {exploreTiles.map((tile) => (
-                <ListCard key={tile.key} tile={tile} />
-              ))}
-            </View>
+            {EXPLORE_GROUP_ORDER.map((groupName) => {
+              const tiles = exploreTiles.filter((t) => t.group === groupName);
+              if (tiles.length === 0) return null;
+              return (
+                <View key={groupName} style={styles.exploreGroup}>
+                  <Text style={styles.exploreGroupLabel}>{groupName}</Text>
+                  <View style={styles.listCol}>
+                    {tiles.map((tile) => (
+                      <ListCard key={tile.key} tile={tile} />
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
           </>
         ) : (
           <>
@@ -401,10 +494,34 @@ export default function HomeScreen({ navigation }: any) {
         </Pressable>
       </View>
     </ScrollView>
+
+    <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      {HOME_BOTTOM_TABS.map((tab) => {
+        const active = tab.key === "home";
+        const tint = active ? colors.primary : "#8a8984";
+        return (
+          <Pressable
+            key={tab.key}
+            style={styles.bottomBarItem}
+            onPress={() => tab.route && navigation.navigate(tab.route)}
+            accessibilityRole="button"
+            accessibilityLabel={tab.label}
+          >
+            <TileIcon name={tab.icon} size={20} color={tint} />
+            <Text style={[styles.bottomBarLabel, { color: tint, fontWeight: active ? "700" : "500" }]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.background },
+  scrollView: { flex: 1 },
   container: { backgroundColor: colors.background, flexGrow: 1 },
   header: {
     flexDirection: "row",
@@ -445,6 +562,16 @@ const styles = StyleSheet.create({
   usageTrack: { marginTop: 14, height: 6, borderRadius: 999, backgroundColor: "#2b2b29", overflow: "hidden" },
   usageFill: { height: "100%", backgroundColor: "#4ade9a", borderRadius: 999 },
   sectionLabel: { fontSize: 13, fontWeight: "700", color: colors.text, marginTop: 20, marginBottom: 10 },
+  exploreGroup: { marginTop: 4 },
+  exploreGroupLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginTop: 14,
+    marginBottom: 8,
+  },
   quickRow: { flexDirection: "row", gap: 10 },
   quickTile: { flex: 1, alignItems: "center", gap: 8 },
   quickTileIcon: {
@@ -495,4 +622,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   logoutText: { color: "#fff", fontWeight: "700" },
+  bottomBar: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 10,
+  },
+  bottomBarItem: { flex: 1, alignItems: "center", gap: 4 },
+  bottomBarLabel: { fontSize: 11 },
 });

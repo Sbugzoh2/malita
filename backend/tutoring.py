@@ -54,6 +54,7 @@ checked here against the tutor's SELF-REPORTED number, not independently
 confirmed against Umalusi/SAQA (see above).
 """
 
+import calendar
 import datetime as dt
 import logging
 import secrets
@@ -3806,3 +3807,119 @@ def mark_payout_paid(payout_id: int, admin_user_id: int, payment_reference: str 
         payout.paid_at = dt.datetime.utcnow()
         payout.paid_by_admin_user_id = admin_user_id
         payout.payment_reference = payment_reference.strip() or None
+
+
+def _next_pay_day(from_date: dt.date | None = None) -> dt.date:
+    """Malita's payout cycle, mirrored from the mobile app's own copy
+    (TutorHomeScreen.tsx's nextPayDay): a session completed the 16th
+    through the end of a month is paid the 15th of the FOLLOWING month;
+    one completed the 1st through the 15th is paid at the end of THAT
+    SAME month. A plain civil-calendar rule, not tied to any instant."""
+    d = from_date or dt.date.today()
+    if d.day <= 15:
+        last_day = calendar.monthrange(d.year, d.month)[1]
+        return dt.date(d.year, d.month, last_day)
+    if d.month == 12:
+        return dt.date(d.year + 1, 1, 15)
+    return dt.date(d.year, d.month + 1, 15)
+
+
+def summarize_pending_payouts() -> dict:
+    """What admin owes right now, overall and split by tutor - both the
+    net amount (what a tutor actually receives, after Malita's cut) and
+    the gross session price behind it, plus the next payday those
+    amounts are due. Session gross comes from the underlying
+    TutoringSessionRequest rather than being backed out of the snapshotted
+    cut percent, since that's the exact figure the learner paid."""
+    with get_session() as db:
+        payouts = db.query(TutoringPayout).filter(TutoringPayout.status == "pending").all()
+        by_tutor: dict[int, dict] = {}
+        overall_gross = 0.0
+        overall_net = 0.0
+        for p in payouts:
+            req = db.query(TutoringSessionRequest).get(p.session_id)
+            gross = req.price_zar if req and req.price_zar is not None else p.amount_zar
+            overall_gross += gross
+            overall_net += p.amount_zar
+            row = by_tutor.setdefault(p.tutor_id, None)
+            if row is None:
+                tutor = db.query(TutorAccount).get(p.tutor_id)
+                row = {
+                    "tutor_id": p.tutor_id, "tutor_name": tutor.name if tutor else None,
+                    "gross_zar": 0.0, "net_zar": 0.0, "count": 0,
+                }
+                by_tutor[p.tutor_id] = row
+            row["gross_zar"] += gross
+            row["net_zar"] += p.amount_zar
+            row["count"] += 1
+        by_tutor_list = sorted(
+            ({**r, "gross_zar": round(r["gross_zar"], 2), "net_zar": round(r["net_zar"], 2)} for r in by_tutor.values()),
+            key=lambda r: r["net_zar"], reverse=True,
+        )
+        return {
+            "overall": {
+                "gross_zar": round(overall_gross, 2), "net_zar": round(overall_net, 2), "count": len(payouts),
+            },
+            "by_tutor": by_tutor_list,
+            "next_pay_day": _next_pay_day().isoformat(),
+        }
+
+
+def _notify_payout_settled(
+    tutor_id: int, email: str, name: str, *, net_zar: float, count: int, payment_reference: str,
+) -> None:
+    """Best-effort - mirrors _notify_tutor_of_decision's try/except
+    pattern, so a failed email/notification send never breaks the
+    admin's bulk-settle action itself."""
+    try:
+        plural = "s" if count != 1 else ""
+        subject = "Your Malita payout has been paid"
+        body = (
+            f"Hi {name},\n\n"
+            f"Your payout of R{net_zar:.2f} for {count} session{plural} has been paid out."
+            + (f"\nReference: {payment_reference}" if payment_reference else "")
+            + "\n\n— The Malita team"
+        )
+        notif_title = "Payout paid"
+        notif_body = f"R{net_zar:.2f} for {count} session{plural} has been paid."
+        send_email(email, subject, body)
+        create_notification(recipient_kind="tutor", recipient_id=tutor_id, title=notif_title, body=notif_body)
+    except Exception:
+        logger.exception("Failed to notify tutor %s of settled payout", tutor_id)
+
+
+def settle_all_pending_payouts(admin_user_id: int, payment_reference: str = "") -> dict:
+    """The 'this payday is settled' bulk action - marks EVERY currently
+    pending payout as paid in one go (instead of admin clicking 'Mark as
+    Paid' once per session), so admin's pending total and each tutor's
+    own pending total both reset to zero at once; the now-paid rows show
+    up as 'Paid' in the tutor's own payout history automatically, since
+    that view reads the same TutoringPayout rows by status."""
+    ref = payment_reference.strip() or None
+    now = dt.datetime.utcnow()
+    per_tutor_net: dict[int, float] = {}
+    per_tutor_count: dict[int, int] = {}
+    tutor_contacts: dict[int, tuple[str, str]] = {}
+    with get_session() as db:
+        payouts = db.query(TutoringPayout).filter(TutoringPayout.status == "pending").all()
+        for p in payouts:
+            p.status = "paid"
+            p.paid_at = now
+            p.paid_by_admin_user_id = admin_user_id
+            p.payment_reference = ref
+            per_tutor_net[p.tutor_id] = per_tutor_net.get(p.tutor_id, 0.0) + p.amount_zar
+            per_tutor_count[p.tutor_id] = per_tutor_count.get(p.tutor_id, 0) + 1
+        count = len(payouts)
+        for tutor_id in per_tutor_net:
+            tutor = db.query(TutorAccount).get(tutor_id)
+            if tutor:
+                tutor_contacts[tutor_id] = (tutor.email, tutor.name)
+
+    for tutor_id, (email, name) in tutor_contacts.items():
+        _notify_payout_settled(
+            tutor_id, email, name,
+            net_zar=per_tutor_net[tutor_id], count=per_tutor_count[tutor_id],
+            payment_reference=ref or "",
+        )
+
+    return {"settled_count": count, "settled_net_zar": round(sum(per_tutor_net.values()), 2)}

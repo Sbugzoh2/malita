@@ -27,6 +27,9 @@ import {
   TutoringPayout,
   fetchPendingPayoutsAdmin,
   markPayoutPaidAdmin,
+  PayoutsSummary,
+  fetchPayoutsSummaryAdmin,
+  settleAllPayoutsAdmin,
   TutorProfile,
   fetchTutorProfile,
   AdminTutoringSession,
@@ -1076,16 +1079,31 @@ function TutorsSection({ token }: { token: string }) {
   );
 }
 
+const PAY_DAY_MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Plain string math on the "YYYY-MM-DD" the backend sends, not a parsed
+// Date - next_pay_day is a civil calendar date, not an instant, so there's
+// no timezone to get wrong this way.
+function formatPayDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${PAY_DAY_MONTH_LABELS[m - 1]} ${y}`;
+}
+
 function PayoutsSection({ token }: { token: string }) {
   const [payouts, setPayouts] = useState<TutoringPayout[] | null>(null);
+  const [summary, setSummary] = useState<PayoutsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refByPayout, setRefByPayout] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [settleReference, setSettleReference] = useState("");
+  const [settling, setSettling] = useState(false);
 
   const load = useCallback(() => {
     fetchPendingPayoutsAdmin(token)
       .then((res) => setPayouts(res.payouts))
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load payouts."));
+    fetchPayoutsSummaryAdmin(token)
+      .then(setSummary)
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load the payouts summary."));
   }, [token]);
 
   useEffect(() => {
@@ -1105,9 +1123,89 @@ function PayoutsSection({ token }: { token: string }) {
     }
   }
 
+  function confirmSettleAll() {
+    if (!summary || summary.overall.count === 0) return;
+    Alert.alert(
+      "Settle this payday?",
+      `This marks all ${summary.overall.count} pending payout(s) — R${summary.overall.net_zar.toFixed(2)} total — as paid. ` +
+        "Only do this once you've actually sent every tutor their EFT.",
+      [
+        { text: "Not yet", style: "cancel" },
+        { text: "Settle all", style: "destructive", onPress: handleSettleAll },
+      ]
+    );
+  }
+
+  async function handleSettleAll() {
+    setSettling(true);
+    setError(null);
+    try {
+      await settleAllPayoutsAdmin(token, settleReference.trim());
+      setSettleReference("");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not settle payouts.");
+    } finally {
+      setSettling(false);
+    }
+  }
+
   return (
     <View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {summary && (
+        <View style={styles.payoutsSummaryCard}>
+          <View style={styles.payoutsSummaryRow}>
+            <View>
+              <Text style={styles.payoutsSummaryLabel}>Expected next payday</Text>
+              <Text style={styles.payoutsSummaryValue}>{formatPayDay(summary.next_pay_day)}</Text>
+            </View>
+            <View style={{ alignItems: "flex-end" }}>
+              <Text style={styles.payoutsSummaryLabel}>Net to pay out</Text>
+              <Text style={styles.payoutsSummaryValuePayout}>R{summary.overall.net_zar.toFixed(2)}</Text>
+            </View>
+          </View>
+          <Text style={styles.payoutsSummaryFooter}>
+            R{summary.overall.gross_zar.toFixed(2)} gross (before Malita's cut) across {summary.overall.count} session(s)
+          </Text>
+
+          {summary.by_tutor.length > 0 && (
+            <View style={styles.payoutsByTutorCol}>
+              <Text style={styles.payoutsByTutorHeading}>By tutor</Text>
+              {summary.by_tutor.map((t) => (
+                <View key={t.tutor_id} style={styles.payoutsByTutorRow}>
+                  <Text style={styles.payoutsByTutorName}>
+                    {t.tutor_name ?? `Tutor #${t.tutor_id}`} ({t.count})
+                  </Text>
+                  <Text style={styles.payoutsByTutorAmount}>
+                    R{t.net_zar.toFixed(2)} <Text style={styles.payoutsByTutorGross}>(R{t.gross_zar.toFixed(2)} gross)</Text>
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {summary.overall.count > 0 && (
+            <View style={{ marginTop: 14 }}>
+              <TextInput
+                style={styles.input}
+                placeholder="Batch payment reference (optional)"
+                value={settleReference}
+                onChangeText={setSettleReference}
+              />
+              <Pressable style={styles.approveButton} onPress={confirmSettleAll} disabled={settling}>
+                {settling ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.approveButtonText}>Settle This Payday ({summary.overall.count})</Text>
+                )}
+              </Pressable>
+            </View>
+          )}
+        </View>
+      )}
+
       {!payouts ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
       ) : payouts.length === 0 ? (
@@ -1325,4 +1423,16 @@ const styles = StyleSheet.create({
   },
   rejectButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
   rejectBox: { marginTop: 10 },
+  payoutsSummaryCard: { backgroundColor: "#0b0b0b", borderRadius: 20, padding: 18, marginBottom: 16 },
+  payoutsSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  payoutsSummaryLabel: { fontSize: 11, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  payoutsSummaryValue: { fontSize: 18, color: "#fff", fontWeight: "800", marginTop: 4 },
+  payoutsSummaryValuePayout: { fontSize: 24, color: colors.success, fontWeight: "800", marginTop: 4 },
+  payoutsSummaryFooter: { fontSize: 11, color: "#8a8984", fontWeight: "500", marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#2b2b29" },
+  payoutsByTutorCol: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#2b2b29", gap: 8 },
+  payoutsByTutorHeading: { fontSize: 11, color: "#b9b8b3", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 },
+  payoutsByTutorRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  payoutsByTutorName: { fontSize: 13, color: "#fff", fontWeight: "600", flex: 1, marginRight: 8 },
+  payoutsByTutorAmount: { fontSize: 13, color: "#fff", fontWeight: "700" },
+  payoutsByTutorGross: { fontSize: 11, color: "#8a8984", fontWeight: "500" },
 });

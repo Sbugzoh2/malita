@@ -14,6 +14,7 @@ import TutorLoginScreen from "../screens/TutorLoginScreen";
 import TutorApplyScreen from "../screens/TutorApplyScreen";
 import TutorHomeScreen from "../screens/TutorHomeScreen";
 import HomeScreen from "../screens/HomeScreen";
+import AccountScreen from "../screens/AccountScreen";
 import AITutorScreen from "../screens/AITutorScreen";
 import AITeacherScreen from "../screens/AITeacherScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
@@ -127,6 +128,12 @@ function AppNavigator() {
           link, title, notification bell) rather than stacking a second
           native header bar above it. */}
       <AppStack.Screen name="MyTutoringRequests" component={MyTutoringRequestsScreen} options={{ headerShown: false }} />
+      {/* Same reasoning as Home: this screen builds its own header (back
+          link, title, notification bell) rather than stacking a second
+          native header bar above it. Registered for every account type
+          (unlike LearnerProfile, which is AI/Practice progress-tracking
+          and doesn't apply to higher-ed accounts). */}
+      <AppStack.Screen name="Account" component={AccountScreen} options={{ headerShown: false }} />
       {!isHigherEd && (
         <>
           <AppStack.Screen

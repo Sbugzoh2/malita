@@ -41,6 +41,24 @@ function payoutPreview(priceZar: number, cutPercent: number): string {
   return `R${(priceZar * (1 - cutPercent / 100)).toFixed(2)}`;
 }
 
+function lastDayOfMonth(year: number, monthIndex0: number): Date {
+  return new Date(year, monthIndex0 + 1, 0);
+}
+
+// Malita's payout cycle: a session completed the 16th through the end of
+// a month is paid on the 15th of the FOLLOWING month; one completed the
+// 1st through the 15th is paid at the end of that SAME month. This is a
+// plain civil-calendar rule (no particular time of day), so it works off
+// local Date components directly rather than an ISO instant.
+function nextPayDay(from: Date = new Date()): Date {
+  if (from.getDate() <= 15) return lastDayOfMonth(from.getFullYear(), from.getMonth());
+  return new Date(from.getFullYear(), from.getMonth() + 1, 15);
+}
+
+function formatPayDay(d: Date): string {
+  return d.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+}
+
 // "3h ago" / "2d ago" for a job card's request timestamp - coarser than
 // formatScheduled on purpose, this is just a freshness signal, not a time
 // someone needs to act on.
@@ -824,27 +842,55 @@ export default function TutorHomeScreen() {
             })()
           ) : !payouts ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
-          ) : payouts.length === 0 ? (
-            <Text style={styles.empty}>No payouts yet.</Text>
-          ) : (
-            payouts.map((p) => (
-              <View key={p.id} style={styles.card}>
-                <Text style={styles.cardTitle}>Session #{p.session_id}</Text>
-                <Text
-                  style={[
-                    styles.cardStatus,
-                    { color: p.status === "paid" ? colors.success : colors.textSecondary },
-                  ]}
-                >
-                  {p.status === "paid" ? "Paid" : "Pending"}
-                </Text>
-                <Text style={styles.cardMeta}>R{p.amount_zar.toFixed(2)}</Text>
-                {p.payment_reference ? (
-                  <Text style={styles.cardMeta}>Reference: {p.payment_reference}</Text>
-                ) : null}
-              </View>
-            ))
-          )}
+          ) : (() => {
+            const totalAmount = payouts.reduce((sum, p) => sum + p.amount_zar, 0);
+            const paidAmount = payouts.filter((p) => p.status === "paid").reduce((sum, p) => sum + p.amount_zar, 0);
+            const pendingAmount = payouts
+              .filter((p) => p.status === "pending")
+              .reduce((sum, p) => sum + p.amount_zar, 0);
+            return (
+              <>
+                <View style={styles.statCard}>
+                  <View style={styles.statCardRow}>
+                    <View>
+                      <Text style={styles.statLabel}>Total payouts</Text>
+                      <Text style={styles.statValue}>R{totalAmount.toFixed(0)}</Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={styles.statLabel}>Next pay day</Text>
+                      <Text style={styles.statValueDate}>{formatPayDay(nextPayDay())}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.statCardFooterRow}>
+                    <Text style={styles.statFooterText}>R{paidAmount.toFixed(0)} paid</Text>
+                    <Text style={styles.statFooterText}>R{pendingAmount.toFixed(0)} pending</Text>
+                  </View>
+                </View>
+
+                {payouts.length === 0 ? (
+                  <Text style={styles.empty}>No payouts yet.</Text>
+                ) : (
+                  payouts.map((p) => (
+                    <View key={p.id} style={styles.card}>
+                      <Text style={styles.cardTitle}>Session #{p.session_id}</Text>
+                      <Text
+                        style={[
+                          styles.cardStatus,
+                          { color: p.status === "paid" ? colors.success : colors.textSecondary },
+                        ]}
+                      >
+                        {p.status === "paid" ? "Paid" : "Pending"}
+                      </Text>
+                      <Text style={styles.cardMeta}>R{p.amount_zar.toFixed(2)}</Text>
+                      {p.payment_reference ? (
+                        <Text style={styles.cardMeta}>Reference: {p.payment_reference}</Text>
+                      ) : null}
+                    </View>
+                  ))
+                )}
+              </>
+            );
+          })()}
         </>
       )}
 
@@ -949,6 +995,7 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 28, color: "#fff", fontWeight: "800", marginTop: 4 },
   statValuePayout: { fontSize: 22, color: colors.success, fontWeight: "800", marginTop: 4 },
   statValueLost: { fontSize: 22, color: colors.error, fontWeight: "800", marginTop: 4 },
+  statValueDate: { fontSize: 20, color: "#fff", fontWeight: "800", marginTop: 4 },
   statCardFooterRow: {
     flexDirection: "row",
     alignItems: "center",

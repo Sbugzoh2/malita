@@ -1105,6 +1105,25 @@ export function markPayoutPaidAdmin(token: string, payoutId: number, paymentRefe
   });
 }
 
+export type PayoutsByTutor = { tutor_id: number; tutor_name: string | null; gross_zar: number; net_zar: number; count: number };
+export type PayoutsSummary = {
+  overall: { gross_zar: number; net_zar: number; count: number };
+  by_tutor: PayoutsByTutor[];
+  next_pay_day: string;
+};
+
+export function fetchPayoutsSummaryAdmin(token: string) {
+  return request<PayoutsSummary>("/admin/tutoring/payouts/summary", { token });
+}
+
+export function settleAllPayoutsAdmin(token: string, paymentReference: string) {
+  return request<{ settled_count: number; settled_net_zar: number }>("/admin/tutoring/payouts/settle-all", {
+    method: "POST",
+    body: { payment_reference: paymentReference },
+    token,
+  });
+}
+
 export type PracticeSolutionStep = { explain: string; latex: string };
 
 export type PracticeQuestion = {

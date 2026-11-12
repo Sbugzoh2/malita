@@ -5,12 +5,40 @@ import { colors } from "../theme";
 // Purely presentational - the YouTube-style red unread badge on a bell
 // icon. The unread count and its refresh (useFocusEffect, not polling)
 // live in whatever header button renders this (see RootNavigator.tsx's
-// HomeNotificationBellButton/TutorNotificationBellButton) and in
+// TutorNotificationBellButton and HomeScreen.tsx's own header) and in
 // NotificationsScreen/TutorNotificationsScreen, not here.
-export default function NotificationBell({ count, onPress }: { count: number; onPress: () => void }) {
+//
+// Built from plain Views (no emoji, no SVG dependency) to match the rest
+// of the app's redesigned icon language.
+export default function NotificationBell({
+  count,
+  onPress,
+  color = colors.text,
+  size = 20,
+}: {
+  count: number;
+  onPress: () => void;
+  color?: string;
+  size?: number;
+}) {
   return (
     <Pressable onPress={onPress} style={styles.container} hitSlop={8}>
-      <Text style={styles.bell}>🔔</Text>
+      <View style={{ width: size, height: size, alignItems: "center" }}>
+        <View
+          style={{
+            width: size * 0.62,
+            height: size * 0.56,
+            borderWidth: 1.6,
+            borderColor: color,
+            borderTopLeftRadius: size * 0.31,
+            borderTopRightRadius: size * 0.31,
+            borderBottomLeftRadius: size * 0.08,
+            borderBottomRightRadius: size * 0.08,
+          }}
+        />
+        <View style={{ width: size * 0.82, height: 1.6, backgroundColor: color, marginTop: 1 }} />
+        <View style={{ width: size * 0.14, height: size * 0.14, borderRadius: 999, backgroundColor: color, marginTop: 2 }} />
+      </View>
       {count > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{count > 99 ? "99+" : count}</Text>
@@ -22,7 +50,6 @@ export default function NotificationBell({ count, onPress }: { count: number; on
 
 const styles = StyleSheet.create({
   container: { marginRight: 12, padding: 4 },
-  bell: { fontSize: 20 },
   badge: {
     position: "absolute",
     top: -2,

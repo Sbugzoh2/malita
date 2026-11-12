@@ -7,7 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
 import NotificationBell from "../components/NotificationBell";
-import { fetchNotificationsUnreadCount, fetchTutorNotificationsUnreadCount } from "../api/client";
+import { fetchTutorNotificationsUnreadCount } from "../api/client";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import TutorLoginScreen from "../screens/TutorLoginScreen";
@@ -80,26 +80,6 @@ function LogoutHeaderButton() {
   );
 }
 
-// Live unread count refreshed on focus only (no polling/websocket) - see
-// backend/tutoring.py's Notification model and api_server.py's
-// /notifications* endpoints. NotificationBell itself stays presentational;
-// this is the "screen" that owns the count, same idea as a list screen's
-// own load()/useFocusEffect, just living in the header instead of the body.
-function HomeNotificationBellButton() {
-  const { token } = useAuth();
-  const navigation = useNavigation();
-  const [count, setCount] = useState(0);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!token) return;
-      fetchNotificationsUnreadCount(token).then((res) => setCount(res.count)).catch(() => {});
-    }, [token])
-  );
-
-  return <NotificationBell count={count} onPress={() => navigation.navigate("Notifications" as never)} />;
-}
-
 function TutorNotificationBellButton() {
   const { token } = useTutorAuth();
   const navigation = useNavigation();
@@ -133,11 +113,10 @@ function AppNavigator() {
         headerTintColor: colors.primary,
       }}
     >
-      <AppStack.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{ title: "Malita Learner", headerRight: HomeNotificationBellButton }}
-      />
+      {/* HomeScreen builds its own header (greeting, avatar, notification
+          bell) in its body, matching the redesigned Jobs/Home look rather
+          than stacking a second native header bar above it. */}
+      <AppStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
       <AppStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
       <AppStack.Screen name="BrowseTutors" component={BrowseTutorsScreen} options={{ title: "Browse Tutors" }} />

@@ -1,11 +1,14 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, TextInput, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
+import NotificationBell from "../components/NotificationBell";
 import {
   ApiError,
   fetchMyTutoringRequests,
+  fetchNotificationsUnreadCount,
   tutoringCheckoutUrl,
   confirmTutoringSessionAsLearner,
   respondToTimeProposal,
@@ -13,6 +16,16 @@ import {
   cancelTutoringSessionAsLearner,
   TutoringRequest,
 } from "../api/client";
+
+// Same hash-by-name palette as the tutor Jobs screen's subject avatars -
+// requests can carry any subject string, so there's no fixed catalog to
+// hand-map from.
+const AVATAR_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+function colorForSubject(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "";
@@ -79,6 +92,8 @@ function StarPicker({ value, onChange }: { value: number; onChange: (v: number) 
 
 export default function MyTutoringRequestsScreen({ navigation }: any) {
   const { token } = useAuth();
+  const insets = useSafeAreaInsets();
+  const [unreadCount, setUnreadCount] = useState(0);
   const [requests, setRequests] = useState<TutoringRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ratingDraft, setRatingDraft] = useState<Record<number, number>>({});
@@ -107,6 +122,13 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     useCallback(() => {
       load();
     }, [load])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      fetchNotificationsUnreadCount(token).then((res) => setUnreadCount(res.count)).catch(() => {});
+    }, [token])
   );
 
   function handlePay(requestId: number) {
@@ -188,12 +210,42 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     }
   }
 
+  const activeCount = requests ? requests.filter((r) => groupForStatus(r.status) === "active").length : 0;
+  const paymentDueCount = requests ? requests.filter((r) => r.status === "awaiting_payment").length : 0;
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
-        <Text style={styles.backLinkText}>‹ Back to Home</Text>
-      </Pressable>
-      <Text style={styles.title}>📋 My Tutoring Requests</Text>
+    <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}>
+      <View style={styles.headerRow}>
+        <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
+          <Text style={styles.backLinkText}>‹ Back to Home</Text>
+        </Pressable>
+        <NotificationBell
+          count={unreadCount}
+          onPress={() => navigation.navigate("Notifications")}
+          color={colors.text}
+          size={22}
+        />
+      </View>
+      <Text style={styles.title}>My Requests</Text>
+
+      {requests && requests.length > 0 && (
+        <View style={styles.statCard}>
+          <View style={styles.statCardRow}>
+            <View>
+              <Text style={styles.statLabel}>Active requests</Text>
+              <Text style={styles.statValue}>{activeCount}</Text>
+            </View>
+            {paymentDueCount > 0 ? (
+              <View style={styles.paymentDuePill}>
+                <View style={styles.paymentDueDot} />
+                <Text style={styles.paymentDueText}>
+                  {paymentDueCount} payment{paymentDueCount === 1 ? "" : "s"} due
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      )}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -226,10 +278,18 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
         requests.filter((r) => groupForStatus(r.status) === group).map((r) => (
           <View key={r.id} style={styles.card}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardSubject}>{r.subject}{r.topic ? ` · ${r.topic}` : ""}</Text>
-              <Text style={[styles.cardStatus, { color: STATUS_COLOR[r.status] }]}>
-                {r.status_label}
-              </Text>
+              <View style={[styles.cardAvatar, { backgroundColor: colorForSubject(r.subject) }]}>
+                <Text style={styles.cardAvatarText}>{r.subject.charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={styles.cardHeaderTextCol}>
+                <View style={styles.cardHeaderTitleRow}>
+                  <Text style={styles.cardSubject}>{r.subject}{r.topic ? ` · ${r.topic}` : ""}</Text>
+                  <View style={styles.cardStatusRow}>
+                    <View style={[styles.cardStatusDot, { backgroundColor: STATUS_COLOR[r.status] }]} />
+                    <Text style={[styles.cardStatus, { color: STATUS_COLOR[r.status] }]}>{r.status_label}</Text>
+                  </View>
+                </View>
+              </View>
             </View>
 
             {r.preferred_times_note ? (
@@ -413,9 +473,25 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
-  backLink: { marginBottom: 12, alignSelf: "flex-start" },
-  backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
-  title: { fontSize: 24, fontWeight: "700", color: colors.text, marginBottom: 16 },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  backLink: { alignSelf: "flex-start" },
+  backLinkText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
+  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginTop: 4, marginBottom: 16 },
+  statCard: { backgroundColor: "#0b0b0b", borderRadius: 20, padding: 18, marginBottom: 16 },
+  statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  statLabel: { fontSize: 11, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  statValue: { fontSize: 26, color: "#fff", fontWeight: "800", marginTop: 4 },
+  paymentDuePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(237,161,0,0.18)",
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
+  paymentDueDot: { width: 7, height: 7, borderRadius: 999, backgroundColor: "#eda100" },
+  paymentDueText: { fontSize: 12, fontWeight: "700", color: "#eda100" },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 24 },
   groupTabRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
@@ -427,7 +503,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     backgroundColor: "#fff",
   },
-  groupTabActive: { backgroundColor: colors.primary, borderColor: "transparent" },
+  groupTabActive: { backgroundColor: "#0b0b0b", borderColor: "transparent" },
   groupTabText: { color: colors.text, fontSize: 13, fontWeight: "600" },
   groupTabTextActive: { color: "#fff" },
   card: {
@@ -435,10 +511,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 14,
+    shadowColor: "#0b0b0b",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
-  cardHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 6 },
-  cardSubject: { fontSize: 16, fontWeight: "700", color: colors.text },
-  cardStatus: { fontSize: 13, fontWeight: "700" },
+  cardHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  cardAvatar: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  cardAvatarText: { fontSize: 15, fontWeight: "800", color: "#fff" },
+  cardHeaderTextCol: { flex: 1, minWidth: 0 },
+  cardHeaderTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 6 },
+  cardSubject: { fontSize: 15, fontWeight: "700", color: colors.text },
+  cardStatusRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  cardStatusDot: { width: 6, height: 6, borderRadius: 999 },
+  cardStatus: { fontSize: 11, fontWeight: "700" },
   cardMeta: { fontSize: 13, color: colors.textSecondary, marginTop: 6 },
   payButton: {
     backgroundColor: colors.primary,

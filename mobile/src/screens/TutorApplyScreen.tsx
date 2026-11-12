@@ -11,7 +11,7 @@ import {
   Platform,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject } from "../theme";
+import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject, SA_BANKS, BANK_ACCOUNT_TYPES } from "../theme";
 import Dropdown from "../components/Dropdown";
 import {
   ApiError, applyAsTutor, YEAR_LEVEL_LABELS,
@@ -62,6 +62,13 @@ export default function TutorApplyScreen({ navigation }: any) {
   const [bio, setBio] = useState("");
   const [idNumber, setIdNumber] = useState("");
   const [availabilityNote, setAvailabilityNote] = useState("");
+  const [bankAccountHolder, setBankAccountHolder] = useState("");
+  const [bankName, setBankName] = useState<string | null>(null);
+  const [bankNameOther, setBankNameOther] = useState("");
+  const [bankBranchCode, setBankBranchCode] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankAccountType, setBankAccountType] = useState<string | null>(null);
+  const [bankAccountTypeOther, setBankAccountTypeOther] = useState("");
   const [bankAccountNote, setBankAccountNote] = useState("");
 
   const [subjectRows, setSubjectRows] = useState<Record<HighSchoolTutoringSubject, SubjectRow>>(
@@ -195,7 +202,16 @@ export default function TutorApplyScreen({ navigation }: any) {
     if (!bio.trim()) { setError("Please enter a short bio."); return; }
     if (!idNumber.trim()) { setError("Please enter your ID number."); return; }
     if (!availabilityNote.trim()) { setError("Please enter your availability."); return; }
-    if (!bankAccountNote.trim()) { setError("Please enter your bank account details."); return; }
+    if (!bankAccountHolder.trim()) { setError("Please enter the bank account holder's name."); return; }
+    if (!bankName) { setError("Please select your bank."); return; }
+    if (bankName === "Other" && !bankNameOther.trim()) { setError("Please enter your bank's name."); return; }
+    if (!bankBranchCode.trim()) { setError("Please enter your branch code."); return; }
+    if (!bankAccountNumber.trim()) { setError("Please enter your account number."); return; }
+    if (!bankAccountType) { setError("Please select your account type."); return; }
+    if (bankAccountType === "Other" && !bankAccountTypeOther.trim()) {
+      setError("Please enter your account type.");
+      return;
+    }
     if (!idDocument) { setError("Please upload your ID document."); return; }
     if (!cv) { setError("Please upload your CV."); return; }
 
@@ -274,6 +290,11 @@ export default function TutorApplyScreen({ navigation }: any) {
         bio: bio.trim(),
         id_number: idNumber.trim(),
         availability_note: availabilityNote.trim(),
+        bank_account_holder: bankAccountHolder.trim(),
+        bank_name: bankName === "Other" ? bankNameOther.trim() : bankName ?? "",
+        bank_branch_code: bankBranchCode.trim(),
+        bank_account_number: bankAccountNumber.trim(),
+        bank_account_type: bankAccountType === "Other" ? bankAccountTypeOther.trim() : bankAccountType ?? "",
         bank_account_note: bankAccountNote.trim(),
         wants_high_school: effectiveWantsHighSchool,
         wants_higher_ed: wantsHigherEd,
@@ -420,8 +441,66 @@ export default function TutorApplyScreen({ navigation }: any) {
             placeholder="e.g. Weekdays after 16:00, Saturday mornings"
           />
 
-          <Text style={styles.label}>Bank account details (for payouts)</Text>
-          <TextInput style={[styles.input, styles.textArea]} value={bankAccountNote} onChangeText={setBankAccountNote} multiline />
+          <Text style={styles.sectionTitle}>Bank Account Details (for payouts)</Text>
+          <Text style={styles.label}>Account holder name</Text>
+          <TextInput
+            style={styles.input}
+            value={bankAccountHolder}
+            onChangeText={setBankAccountHolder}
+            placeholder="As it appears on your bank statement"
+          />
+          <Dropdown
+            label="Bank"
+            options={SA_BANKS.map((b) => ({ label: b, value: b }))}
+            value={bankName}
+            onChange={setBankName}
+          />
+          {bankName === "Other" && (
+            <>
+              <Text style={styles.label}>Bank name</Text>
+              <TextInput style={styles.input} value={bankNameOther} onChangeText={setBankNameOther} />
+            </>
+          )}
+          <View style={styles.timeRow}>
+            <View style={styles.timeCol}>
+              <Text style={styles.label}>Branch code</Text>
+              <TextInput
+                style={styles.input}
+                value={bankBranchCode}
+                onChangeText={setBankBranchCode}
+                keyboardType="number-pad"
+              />
+            </View>
+            <View style={styles.timeCol}>
+              <Text style={styles.label}>Account number</Text>
+              <TextInput
+                style={styles.input}
+                value={bankAccountNumber}
+                onChangeText={setBankAccountNumber}
+                keyboardType="number-pad"
+              />
+            </View>
+          </View>
+          <Dropdown
+            label="Account type"
+            options={BANK_ACCOUNT_TYPES.map((t) => ({ label: t, value: t }))}
+            value={bankAccountType}
+            onChange={setBankAccountType}
+          />
+          {bankAccountType === "Other" && (
+            <>
+              <Text style={styles.label}>Account type</Text>
+              <TextInput style={styles.input} value={bankAccountTypeOther} onChangeText={setBankAccountTypeOther} />
+            </>
+          )}
+          <Text style={styles.label}>Additional notes (optional)</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            value={bankAccountNote}
+            onChangeText={setBankAccountNote}
+            multiline
+            placeholder="e.g. a SWIFT code for an international account"
+          />
 
           <DocumentField label="ID document" value={idDocument} onPick={setIdDocument} />
           <DocumentField

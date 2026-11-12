@@ -82,6 +82,32 @@ export const HIGH_SCHOOL_TUTORING_SUBJECTS = [
 ] as const;
 export type HighSchoolTutoringSubject = (typeof HIGH_SCHOOL_TUTORING_SUBJECTS)[number];
 
+// Standard South African retail banks, for a tutor's payout details
+// (TutorApplyScreen) - "Other" is a free-text escape hatch, same pattern
+// as everywhere else a catalog list might not cover everyone.
+export const SA_BANKS = [
+  "ABSA",
+  "African Bank",
+  "Bank Zero",
+  "Bidvest Bank",
+  "Capitec Bank",
+  "Discovery Bank",
+  "First National Bank (FNB)",
+  "Investec",
+  "Nedbank",
+  "Sasfin Bank",
+  "Standard Bank",
+  "TymeBank",
+  "Other",
+] as const;
+
+export const BANK_ACCOUNT_TYPES = [
+  "Cheque/Current Account",
+  "Savings Account",
+  "Transmission Account",
+  "Other",
+] as const;
+
 export const PAPER_TOPICS_BY_SUBJECT: Record<Subject, Record<string, string[]>> = {
   Mathematics: {
     "Paper 1": ["Algebra", "Sequences", "Financial Mathematics", "Calculus", "Functions & Graphs"],

@@ -94,6 +94,25 @@ def to_sast_str(d, fmt="%d %b %Y, %H:%M") -> str:
     return (d + dt.timedelta(hours=2)).strftime(fmt) + " SAST"
 
 
+def _format_bank_details(d: dict, prefix: str = "") -> str:
+    """Shared by the tutor-application and payout admin views - falls
+    back to the free-text note for a tutor who applied before the
+    structured bank fields existed (see backend/db.py's TutorAccount
+    docstring). `prefix` picks between a tutor application dict's own
+    keys ("bank_name" etc.) and a payout dict's "tutor_"-prefixed ones."""
+    holder = d.get(f"{prefix}bank_account_holder")
+    bank = d.get(f"{prefix}bank_name")
+    branch = d.get(f"{prefix}bank_branch_code")
+    account = d.get(f"{prefix}bank_account_number")
+    acc_type = d.get(f"{prefix}bank_account_type")
+    note = d.get(f"{prefix}bank_account_note")
+    parts = [p for p in [holder, bank, f"Acc: {account}" if account else None, f"Branch: {branch}" if branch else None, acc_type] if p]
+    if not parts:
+        return note or "— (not provided)"
+    line = " · ".join(parts)
+    return f"{line} ({note})" if note else line
+
+
 # -------------------------------------------------
 # HELPER: Convert SVG to Base64
 # -------------------------------------------------
@@ -2032,7 +2051,7 @@ elif mode == "🛠️ Tutoring Admin":
                                     st.rerun()
                                 except TutoringError as e:
                                     st.error(str(e))
-                    st.write(f"**Bank details:** {a['bank_account_note'] or '—'}")
+                    st.write(f"**Bank details:** {_format_bank_details(a)}")
                     st.markdown("**Subjects applied for:**")
                     for s in a["subjects"]:
                         topics_str = f" — topics: {s['topics']}" if s["topics"] else ""
@@ -2090,7 +2109,7 @@ elif mode == "🛠️ Tutoring Admin":
                     )
                     st.write(f"**Bio:** {a['bio'] or '—'}")
                     st.write(f"**Availability:** {a['availability_note'] or '—'}")
-                    st.write(f"**Bank details:** {a['bank_account_note'] or '—'}")
+                    st.write(f"**Bank details:** {_format_bank_details(a)}")
                     st.markdown("**Modules applied for:**")
                     for m in a["modules"]:
                         st.write(f"- {m['name']} ({m['year_level_label']})")
@@ -2446,7 +2465,7 @@ elif mode == "🛠️ Tutoring Admin":
             st.caption(f"{len(payouts)} payout(s) pending.")
             for p in payouts:
                 with st.expander(f"Session #{p['session_id']} — {p['tutor_name']} — R{p['amount_zar']:.2f}"):
-                    st.write(f"**Bank details:** {p['tutor_bank_note'] or '— (not provided)'}")
+                    st.write(f"**Bank details:** {_format_bank_details(p, prefix='tutor_')}")
                     with st.form(f"payout_form_{p['id']}"):
                         ref = st.text_input("Payment reference (e.g. EFT ref)", key=f"payout_ref_{p['id']}")
                         if st.form_submit_button("Mark as Paid"):

@@ -55,6 +55,24 @@ import Dropdown from "../components/Dropdown";
 
 type Section = "applications" | "higherEdApplications" | "catalog" | "match" | "sessions" | "tutors" | "payouts";
 
+// Shared by ApplicationsSection/HigherEdApplicationsSection/PayoutsSection
+// below - falls back to the free-text note for a tutor who applied before
+// the structured bank fields existed (see backend/db.py's TutorAccount).
+function formatBankDetails(opts: {
+  holder: string | null; bank: string | null; branchCode: string | null;
+  accountNumber: string | null; accountType: string | null; note: string | null;
+}): string {
+  const parts: string[] = [];
+  if (opts.holder) parts.push(opts.holder);
+  if (opts.bank) parts.push(opts.bank);
+  if (opts.accountNumber) parts.push(`Acc: ${opts.accountNumber}`);
+  if (opts.branchCode) parts.push(`Branch: ${opts.branchCode}`);
+  if (opts.accountType) parts.push(opts.accountType);
+  if (parts.length === 0) return opts.note || "— (not provided)";
+  const line = parts.join(" · ");
+  return opts.note ? `${line} (${opts.note})` : line;
+}
+
 const STATUS_OPTIONS: { label: string; value: TutorApplication["status"] }[] = [
   { label: "Pending Review", value: "pending_review" },
   { label: "Approved", value: "approved" },
@@ -204,7 +222,12 @@ function ApplicationsSection({ token }: { token: string }) {
                   <Text style={styles.detailLine}>Matric certificate note: {a.matric_certificate_note || "—"}</Text>
                   <Text style={styles.detailLine}>CV note: {a.cv_note || "—"}</Text>
                   <Text style={styles.detailLine}>Availability: {a.availability_note || "—"}</Text>
-                  <Text style={styles.detailLine}>Bank details: {a.bank_account_note || "—"}</Text>
+                  <Text style={styles.detailLine}>
+                    Bank details: {formatBankDetails({
+                      holder: a.bank_account_holder, bank: a.bank_name, branchCode: a.bank_branch_code,
+                      accountNumber: a.bank_account_number, accountType: a.bank_account_type, note: a.bank_account_note,
+                    })}
+                  </Text>
 
                   {([
                     ["id", "ID document", a.has_id_document] as const,
@@ -396,7 +419,12 @@ function HigherEdApplicationsSection({ token }: { token: string }) {
                   <Text style={styles.detailLine}>Transcript note: {a.higher_ed_transcript_note || "—"}</Text>
                   <Text style={styles.detailLine}>Bio: {a.bio || "—"}</Text>
                   <Text style={styles.detailLine}>Availability: {a.availability_note || "—"}</Text>
-                  <Text style={styles.detailLine}>Bank details: {a.bank_account_note || "—"}</Text>
+                  <Text style={styles.detailLine}>
+                    Bank details: {formatBankDetails({
+                      holder: a.bank_account_holder, bank: a.bank_name, branchCode: a.bank_branch_code,
+                      accountNumber: a.bank_account_number, accountType: a.bank_account_type, note: a.bank_account_note,
+                    })}
+                  </Text>
                   {a.wants_high_school ? (
                     <Text style={styles.detailLine}>This tutor also applied for high-school tutoring.</Text>
                   ) : null}
@@ -1115,7 +1143,12 @@ function PayoutsSection({ token }: { token: string }) {
               Session #{p.session_id} — {p.tutor_name}
             </Text>
             <Text style={styles.cardSubtitle}>R{p.amount_zar.toFixed(2)}</Text>
-            <Text style={styles.detailLine}>Bank details: {p.tutor_bank_note || "— (not provided)"}</Text>
+            <Text style={styles.detailLine}>
+              Bank details: {formatBankDetails({
+                holder: p.tutor_bank_account_holder, bank: p.tutor_bank_name, branchCode: p.tutor_bank_branch_code,
+                accountNumber: p.tutor_bank_account_number, accountType: p.tutor_bank_account_type, note: p.tutor_bank_note,
+              })}
+            </Text>
             <TextInput
               style={styles.input}
               placeholder="Payment reference (e.g. EFT ref)"

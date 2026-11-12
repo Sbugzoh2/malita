@@ -616,6 +616,14 @@ export type TutorApplyParams = {
   matric_certificate_note?: string;
   cv_note?: string;
   availability_note?: string;
+  bank_account_holder?: string;
+  bank_name?: string;
+  bank_branch_code?: string;
+  bank_account_number?: string;
+  bank_account_type?: string;
+  // Optional extra notes alongside the structured fields above (e.g. a
+  // SWIFT code for an international account) - not the primary bank
+  // info anymore, see backend/db.py's TutorAccount docstring.
   bank_account_note?: string;
   wants_high_school: boolean;
   wants_higher_ed: boolean;
@@ -669,6 +677,11 @@ export async function applyAsTutor(params: TutorApplyParams): Promise<TutorApply
     matric_certificate_note: params.matric_certificate_note ?? "",
     cv_note: params.cv_note ?? "",
     availability_note: params.availability_note ?? "",
+    bank_account_holder: params.bank_account_holder ?? "",
+    bank_name: params.bank_name ?? "",
+    bank_branch_code: params.bank_branch_code ?? "",
+    bank_account_number: params.bank_account_number ?? "",
+    bank_account_type: params.bank_account_type ?? "",
     bank_account_note: params.bank_account_note ?? "",
     wants_high_school: String(params.wants_high_school),
     wants_higher_ed: String(params.wants_higher_ed),
@@ -800,6 +813,11 @@ export type TutorApplication = {
   cv_note: string | null;
   has_cv_document: boolean;
   availability_note: string | null;
+  bank_account_holder: string | null;
+  bank_name: string | null;
+  bank_branch_code: string | null;
+  bank_account_number: string | null;
+  bank_account_type: string | null;
   bank_account_note: string | null;
   status: "pending_review" | "approved" | "rejected" | "suspended";
   status_label: string;
@@ -855,6 +873,11 @@ export type TutorHigherEdApplication = {
   cv_note: string | null;
   has_cv_document: boolean;
   availability_note: string | null;
+  bank_account_holder: string | null;
+  bank_name: string | null;
+  bank_branch_code: string | null;
+  bank_account_number: string | null;
+  bank_account_type: string | null;
   bank_account_note: string | null;
   wants_high_school: boolean;
   higher_ed_status: "pending_review" | "approved" | "rejected" | "suspended";
@@ -998,6 +1021,11 @@ export type TutoringPayout = {
   session_id: number;
   tutor_id: number;
   tutor_name: string | null;
+  tutor_bank_account_holder: string | null;
+  tutor_bank_name: string | null;
+  tutor_bank_branch_code: string | null;
+  tutor_bank_account_number: string | null;
+  tutor_bank_account_type: string | null;
   tutor_bank_note: string | null;
   amount_zar: number;
   created_at: string | null;

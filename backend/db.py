@@ -439,6 +439,25 @@ class TutorAccount(Base):
     # structured day/time picker in v1, since matching is already a manual
     # admin step (see backend/tutoring.py) where an admin reads this by eye.
     availability_note = Column(String, nullable=True)
+    # Structured payout details, replacing a single free-text box so every
+    # tutor's banking info is captured the same way (an admin paying out
+    # via EFT needs the exact account number/branch code, not a sentence
+    # to parse by eye). bank_name/bank_account_type hold whatever the
+    # mobile app's dropdown produced, including a typed-in value when the
+    # applicant picked "Other" there - this column makes no distinction
+    # between a listed bank and a typed one, same as elsewhere "Other" is
+    # just a free-text escape hatch with nothing further to validate.
+    bank_account_holder = Column(String(120), nullable=True)
+    bank_name = Column(String(60), nullable=True)
+    bank_branch_code = Column(String(20), nullable=True)
+    bank_account_number = Column(String(40), nullable=True)
+    bank_account_type = Column(String(30), nullable=True)
+    # Pre-dates the structured fields above (and kept for every tutor
+    # who applied before them) - now doubles as an optional "anything
+    # else" note (e.g. a SWIFT code for an international account)
+    # alongside the structured fields rather than the only bank info at
+    # all. Admin views fall back to this when the structured fields are
+    # all empty, for an existing tutor who applied before this change.
     bank_account_note = Column(String, nullable=True)
     bio = Column(String, nullable=True)
     # pending_review | approved | rejected | suspended - this is the
@@ -858,6 +877,11 @@ def init_db():
     _ensure_column("tutor_accounts", "cv_note", "VARCHAR")
     _ensure_column("tutor_accounts", "cv_document_path", "VARCHAR")
     _ensure_column("tutor_accounts", "availability_note", "VARCHAR")
+    _ensure_column("tutor_accounts", "bank_account_holder", "VARCHAR(120)")
+    _ensure_column("tutor_accounts", "bank_name", "VARCHAR(60)")
+    _ensure_column("tutor_accounts", "bank_branch_code", "VARCHAR(20)")
+    _ensure_column("tutor_accounts", "bank_account_number", "VARCHAR(40)")
+    _ensure_column("tutor_accounts", "bank_account_type", "VARCHAR(30)")
     _ensure_column("tutoring_session_requests", "meet_link", "VARCHAR")
     _ensure_column("tutoring_session_requests", "calendar_event_id", "VARCHAR")
     _ensure_column("tutoring_session_requests", "learner_confirmed_at", "TIMESTAMP")

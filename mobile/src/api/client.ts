@@ -751,7 +751,11 @@ export function fetchTutorOpenRequests(token: string) {
 }
 
 export function acceptTutoringRequest(token: string, requestId: number) {
-  return request<{ id: number; status: string; m_payment_id: string; meet_link: string | null }>(
+  // m_payment_id/meet_link are null when status comes back as
+  // "pending_admin_approval" - a custom ("Other") module claim, not
+  // finalized until an admin approves it (see backend/tutoring.py's
+  // accept_tutoring_request).
+  return request<{ id: number; status: string; m_payment_id: string | null; meet_link: string | null }>(
     `/tutor/requests/${requestId}/accept`,
     { method: "POST", token }
   );

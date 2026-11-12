@@ -66,6 +66,7 @@ from backend.tutoring import (
     delete_institution, delete_qualification, delete_module,
     list_tutor_higher_ed_applications,
     approve_tutor_higher_ed, reject_tutor_higher_ed, list_learner_requests,
+    list_pending_custom_claims, respond_to_custom_module_claim,
 )
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -1984,10 +1985,13 @@ elif mode == "🛠️ Tutoring Admin":
             "verifies the app — see backend/google_calendar.py)."
         )
 
-        tab_apps, tab_higher_ed_apps, tab_catalog, tab_match, tab_sessions, tab_tutors, tab_payouts = st.tabs(
+        (
+            tab_apps, tab_higher_ed_apps, tab_catalog, tab_match, tab_claims,
+            tab_sessions, tab_tutors, tab_payouts,
+        ) = st.tabs(
             [
                 "Tutor Applications", "Higher-Ed Applications", "Higher-Ed Catalog",
-                "Match Requests", "All Sessions", "Tutors", "Payouts",
+                "Match Requests", "Pending Claims", "All Sessions", "Tutors", "Payouts",
             ]
         )
 
@@ -2238,6 +2242,28 @@ elif mode == "🛠️ Tutoring Admin":
                             except TutoringError as e:
                                 st.error(str(e))
 
+        def _render_tutor_profile_summary(t: dict) -> None:
+            """A tutor's own declared background, shown alongside each
+            candidate in the match tabs below - mainly useful for a
+            custom ("Other") module request, where there's no catalog
+            eligibility check to lean on and an admin has to judge
+            suitability by eye (e.g. confirming a Mathematics module
+            isn't being claimed by a Psychology student)."""
+            prof = t.get("higher_ed_profile")
+            if prof:
+                complete_str = " (completed)" if prof["qualification_complete"] else ""
+                st.caption(
+                    f"🎓 {prof['qualification'] or '—'} at {prof['institution'] or '—'} — "
+                    f"{prof['year_of_study_label'] or '—'}{complete_str}"
+                )
+                if prof["custom_modules"]:
+                    mods = ", ".join(f"{m['name']} ({m['year_level_label']})" for m in prof["custom_modules"])
+                    st.caption(f"Also tutors (custom): {mods}")
+            if t.get("bio"):
+                st.caption(f"Bio: {t['bio']}")
+            if t.get("availability_note"):
+                st.caption(f"Availability: {t['availability_note']}")
+
         # ---- Admin override: force-assign a tutor to an open request ----
         # Tutors now self-accept open requests at the price/duration the
         # learner already set (see the mobile tutor app) - this tab is
@@ -2273,6 +2299,10 @@ elif mode == "🛠️ Tutoring Admin":
                     if not candidates:
                         st.warning(f"No approved tutors for {r['subject']} yet.")
                     else:
+                        st.markdown("**Candidate profiles:**")
+                        for t in candidates:
+                            st.write(f"— **{t['name']}** ({t['email']}) — {t['sessions_completed']} completed session(s)")
+                            _render_tutor_profile_summary(t)
                         tutor_labels = {
                             f"{t['name']} ({t['email']}) — {t['sessions_completed']} completed session(s)": t["id"]
                             for t in candidates
@@ -2307,6 +2337,47 @@ elif mode == "🛠️ Tutoring Admin":
                                     st.rerun()
                                 except TutoringError as e:
                                     st.error(str(e))
+
+        # ---- Tutor self-claims on custom ("Other") module requests ----
+        # Year-level eligibility alone (checked when the tutor claimed it)
+        # can't confirm the module is actually in that tutor's field, so
+        # every claim sits here until a human approves or rejects it -
+        # see backend/tutoring.py's accept_tutoring_request/
+        # respond_to_custom_module_claim.
+        with tab_claims:
+            claims = list_pending_custom_claims()
+            st.caption(f"{len(claims)} claim(s) awaiting approval.")
+            for r in claims:
+                topic_str = f" ({r['topic']})" if r["topic"] else ""
+                with st.expander(f"#{r['id']} — {r['subject']}{topic_str} — claimed by {r['tutor_name']}"):
+                    if r["scheduled_at"]:
+                        st.write(f"**Scheduled:** {to_sast_str(r['scheduled_at'])}")
+                    if r["price_zar"] is not None:
+                        st.write(f"**Price:** R{r['price_zar']:.2f} ({r['duration_minutes']} min)")
+                    if r.get("custom_qualification_name"):
+                        st.write(f"**Learner's qualification:** {r['custom_qualification_name']}")
+                    tutor_candidates = {t["id"]: t for t in list_approved_tutors()}
+                    tutor = tutor_candidates.get(r["tutor_id"])
+                    if tutor:
+                        st.markdown(f"**{tutor['name']}'s profile:**")
+                        _render_tutor_profile_summary(tutor)
+                    col_approve, col_reject = st.columns(2)
+                    with col_approve:
+                        if st.button("✅ Approve", key=f"approve_claim_{r['id']}"):
+                            try:
+                                respond_to_custom_module_claim(r["id"], approve=True)
+                                st.success("Approved! The learner and tutor have been notified.")
+                                st.rerun()
+                            except TutoringError as e:
+                                st.error(str(e))
+                    with col_reject:
+                        if st.button("❌ Reject", key=f"reject_claim_{r['id']}"):
+                            try:
+                                respond_to_custom_module_claim(r["id"], approve=False)
+                                st.success("Rejected - reopened for another tutor.")
+                                st.rerun()
+                            except TutoringError as e:
+                                st.error(str(e))
 
         # ---- Every matched session (upcoming + completed), full detail ----
         with tab_sessions:

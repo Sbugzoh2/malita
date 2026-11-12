@@ -128,7 +128,17 @@ export default function TutorHomeScreen() {
     setAcceptingId(requestId);
     setError(null);
     try {
-      await acceptTutoringRequest(token, requestId);
+      const result = await acceptTutoringRequest(token, requestId);
+      // A custom ("Other") module claim doesn't finalize immediately -
+      // an admin has to confirm it's actually in your field first (see
+      // backend/tutoring.py's accept_tutoring_request).
+      if (result.status === "pending_admin_approval") {
+        Alert.alert(
+          "Submitted for review",
+          "This module isn't in our catalog, so an admin needs to confirm it's a good match for your " +
+            "qualification before it's finalized. You'll be notified once it's approved."
+        );
+      }
       load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not accept this request.");

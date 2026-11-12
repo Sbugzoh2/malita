@@ -101,6 +101,7 @@ SESSION_STATUS_LABELS = {
     "requested": "Waiting for a tutor to accept",
     "time_proposed": "Tutor proposed a new time — awaiting your approval",
     "admin_proposed": "An admin suggested this match — awaiting the tutor's confirmation",
+    "pending_admin_approval": "A tutor claimed this — awaiting admin approval",
     "awaiting_payment": "Accepted! Awaiting payment",
     "confirmed": "Paid — confirm once the session happens",
     "completed": "Completed",
@@ -1326,10 +1327,19 @@ def list_approved_tutors(subject: str | None = None, module_id: int | None = Non
     you'd keep recalling a reliable employee for new work rather than
     starting over with someone untested each time."""
     with get_session() as db:
-        q = db.query(TutorAccount).filter(TutorAccount.status == "approved")
+        # A tutor can be approved on EITHER track independently (see
+        # TutorAccount's own docstring) - filtering on status alone would
+        # silently drop every tutor approved only for higher-ed (status
+        # stays its pending_review default forever if they never applied
+        # for high school too), which would have made them invisible as
+        # match candidates for exactly the higher-ed requests they can
+        # actually tutor.
+        q = db.query(TutorAccount).filter(
+            sa.or_(TutorAccount.status == "approved", TutorAccount.higher_ed_status == "approved")
+        )
         out = []
         for t in q.all():
-            subjects = [s for s in t.subjects if s.is_active]
+            subjects = [s for s in t.subjects if s.is_active] if t.status == "approved" else []
             if subject and not any(s.subject == subject for s in subjects):
                 continue
             higher_ed_modules = (
@@ -1343,10 +1353,32 @@ def list_approved_tutors(subject: str | None = None, module_id: int | None = Non
                 .filter(TutoringSessionRequest.tutor_id == t.id, TutoringSessionRequest.status == "completed")
                 .count()
             )
+            # The tutor's OWN declared higher-ed qualification (not the
+            # per-module catalog rows below) - this, not a catalog match,
+            # is what an admin actually needs to judge whether a tutor
+            # suits a custom ("Other") module request, e.g. confirming a
+            # Mathematics module isn't being claimed by a Psychology
+            # student just because their year of study is high enough.
+            higher_ed_profile = None
+            if t.higher_ed_status == "approved":
+                qual = db.query(Qualification).get(t.higher_ed_qualification_id) if t.higher_ed_qualification_id else None
+                inst = db.query(Institution).get(t.higher_ed_institution_id) if t.higher_ed_institution_id else None
+                higher_ed_profile = {
+                    "institution": inst.name if inst else None,
+                    "qualification": qual.name if qual else t.higher_ed_qualification_custom_name,
+                    "year_of_study": t.higher_ed_year_of_study,
+                    "year_of_study_label": YEAR_LEVEL_LABELS.get(t.higher_ed_year_of_study),
+                    "qualification_complete": t.higher_ed_qualification_complete,
+                    "custom_modules": [
+                        {"name": m.name, "year_level": m.year_level, "year_level_label": YEAR_LEVEL_LABELS.get(m.year_level)}
+                        for m in t.higher_ed_custom_modules
+                    ],
+                }
             out.append({
                 "id": t.id, "name": t.name, "email": t.email,
                 "bio": t.bio, "availability_note": t.availability_note,
                 "sessions_completed": sessions_completed,
+                "higher_ed_profile": higher_ed_profile,
                 "subjects": [
                     {"subject": s.subject, "matric_percentage": s.matric_percentage,
                      "topics": s.topics, "hourly_rate_zar": s.hourly_rate_zar}
@@ -1439,8 +1471,12 @@ def _check_schedule_conflict(
         other_end = other_start + dt.timedelta(minutes=other.duration_minutes or 60)
         if new_start < (other_end + buffer) and new_end > (other_start - buffer):
             who = "You already have" if kind == "learner" else "This tutor already has"
+            # other_start is naive UTC like every scheduled_at - format it
+            # in SAST (_format_sast) to match what the learner actually
+            # picked on the Hour (SAST)/Minute pickers, not raw UTC (which
+            # read 2 hours behind whatever time they'd just selected).
             raise TutoringError(
-                f"{who} a session scheduled around {other_start.strftime('%d %b %Y %H:%M')} - "
+                f"{who} a session scheduled around {_format_sast(other_start)} - "
                 f"sessions need at least {SCHEDULING_BUFFER_MINUTES} minutes' gap between them. "
                 "Please choose a different time."
             )
@@ -1940,6 +1976,24 @@ def list_open_requests() -> list[dict]:
         return [_serialize_request(r) for r in reqs]
 
 
+def list_pending_custom_claims() -> list[dict]:
+    """Admin visibility: custom ("Other") module requests a tutor has
+    already claimed (see accept_tutoring_request) but that aren't
+    finalized yet - year-level eligibility alone can't confirm the
+    module is actually in that tutor's field, so these sit here until an
+    admin approves or rejects them (see respond_to_custom_module_claim).
+    Separate from list_open_requests, which only covers status=="requested"
+    (not yet claimed by anyone)."""
+    with get_session() as db:
+        reqs = (
+            db.query(TutoringSessionRequest)
+            .filter(TutoringSessionRequest.status == "pending_admin_approval")
+            .order_by(TutoringSessionRequest.created_at.asc())
+            .all()
+        )
+        return [_serialize_request(r) for r in reqs]
+
+
 def list_all_tutoring_sessions(
     upcoming_only: bool = False, completed_only: bool = False, lapsed_only: bool = False,
 ) -> list[dict]:
@@ -2010,16 +2064,42 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
         if not tutor:
             raise TutoringError("Tutor account not found.")
         subjects, module_ids = _tutor_eligible_subjects_and_modules(db, tutor)
-        if not subjects and not module_ids:
+        # A custom ("Other") module has no catalog Module row, so it can't
+        # be matched by id - broadcast it to every higher-ed-approved
+        # tutor who's year-eligible instead (same "at least one year
+        # ahead" rule the catalog uses - see
+        # _tutor_eligible_for_custom_module), same as a high-school
+        # request broadcasts by subject string. Accepting one of these
+        # doesn't finalize it though (see accept_tutoring_request) - year
+        # level alone can't confirm the module is even in the tutor's
+        # actual field, so an admin still has to sign off before the
+        # learner ever sees it as accepted.
+        custom_eligible = tutor.higher_ed_status == "approved"
+        if not subjects and not module_ids and not custom_eligible:
             return []
         filters = []
         if subjects:
             filters.append(sa.and_(
                 TutoringSessionRequest.module_id.is_(None),
+                TutoringSessionRequest.is_custom_higher_ed.is_(False),
                 TutoringSessionRequest.subject.in_(subjects),
             ))
         if module_ids:
             filters.append(TutoringSessionRequest.module_id.in_(module_ids))
+        if custom_eligible:
+            if tutor.higher_ed_qualification_complete or tutor.higher_ed_year_of_study is None:
+                custom_filter = TutoringSessionRequest.is_custom_higher_ed.is_(True)
+            else:
+                custom_filter = sa.and_(
+                    TutoringSessionRequest.is_custom_higher_ed.is_(True),
+                    sa.or_(
+                        TutoringSessionRequest.custom_module_year_level.is_(None),
+                        TutoringSessionRequest.custom_module_year_level < tutor.higher_ed_year_of_study,
+                    ),
+                )
+            filters.append(custom_filter)
+        if not filters:
+            return []
         reqs = (
             db.query(TutoringSessionRequest)
             .filter(
@@ -2032,14 +2112,6 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
                     TutoringSessionRequest.preferred_tutor_id.is_(None),
                     TutoringSessionRequest.preferred_tutor_id == tutor_id,
                 ),
-                # A custom ("Other") module has no catalog Module row for
-                # any tutor to validly self-accept against - it has
-                # module_id NULL like a high-school request, so without
-                # this it could otherwise accidentally match a tutor whose
-                # high-school subject happens to share the same string.
-                # These are routed to admin's manual match flow instead
-                # (see list_open_requests/match_tutor_to_request).
-                TutoringSessionRequest.is_custom_higher_ed.is_(False),
             )
             .order_by(TutoringSessionRequest.created_at.asc())
             .all()
@@ -2119,19 +2191,43 @@ def _assign_tutor_to_request(db, req: TutoringSessionRequest, tutor: TutorAccoun
 
 def _check_tutor_eligible_for_request(db, tutor: TutorAccount, req: TutoringSessionRequest) -> None:
     """Shared by accept_tutoring_request and propose_new_time - branches
-    on whether this is a higher-ed request (module_id set, matched
-    against TutorHigherEdModule + the independent higher_ed_status) or a
-    high-school one (matched against TutorSubject + status, as before)."""
+    on whether this is a catalog higher-ed request (module_id set,
+    matched against TutorHigherEdModule + the independent
+    higher_ed_status), a custom ("Other") higher-ed request (year-level
+    only - see _tutor_eligible_for_custom_module), or a high-school one
+    (matched against TutorSubject + status, as before)."""
     if req.module_id is not None:
         if tutor.higher_ed_status != "approved":
             raise TutoringError("Your higher-ed tutor application isn't approved.")
         if not any(m.module_id == req.module_id and m.is_active for m in tutor.higher_ed_modules):
+            raise TutoringError(f"You're not approved to tutor {req.subject}.")
+    elif req.is_custom_higher_ed:
+        if not _tutor_eligible_for_custom_module(tutor, req.custom_module_year_level):
             raise TutoringError(f"You're not approved to tutor {req.subject}.")
     else:
         if tutor.status != "approved":
             raise TutoringError("Your tutor account isn't approved.")
         if not any(s.subject == req.subject and s.is_active for s in tutor.subjects):
             raise TutoringError(f"You're not approved to tutor {req.subject}.")
+
+
+def _tutor_eligible_for_custom_module(tutor: TutorAccount, module_year_level: int | None) -> bool:
+    """A custom ("Other") module has no catalog row, so the only thing
+    that can be checked automatically is the SAME "at least one year
+    ahead" rule the catalog uses - it can't confirm the module is even
+    in the tutor's actual field (that's exactly why accept_tutoring_
+    request routes a claim here to pending_admin_approval instead of
+    finalizing it immediately, same reasoning as the module docstring's
+    own Psychology-tutor-claiming-Mathematics example)."""
+    if tutor.higher_ed_status != "approved":
+        return False
+    if tutor.higher_ed_qualification_complete:
+        return True
+    if module_year_level is None or tutor.higher_ed_year_of_study is None:
+        # No year to compare against - broadcast it rather than hide it;
+        # admin approval is still the backstop either way.
+        return True
+    return tutor.higher_ed_year_of_study > module_year_level
 
 
 def accept_tutoring_request(request_id: int, tutor_id: int) -> dict:
@@ -2156,23 +2252,41 @@ def accept_tutoring_request(request_id: int, tutor_id: int) -> dict:
             duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
         )
 
-        _assign_tutor_to_request(db, req, tutor)
+        # A custom ("Other") module claim can't finalize here like a
+        # catalog match does - year-level eligibility (just checked
+        # above) can't confirm the module is actually in the tutor's own
+        # field, so it parks at pending_admin_approval for a human to
+        # sign off (see respond_to_custom_module_claim) before the
+        # learner ever sees it as accepted.
+        if req.is_custom_higher_ed:
+            req.tutor_id = tutor.id
+            req.status = "pending_admin_approval"
+            result = {"id": req.id, "status": req.status, "m_payment_id": None, "meet_link": None}
+            subject, topic, scheduled_at = req.subject, req.topic, req.scheduled_at
+            tutor_name, tutor_email = tutor.name, tutor.email
+        else:
+            _assign_tutor_to_request(db, req, tutor)
+            result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
+            learner = db.query(User).get(req.learner_user_id)
+            learner_name, learner_email = learner.name, learner.email
+            tutor_name, tutor_email = tutor.name, tutor.email
+            subject, topic, price_zar, duration_minutes, scheduled_at = (
+                req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
+            )
 
-        result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
-        learner = db.query(User).get(req.learner_user_id)
-        learner_name, learner_email = learner.name, learner.email
-        tutor_name, tutor_email = tutor.name, tutor.email
-        subject, topic, price_zar, duration_minutes, scheduled_at = (
-            req.subject, req.topic, req.price_zar, req.duration_minutes, req.scheduled_at
+    if result["status"] == "pending_admin_approval":
+        _notify_admins_of_custom_claim(
+            request_id=request_id, tutor_name=tutor_name, tutor_email=tutor_email,
+            subject=subject, topic=topic, scheduled_at=scheduled_at,
         )
-
-    _notify_match(
-        learner_name=learner_name, learner_email=learner_email,
-        tutor_name=tutor_name, tutor_email=tutor_email,
-        subject=subject, topic=topic, price_zar=price_zar,
-        duration_minutes=duration_minutes, scheduled_at=scheduled_at,
-        meet_link=result["meet_link"],
-    )
+    else:
+        _notify_match(
+            learner_name=learner_name, learner_email=learner_email,
+            tutor_name=tutor_name, tutor_email=tutor_email,
+            subject=subject, topic=topic, price_zar=price_zar,
+            duration_minutes=duration_minutes, scheduled_at=scheduled_at,
+            meet_link=result["meet_link"],
+        )
     return result
 
 
@@ -2399,6 +2513,84 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
     return result
 
 
+def respond_to_custom_module_claim(request_id: int, approve: bool) -> dict:
+    """Admin approving or rejecting a tutor's self-claim on a custom
+    ("Other") module request (see accept_tutoring_request's
+    pending_admin_approval branch and _tutor_eligible_for_custom_module's
+    own docstring) - the one check a catalog match gets for free (the
+    tutor's own TutorHigherEdModule membership, which actually ties them
+    to that specific module) doesn't exist for a typed-in module, so a
+    claim sits here until a human visually confirms the tutor's
+    qualification is actually relevant. Rejecting fully reopens the
+    request (same as a declined admin_proposed match) so it goes back to
+    every year-eligible tutor's queue and an admin can review a different
+    claim. Approving finalizes it exactly like a direct accept, including
+    a fresh schedule-conflict recheck in case the tutor booked something
+    else in the meantime."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.status != "pending_admin_approval":
+            raise TutoringError("This request isn't awaiting approval.")
+        tutor = db.query(TutorAccount).get(req.tutor_id)
+        if not tutor:
+            raise TutoringError("Tutor account not found.")
+        tutor_name, tutor_email = tutor.name, tutor.email
+        subject, topic, scheduled_at = req.subject, req.topic, req.scheduled_at
+
+        if not approve:
+            req.tutor_id = None
+            req.status = "requested"
+            result = {"id": req.id, "status": req.status}
+            _notify_custom_claim_rejected(
+                tutor_name=tutor_name, tutor_email=tutor_email, subject=subject, topic=topic,
+            )
+            return result
+
+        if tutor.status != "approved" and tutor.higher_ed_status != "approved":
+            raise TutoringError("That tutor is not an approved, active tutor.")
+        _check_schedule_conflict(
+            db, kind="tutor", person_id=tutor.id, scheduled_at=req.scheduled_at,
+            duration_minutes=req.duration_minutes or 60, exclude_request_id=req.id,
+        )
+        _assign_tutor_to_request(db, req, tutor)
+
+        result = {"id": req.id, "status": req.status, "m_payment_id": req.m_payment_id, "meet_link": req.meet_link}
+        learner = db.query(User).get(req.learner_user_id)
+        learner_name, learner_email = learner.name, learner.email
+        price_zar, duration_minutes, final_scheduled_at = req.price_zar, req.duration_minutes, req.scheduled_at
+
+    _notify_match(
+        learner_name=learner_name, learner_email=learner_email,
+        tutor_name=tutor_name, tutor_email=tutor_email,
+        subject=subject, topic=topic, price_zar=price_zar,
+        duration_minutes=duration_minutes, scheduled_at=final_scheduled_at,
+        meet_link=result["meet_link"],
+    )
+    return result
+
+
+def _notify_custom_claim_rejected(
+    *, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
+) -> None:
+    """Best-effort - tells the tutor their claim on a custom module
+    request wasn't approved, same spirit as _notify_tutor_of_decision for
+    an application rejection."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        send_email(
+            tutor_email,
+            "Your claim on a tutoring request wasn't approved",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"An admin reviewed your claim on the {subject}{topic_str} request and decided it "
+                "isn't a good match for your qualification - it's been reopened for another tutor.\n\n"
+                "— The Malita team"
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify tutor %s of a rejected custom module claim", tutor_email)
+
+
 def _notify_admin_proposed_match(
     *, tutor_name: str, tutor_email: str, subject: str, topic: str | None,
     scheduled_at: dt.datetime | None,
@@ -2496,6 +2688,37 @@ def _notify_time_proposed(
         )
     except Exception:
         logger.exception("Failed to notify learner %s of a proposed time change", learner_email)
+
+
+def _notify_admins_of_custom_claim(
+    *, request_id: int, tutor_name: str, tutor_email: str,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None,
+) -> None:
+    """Best-effort email to every admin (same pattern as
+    _notify_admins_of_recording) - a tutor claiming a custom ("Other")
+    module request needs a human to confirm the module is actually in
+    that tutor's field before it reaches the learner at all (see
+    accept_tutoring_request/respond_to_custom_module_claim), and nobody
+    reviews the admin console on a fixed schedule, so this is what
+    actually prompts someone to go look."""
+    try:
+        with get_session() as db:
+            admin_emails = [u.email for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admin_emails:
+            return
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        body = (
+            f"{tutor_name} ({tutor_email}) claimed request #{request_id} - {subject}{topic_str}, "
+            f"scheduled {when_str}.\n\n"
+            "This is a custom module (not in the catalog), so it needs your approval before the "
+            "learner sees it as accepted - open the admin console's Tutoring tab to review and "
+            "approve or reject it.\n"
+        )
+        for email in admin_emails:
+            send_email(email, f"Tutor claim needs approval: {subject}{topic_str}", body)
+    except Exception:
+        logger.exception("Failed to notify admins of request %s's custom module claim", request_id)
 
 
 def _notify_match(

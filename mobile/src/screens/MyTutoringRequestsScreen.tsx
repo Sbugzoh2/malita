@@ -14,6 +14,8 @@ import {
   respondToTimeProposal,
   withdrawTutoringRequest,
   cancelTutoringSessionAsLearner,
+  reallocateAfterTutorCancellation,
+  requestRefundForCancelledSession,
   TutoringRequest,
 } from "../api/client";
 
@@ -47,6 +49,7 @@ const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   admin_proposed: colors.textSecondary,
   awaiting_payment: "#eda100",
   confirmed: colors.primary,
+  tutor_cancelled: colors.error,
   completed: colors.success,
   cancelled: colors.error,
   lapsed: colors.error,
@@ -78,6 +81,69 @@ const GROUP_EMPTY_LABEL: Record<SessionGroup, string> = {
   lapsed: "No lapsed sessions.",
 };
 
+// Built from plain Views (no SVG dependency, no emoji) - same icon
+// language as the rest of this redesign pass.
+function GroupTabIcon({ name, size = 20, color }: { name: SessionGroup; size?: number; color: string }) {
+  const box = { width: size, height: size, alignItems: "center" as const, justifyContent: "center" as const, position: "relative" as const };
+  switch (name) {
+    case "active":
+      return (
+        <View style={box}>
+          <View style={{ width: size * 0.82, height: size * 0.82, borderRadius: 999, borderWidth: 1.6, borderColor: color }} />
+          <View style={{ position: "absolute", width: 1.4, height: size * 0.26, backgroundColor: color, top: size * 0.16, borderRadius: 1 }} />
+          <View style={{ position: "absolute", width: size * 0.2, height: 1.4, backgroundColor: color, borderRadius: 1 }} />
+        </View>
+      );
+    case "completed":
+      return (
+        <View style={box}>
+          <View style={{ width: size * 0.82, height: size * 0.82, borderRadius: 999, borderWidth: 1.6, borderColor: color }} />
+          <View
+            style={{
+              position: "absolute",
+              width: size * 0.16,
+              height: 1.6,
+              backgroundColor: color,
+              borderRadius: 1,
+              left: size * 0.28,
+              top: size * 0.52,
+              transform: [{ rotate: "45deg" }],
+            }}
+          />
+          <View
+            style={{
+              position: "absolute",
+              width: size * 0.3,
+              height: 1.6,
+              backgroundColor: color,
+              borderRadius: 1,
+              left: size * 0.36,
+              top: size * 0.44,
+              transform: [{ rotate: "-45deg" }],
+            }}
+          />
+        </View>
+      );
+    case "cancelled":
+      return (
+        <View style={box}>
+          <View style={{ width: size * 0.82, height: size * 0.82, borderRadius: 999, borderWidth: 1.6, borderColor: color }} />
+          <View style={{ position: "absolute", width: size * 0.42, height: 1.6, backgroundColor: color, borderRadius: 1, transform: [{ rotate: "45deg" }] }} />
+          <View style={{ position: "absolute", width: size * 0.42, height: 1.6, backgroundColor: color, borderRadius: 1, transform: [{ rotate: "-45deg" }] }} />
+        </View>
+      );
+    case "lapsed":
+      return (
+        <View style={box}>
+          <View style={{ width: size * 0.82, height: size * 0.82, borderRadius: 999, borderWidth: 1.6, borderColor: color }} />
+          <View style={{ position: "absolute", width: size * 0.58, height: 1.6, backgroundColor: color, borderRadius: 1, transform: [{ rotate: "45deg" }] }} />
+        </View>
+      );
+    default:
+      return null;
+  }
+}
+
 function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <View style={styles.starRow}>
@@ -104,6 +170,8 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const [cancelingId, setCancelingId] = useState<number | null>(null);
   const [cancelReasonId, setCancelReasonId] = useState<number | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [reallocatingId, setReallocatingId] = useState<number | null>(null);
+  const [refundingId, setRefundingId] = useState<number | null>(null);
   const [group, setGroup] = useState<SessionGroup>("active");
 
   const load = useCallback(() => {
@@ -210,11 +278,51 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     }
   }
 
+  async function handleReallocate(requestId: number) {
+    if (!token) return;
+    setReallocatingId(requestId);
+    setError(null);
+    try {
+      await reallocateAfterTutorCancellation(token, requestId);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not reopen this request.");
+    } finally {
+      setReallocatingId(null);
+    }
+  }
+
+  function confirmRequestRefund(requestId: number) {
+    Alert.alert(
+      "Request a refund?",
+      "We'll stop looking for another tutor and arrange your refund instead.",
+      [
+        { text: "Never mind", style: "cancel" },
+        { text: "Request Refund", style: "destructive", onPress: () => handleRequestRefund(requestId) },
+      ]
+    );
+  }
+
+  async function handleRequestRefund(requestId: number) {
+    if (!token) return;
+    setRefundingId(requestId);
+    setError(null);
+    try {
+      await requestRefundForCancelledSession(token, requestId);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not request a refund for this session.");
+    } finally {
+      setRefundingId(null);
+    }
+  }
+
   const activeCount = requests ? requests.filter((r) => groupForStatus(r.status) === "active").length : 0;
   const paymentDueCount = requests ? requests.filter((r) => r.status === "awaiting_payment").length : 0;
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}>
+    <View style={styles.screen}>
+    <ScrollView style={styles.scrollView} contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}>
       <View style={styles.headerRow}>
         <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
           <Text style={styles.backLinkText}>‹ Back to Home</Text>
@@ -249,25 +357,6 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {requests && requests.length > 0 && (
-        <View style={styles.groupTabRow}>
-          {GROUP_TABS.map((tab) => {
-            const count = requests.filter((r) => groupForStatus(r.status) === tab.key).length;
-            return (
-              <Pressable
-                key={tab.key}
-                style={[styles.groupTab, group === tab.key && styles.groupTabActive]}
-                onPress={() => setGroup(tab.key)}
-              >
-                <Text style={[styles.groupTabText, group === tab.key && styles.groupTabTextActive]}>
-                  {tab.label}{count ? ` (${count})` : ""}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      )}
-
       {!requests ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : requests.length === 0 ? (
@@ -283,7 +372,9 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
               </View>
               <View style={styles.cardHeaderTextCol}>
                 <View style={styles.cardHeaderTitleRow}>
-                  <Text style={styles.cardSubject}>{r.subject}{r.topic ? ` · ${r.topic}` : ""}</Text>
+                  <Text style={styles.cardSubject}>
+                    {r.grade ? `Grade ${r.grade} · ` : ""}{r.subject}{r.topic ? ` · ${r.topic}` : ""}
+                  </Text>
                   <View style={styles.cardStatusRow}>
                     <View style={[styles.cardStatusDot, { backgroundColor: STATUS_COLOR[r.status] }]} />
                     <Text style={[styles.cardStatus, { color: STATUS_COLOR[r.status] }]}>{r.status_label}</Text>
@@ -307,6 +398,10 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
               <Pressable onPress={() => Linking.openURL(r.meet_link!)}>
                 <Text style={styles.meetLink}>🎥 Join via Google Meet</Text>
               </Pressable>
+            ) : r.status === "awaiting_payment" ? (
+              <Text style={styles.cardMeta}>
+                The Google Meet link will be created once your payment is confirmed.
+              </Text>
             ) : null}
 
             {r.status === "time_proposed" && (
@@ -360,6 +455,36 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
                     <ActivityIndicator color={colors.error} />
                   ) : (
                     <Text style={styles.dangerButtonText}>Withdraw</Text>
+                  )}
+                </Pressable>
+              </View>
+            )}
+
+            {r.status === "tutor_cancelled" && (
+              <View style={styles.tutorCancelledBox}>
+                <Text style={styles.confirmLabel}>
+                  Your tutor cancelled this session - you've already paid for it. What would you like to do?
+                </Text>
+                <Pressable
+                  style={styles.confirmButton}
+                  onPress={() => handleReallocate(r.id)}
+                  disabled={reallocatingId === r.id || refundingId === r.id}
+                >
+                  {reallocatingId === r.id ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>Find Another Tutor</Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  style={styles.dangerLinkButton}
+                  onPress={() => confirmRequestRefund(r.id)}
+                  disabled={reallocatingId === r.id || refundingId === r.id}
+                >
+                  {refundingId === r.id ? (
+                    <ActivityIndicator color={colors.error} />
+                  ) : (
+                    <Text style={styles.dangerButtonText}>Request a Refund Instead</Text>
                   )}
                 </Pressable>
               </View>
@@ -422,6 +547,13 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
                 Cancelled by {r.cancelled_by ?? "—"}{r.cancellation_reason ? `: ${r.cancellation_reason}` : "."}
               </Text>
             )}
+            {r.status === "cancelled" && r.refund_requested_at && (
+              <Text style={styles.cardMeta}>
+                {r.refund_processed_at
+                  ? "✓ Your refund has been processed."
+                  : "Refund requested - Malita is arranging it."}
+              </Text>
+            )}
             {r.status === "lapsed" && (
               <Text style={styles.cardMeta}>
                 This match lapsed because payment wasn't completed in time - submit a new request if you still need a tutor.
@@ -468,10 +600,36 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
         <Text style={styles.newRequestButtonText}>Request Another Tutor</Text>
       </Pressable>
     </ScrollView>
+
+    {requests && requests.length > 0 && (
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        {GROUP_TABS.map((tab) => {
+          const count = requests.filter((r) => groupForStatus(r.status) === tab.key).length;
+          const active = group === tab.key;
+          const tint = active ? colors.primary : "#8a8984";
+          return (
+            <Pressable
+              key={tab.key}
+              style={styles.bottomBarItem}
+              onPress={() => setGroup(tab.key)}
+              accessibilityRole="button"
+              accessibilityLabel={tab.label}
+            >
+              <GroupTabIcon name={tab.key} color={tint} />
+              <Text style={[styles.bottomBarLabel, { color: tint, fontWeight: active ? "700" : "500" }]}>
+                {tab.label}{count ? ` (${count})` : ""}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  scrollView: { flex: 1 },
   container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   backLink: { alignSelf: "flex-start" },
@@ -494,18 +652,16 @@ const styles = StyleSheet.create({
   paymentDueText: { fontSize: 12, fontWeight: "700", color: "#eda100" },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 24 },
-  groupTabRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  groupTab: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+  screen: { flex: 1, backgroundColor: colors.background },
+  bottomBar: {
+    flexDirection: "row",
     backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 10,
   },
-  groupTabActive: { backgroundColor: "#0b0b0b", borderColor: "transparent" },
-  groupTabText: { color: colors.text, fontSize: 13, fontWeight: "600" },
-  groupTabTextActive: { color: "#fff" },
+  bottomBarItem: { flex: 1, alignItems: "center", gap: 4 },
+  bottomBarLabel: { fontSize: 11 },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 16,
@@ -591,6 +747,7 @@ const styles = StyleSheet.create({
   },
   dangerButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
   dangerLinkButton: { marginTop: 12, alignItems: "center" },
+  tutorCancelledBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   cancelSection: { marginTop: 4 },
   cancelBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   helperText: { fontSize: 11, color: colors.textSecondary, marginTop: 6, fontStyle: "italic" },

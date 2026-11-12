@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, View, Text, Pressable, TextInput, StyleSheet, ScrollView, ActivityIndicator, Linking, Image } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
@@ -132,6 +133,63 @@ const SESSION_GROUP_EMPTY_LABEL: Record<SessionGroup, string> = {
   lapsed: "No lapsed sessions.",
 };
 
+// Built from plain Views (no SVG dependency, no emoji) - same icon
+// language as the My Requests screen's bottom tab bar.
+function SectionTabIcon({ name, size = 20, color }: { name: Section; size?: number; color: string }) {
+  const box = { width: size, height: size, alignItems: "center" as const, justifyContent: "center" as const, position: "relative" as const };
+  switch (name) {
+    case "open":
+      return (
+        <View style={box}>
+          <View
+            style={{
+              position: "absolute",
+              bottom: 0,
+              width: size * 0.82,
+              height: size * 0.56,
+              borderWidth: 1.6,
+              borderColor: color,
+              borderRadius: 3,
+            }}
+          />
+          <View
+            style={{
+              position: "absolute",
+              top: size * 0.14,
+              width: size * 0.3,
+              height: size * 0.2,
+              borderWidth: 1.6,
+              borderColor: color,
+              borderBottomWidth: 0,
+              borderTopLeftRadius: 4,
+              borderTopRightRadius: 4,
+            }}
+          />
+        </View>
+      );
+    case "sessions":
+      return (
+        <View style={box}>
+          <View style={{ width: size * 0.82, height: size * 0.72, borderWidth: 1.6, borderColor: color, borderRadius: 3 }}>
+            <View style={{ height: size * 0.2, borderBottomWidth: 1.6, borderBottomColor: color }} />
+          </View>
+        </View>
+      );
+    case "payouts":
+      return (
+        <View style={box}>
+          <View style={{ width: size * 0.68, height: size * 0.82, borderWidth: 1.6, borderColor: color, borderRadius: 3, padding: size * 0.12, justifyContent: "space-evenly" }}>
+            <View style={{ height: 1.4, backgroundColor: color }} />
+            <View style={{ height: 1.4, backgroundColor: color }} />
+            <View style={{ height: 1.4, width: "60%", backgroundColor: color }} />
+          </View>
+        </View>
+      );
+    default:
+      return null;
+  }
+}
+
 function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <View style={styles.starRow}>
@@ -146,6 +204,7 @@ function StarPicker({ value, onChange }: { value: number; onChange: (v: number) 
 
 export default function TutorHomeScreen() {
   const { token, me, logout } = useTutorAuth();
+  const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<TutorProfile | null>(null);
   const [payouts, setPayouts] = useState<TutorPayout[] | null>(null);
   const [openRequests, setOpenRequests] = useState<TutoringRequest[] | null>(null);
@@ -325,7 +384,8 @@ export default function TutorHomeScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <View style={styles.screen}>
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.container}>
       <View style={styles.hero}>
         <Image
           source={require("../../assets/hero-student.png")}
@@ -356,24 +416,6 @@ export default function TutorHomeScreen() {
         </View>
       ) : (
         <>
-          <View style={styles.sectionRow}>
-            {([
-              { key: "open", label: "Jobs" },
-              { key: "sessions", label: "My Sessions" },
-              { key: "payouts", label: "My Payouts" },
-            ] as { key: Section; label: string }[]).map((s) => (
-              <Pressable
-                key={s.key}
-                style={[styles.sectionChip, section === s.key && styles.sectionChipActive]}
-                onPress={() => setSection(s.key)}
-              >
-                <Text style={[styles.sectionChipText, section === s.key && styles.sectionChipTextActive]}>
-                  {s.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
           {section === "open" ? (
             !openRequests ? (
               <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
@@ -453,8 +495,10 @@ export default function TutorHomeScreen() {
                           >
                             <View style={styles.jobCardInfo}>
                               <Text style={styles.jobTitle}>{r.topic || r.custom_module_name || r.subject}</Text>
-                              {(r.duration_minutes || r.scheduled_at) ? (
+                              {(r.grade || r.duration_minutes || r.scheduled_at) ? (
                                 <Text style={styles.jobMetaText}>
+                                  {r.grade ? `Grade ${r.grade}` : ""}
+                                  {r.grade && (r.duration_minutes || r.scheduled_at) ? " · " : ""}
                                   {r.duration_minutes ? `${r.duration_minutes} min` : ""}
                                   {r.duration_minutes && r.scheduled_at ? " · " : ""}
                                   {r.scheduled_at ? formatScheduledShort(r.scheduled_at) : ""}
@@ -538,8 +582,38 @@ export default function TutorHomeScreen() {
               <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
             ) : profile.sessions.length === 0 ? (
               <Text style={styles.empty}>No sessions yet - accept an open request to get started.</Text>
-            ) : (
+            ) : (() => {
+              const lostSessions = profile.sessions.filter((s) => {
+                const g = groupForStatus(s.status);
+                return g === "cancelled" || g === "lapsed";
+              });
+              const lostRaw = lostSessions.reduce((sum, s) => sum + (s.price_zar ?? 0), 0);
+              const lostAfterCut = lostSessions.reduce(
+                (sum, s) => sum + (s.price_zar ?? 0) * (1 - (s.platform_cut_percent ?? openCutPercent) / 100),
+                0
+              );
+              return (
               <>
+                {lostSessions.length > 0 ? (
+                  <View style={styles.statCard}>
+                    <View style={styles.statCardRow}>
+                      <View>
+                        <Text style={styles.statLabel}>Lost to cancels & lapses</Text>
+                        <Text style={styles.statValue}>
+                          {lostSessions.length} session{lostSessions.length === 1 ? "" : "s"}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={styles.statLabel}>Payout you missed</Text>
+                        <Text style={styles.statValueLost}>R{lostAfterCut.toFixed(0)}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.statCardFooterRow}>
+                      <Text style={styles.statFooterText}>R{lostRaw.toFixed(0)} total before Malita's fee</Text>
+                      <Text style={styles.statFooterText}>confirm early to avoid lapses</Text>
+                    </View>
+                  </View>
+                ) : null}
                 <View style={styles.sectionRow}>
                   {SESSION_GROUP_TABS.map((tab) => {
                     const count = profile.sessions.filter((s) => groupForStatus(s.status) === tab.key).length;
@@ -597,6 +671,10 @@ export default function TutorHomeScreen() {
                     <Pressable onPress={() => Linking.openURL(sess.meet_link!)}>
                       <Text style={styles.meetLink}>🎥 Join via Google Meet</Text>
                     </Pressable>
+                  ) : sess.status === "awaiting_payment" ? (
+                    <Text style={styles.cardMeta}>
+                      The Google Meet link will be created once the learner's payment is confirmed.
+                    </Text>
                   ) : null}
 
                   {(sess.status === "confirmed" || sess.status === "completed") && (
@@ -742,7 +820,8 @@ export default function TutorHomeScreen() {
                     ))
                 )}
               </>
-            )
+              );
+            })()
           ) : !payouts ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
           ) : payouts.length === 0 ? (
@@ -774,12 +853,51 @@ export default function TutorHomeScreen() {
       </Pressable>
       </View>
     </ScrollView>
+
+    {me.status === "approved" && (
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        {([
+          { key: "open", label: "Jobs" },
+          { key: "sessions", label: "Sessions" },
+          { key: "payouts", label: "Payouts" },
+        ] as { key: Section; label: string }[]).map((s) => {
+          const active = section === s.key;
+          const tint = active ? colors.primary : "#8a8984";
+          return (
+            <Pressable
+              key={s.key}
+              style={styles.bottomBarItem}
+              onPress={() => setSection(s.key)}
+              accessibilityRole="button"
+              accessibilityLabel={s.label}
+            >
+              <SectionTabIcon name={s.key} color={tint} />
+              <Text style={[styles.bottomBarLabel, { color: tint, fontWeight: active ? "700" : "500" }]}>
+                {s.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
+  screen: { flex: 1, backgroundColor: colors.background },
+  scrollView: { flex: 1 },
   container: { backgroundColor: colors.background, flexGrow: 1 },
+  bottomBar: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 10,
+  },
+  bottomBarItem: { flex: 1, alignItems: "center", gap: 4 },
+  bottomBarLabel: { fontSize: 11 },
   body: { padding: 20, paddingBottom: 40 },
   hero: { height: 160, position: "relative" },
   heroImage: { width: "100%", height: "100%" },
@@ -830,6 +948,7 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
   statValue: { fontSize: 28, color: "#fff", fontWeight: "800", marginTop: 4 },
   statValuePayout: { fontSize: 22, color: colors.success, fontWeight: "800", marginTop: 4 },
+  statValueLost: { fontSize: 22, color: colors.error, fontWeight: "800", marginTop: 4 },
   statCardFooterRow: {
     flexDirection: "row",
     alignItems: "center",

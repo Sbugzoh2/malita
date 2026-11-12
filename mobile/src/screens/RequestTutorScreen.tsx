@@ -101,6 +101,10 @@ export default function RequestTutorScreen({ navigation, route }: any) {
       (directoryPrefill?.subject as HighSchoolTutoringSubject) ||
       "Mathematics"
   );
+  // High-school requests only - the learner's own CAPS grade, purely
+  // informational for the tutor (see backend/tutoring.py's
+  // _validate_request_fields).
+  const [grade, setGrade] = useState<number | null>(editRequest?.grade ?? null);
 
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [institutionId, setInstitutionId] = useState<number | null>(
@@ -233,6 +237,10 @@ export default function RequestTutorScreen({ navigation, route }: any) {
       setError("Please enter a topic for this session.");
       return;
     }
+    if (!isHigherEd && !grade) {
+      setError("Please select your grade.");
+      return;
+    }
     if (isHigherEd && !institutionId) {
       setError("Please select your institution.");
       return;
@@ -258,6 +266,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
     try {
       const params = {
         subject: isHigherEd ? undefined : subject,
+        grade: isHigherEd ? undefined : grade!,
         module_id: isHigherEd && !useCustomModule ? moduleId! : undefined,
         custom_module_name: isHigherEd && useCustomModule ? customModuleName.trim() : undefined,
         custom_module_year_level: isHigherEd && useCustomModule ? customModuleYearLevel ?? undefined : undefined,
@@ -416,12 +425,20 @@ export default function RequestTutorScreen({ navigation, route }: any) {
             )}
           </>
         ) : (
-          <Dropdown
-            label="Subject"
-            options={HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => ({ label: s, value: s }))}
-            value={subject}
-            onChange={(v) => setSubject(v as HighSchoolTutoringSubject)}
-          />
+          <>
+            <Dropdown
+              label="Subject"
+              options={HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => ({ label: s, value: s }))}
+              value={subject}
+              onChange={(v) => setSubject(v as HighSchoolTutoringSubject)}
+            />
+            <Dropdown
+              label="Grade"
+              options={[10, 11, 12].map((g) => ({ label: `Grade ${g}`, value: String(g) }))}
+              value={grade != null ? String(grade) : null}
+              onChange={(v) => setGrade(parseInt(v, 10))}
+            />
+          </>
         )}
 
         <Text style={styles.label}>What are you willing to pay? (R)</Text>

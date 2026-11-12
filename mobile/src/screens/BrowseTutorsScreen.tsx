@@ -1,13 +1,27 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
 import { colors, HIGH_SCHOOL_TUTORING_SUBJECTS, HighSchoolTutoringSubject } from "../theme";
-import { ApiError, DirectoryTutor, fetchTutorsDirectory } from "../api/client";
+import { ApiError, DirectoryTutor, fetchNotificationsUnreadCount, fetchTutorsDirectory } from "../api/client";
 import Dropdown from "../components/Dropdown";
+import NotificationBell from "../components/NotificationBell";
+
+// Same hash-by-name palette as the other redesigned screens' subject/
+// tutor avatars - a tutor's name has no fixed catalog to hand-map a
+// color from.
+const AVATAR_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+function colorForName(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
 
 export default function BrowseTutorsScreen({ navigation }: any) {
   const { token, me } = useAuth();
+  const insets = useSafeAreaInsets();
+  const [unreadCount, setUnreadCount] = useState(0);
   const isHigherEd = me?.user.account_type === "higher_ed";
   // Rare admin override (see backend/set_cross_segment_access.py) - shows
   // BOTH high-school subject tutors and higher-ed module tutors together,
@@ -35,6 +49,13 @@ export default function BrowseTutorsScreen({ navigation }: any) {
     useCallback(() => {
       load();
     }, [load])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      fetchNotificationsUnreadCount(token).then((res) => setUnreadCount(res.count)).catch(() => {});
+    }, [token])
   );
 
   function requestSubject(tutor: DirectoryTutor, subject: string) {
@@ -69,8 +90,19 @@ export default function BrowseTutorsScreen({ navigation }: any) {
   });
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>🔎 Browse Tutors</Text>
+    <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}>
+      <View style={styles.headerRow}>
+        <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
+          <Text style={styles.backLinkText}>‹ Back to Home</Text>
+        </Pressable>
+        <NotificationBell
+          count={unreadCount}
+          onPress={() => navigation.navigate("Notifications")}
+          color={colors.text}
+          size={22}
+        />
+      </View>
+      <Text style={styles.title}>Browse Tutors</Text>
       <Text style={styles.subtitle}>
         Pick a specific tutor instead of broadcasting a request. Once they accept, it's the exact same
         flow — a Google Meet link is created and you'll be asked to pay before the session is confirmed.
@@ -94,8 +126,15 @@ export default function BrowseTutorsScreen({ navigation }: any) {
       ) : (
         visibleTutors.map((tutor) => (
           <View key={tutor.id} style={styles.card}>
-            <Text style={styles.cardTitle}>{tutor.name}</Text>
-            <Text style={styles.cardMeta}>{tutor.sessions_completed} session(s) completed on Malita</Text>
+            <View style={styles.cardHeaderRow}>
+              <View style={[styles.cardAvatar, { backgroundColor: colorForName(tutor.name) }]}>
+                <Text style={styles.cardAvatarText}>{tutor.name.charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={styles.cardHeaderTextCol}>
+                <Text style={styles.cardTitle}>{tutor.name}</Text>
+                <Text style={styles.cardMeta}>{tutor.sessions_completed} session(s) completed on Malita</Text>
+              </View>
+            </View>
             {tutor.bio ? <Text style={styles.bio}>{tutor.bio}</Text> : null}
             {tutor.availability_note ? (
               <Text style={styles.cardMeta}>Availability: {tutor.availability_note}</Text>
@@ -106,6 +145,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
                 .filter((s) => !subjectFilter || s.subject === subjectFilter)
                 .map((s) => (
                 <View key={s.subject} style={styles.offerRow}>
+                  <View style={[styles.offerDot, { backgroundColor: colorForName(s.subject) }]} />
                   <View style={styles.offerTextCol}>
                     <Text style={styles.offerTitle}>{s.subject}</Text>
                     <Text style={styles.offerMeta}>
@@ -123,6 +163,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
             {showModules &&
               tutor.higher_ed_modules.map((m) => (
                 <View key={m.id} style={styles.offerRow}>
+                  <View style={[styles.offerDot, { backgroundColor: colorForName(m.name) }]} />
                   <View style={styles.offerTextCol}>
                     <Text style={styles.offerTitle}>{m.name} ({m.year_level_label})</Text>
                     <Text style={styles.offerMeta}>
@@ -145,7 +186,10 @@ const styles = StyleSheet.create({
   // Generous bottom padding so the last card sits well clear of the
   // device's own bottom nav bar/gesture area.
   container: { padding: 20, paddingBottom: 56, backgroundColor: colors.background, flexGrow: 1 },
-  title: { fontSize: 24, fontWeight: "700", color: colors.text },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  backLink: { alignSelf: "flex-start" },
+  backLinkText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
+  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginTop: 4 },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4, marginBottom: 14 },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 16 },
@@ -155,7 +199,16 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     marginTop: 12,
+    shadowColor: "#0b0b0b",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
+  cardHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  cardAvatar: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  cardAvatarText: { fontSize: 17, fontWeight: "800", color: "#fff" },
+  cardHeaderTextCol: { flex: 1, minWidth: 0 },
   cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
   cardMeta: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
   bio: { fontSize: 13, color: colors.text, marginTop: 8, lineHeight: 18 },
@@ -166,7 +219,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: 12,
+    gap: 10,
   },
+  offerDot: { width: 8, height: 8, borderRadius: 999, flexShrink: 0 },
   offerTextCol: { flex: 1, paddingRight: 10 },
   offerTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
   offerMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },

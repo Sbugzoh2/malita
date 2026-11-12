@@ -366,11 +366,14 @@ export type TutoringRequest = {
   custom_qualification_name: string | null;
   admin_match_note: string | null;
   is_custom_higher_ed: boolean;
+  // The learner's own CAPS grade (10/11/12) - high-school requests only,
+  // null for a higher-ed one. Informational, not a matching filter.
+  grade: number | null;
   topic: string | null;
   preferred_times_note: string | null;
   status:
     | "requested" | "time_proposed" | "admin_proposed" | "awaiting_payment"
-    | "confirmed" | "completed" | "cancelled" | "lapsed";
+    | "confirmed" | "tutor_cancelled" | "completed" | "cancelled" | "lapsed";
   status_label: string;
   tutor_id: number | null;
   tutor_name: string | null;
@@ -391,6 +394,12 @@ export type TutoringRequest = {
   tutor_rating: number | null;
   cancelled_by: "learner" | "tutor" | "admin" | null;
   cancellation_reason: string | null;
+  // Set once the learner chooses a refund after a tutor cancelled an
+  // already-paid session (status "tutor_cancelled" -> "cancelled");
+  // refund_processed_at is set once an admin has actually arranged it
+  // (no automated PayFast refund - see backend/tutoring.py).
+  refund_requested_at: string | null;
+  refund_processed_at: string | null;
   lapsed_at: string | null;
   recording_link: string | null;
   recording_shared_at: string | null;
@@ -398,6 +407,9 @@ export type TutoringRequest = {
 
 export type TutoringRequestParams = {
   subject?: string;
+  // Required for a high-school request (10/11/12) - ignored for a
+  // higher-ed one.
+  grade?: number;
   price_zar: number;
   scheduled_at: string; // ISO 8601, required, at least 24h ahead
   duration_minutes?: number;
@@ -428,6 +440,7 @@ export type TutoringRequestParams = {
 function tutoringRequestBody(params: TutoringRequestParams) {
   return {
     subject: params.subject ?? "",
+    grade: params.grade,
     price_zar: params.price_zar,
     scheduled_at: params.scheduled_at,
     duration_minutes: params.duration_minutes ?? 60,
@@ -485,6 +498,23 @@ export function cancelTutoringSessionAsTutor(token: string, requestId: number, r
   return request<{ id: number; status: string }>(`/tutor/sessions/${requestId}/cancel`, {
     method: "POST",
     body: { reason },
+    token,
+  });
+}
+
+// The two choices a learner gets after a tutor cancels an already-paid
+// session (status "tutor_cancelled" - see backend/tutoring.py's
+// cancel_accepted_session).
+export function reallocateAfterTutorCancellation(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}/reallocate`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function requestRefundForCancelledSession(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}/request-refund`, {
+    method: "POST",
     token,
   });
 }
@@ -1022,6 +1052,28 @@ export function respondToAdminMatch(token: string, requestId: number, accept: bo
   return request<{ id: number; status: string }>(`/tutor/requests/${requestId}/admin-match/respond`, {
     method: "POST",
     body: { accept },
+    token,
+  });
+}
+
+// Paid sessions a tutor just cancelled (awaiting the learner's
+// re-allocation/refund choice) plus refunds requested but not yet
+// marked processed - see backend/tutoring.py's
+// list_requests_needing_attention.
+export function fetchRequestsNeedingAttention(token: string) {
+  return request<{ requests: TutoringRequest[] }>("/admin/tutoring/requests/needing-attention", { token });
+}
+
+export function suggestRefundAdmin(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/suggest-refund`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function markRefundProcessedAdmin(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/mark-refund-processed`, {
+    method: "POST",
     token,
   });
 }

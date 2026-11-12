@@ -119,7 +119,10 @@ function AppNavigator() {
       <AppStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
       <AppStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
-      <AppStack.Screen name="BrowseTutors" component={BrowseTutorsScreen} options={{ title: "Browse Tutors" }} />
+      {/* Same reasoning as Home: this screen builds its own header (back
+          link, title, notification bell) rather than stacking a second
+          native header bar above it. */}
+      <AppStack.Screen name="BrowseTutors" component={BrowseTutorsScreen} options={{ headerShown: false }} />
       {/* Same reasoning as Home: this screen builds its own header (back
           link, title, notification bell) rather than stacking a second
           native header bar above it. */}

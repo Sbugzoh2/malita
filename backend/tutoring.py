@@ -104,6 +104,7 @@ SESSION_STATUS_LABELS = {
     "pending_admin_approval": "A tutor claimed this — awaiting admin approval",
     "awaiting_payment": "Accepted! Awaiting payment",
     "confirmed": "Paid — confirm once the session happens",
+    "tutor_cancelled": "Tutor cancelled — choose what happens next",
     "completed": "Completed",
     "cancelled": "Cancelled",
     "lapsed": "Lapsed — payment wasn't made in time",
@@ -1593,12 +1594,19 @@ def _validate_request_fields(
     scheduled_at: dt.datetime, duration_minutes: int, module_id: int | None,
     preferred_tutor_id: int | None, exclude_request_id: int | None = None,
     is_custom_higher_ed: bool = False, topic: str = "",
+    institution_id: int | None = None, grade: int | None = None,
 ) -> None:
     """Shared validation for request_tutoring_session (new) and
     edit_tutoring_request (in place) - raises TutoringError on any
     problem, otherwise returns None."""
     if not topic or not topic.strip():
         raise TutoringError("Please enter a topic for this session.")
+    # institution_id is always set for a higher-ed request (catalog or
+    # custom module alike - see TutoringSessionRequest's docstring), so
+    # its absence is what marks this as a high-school request, which is
+    # the only kind that carries a CAPS grade.
+    if institution_id is None and grade not in (10, 11, 12):
+        raise TutoringError("Please select your grade (10, 11 or 12).")
     if price_zar is None or price_zar <= 0:
         raise TutoringError("Please set a price greater than R0 for this session.")
     if not duration_minutes or duration_minutes < MIN_SESSION_DURATION_MINUTES:
@@ -1676,7 +1684,7 @@ def request_tutoring_session(
     module_id: int | None = None, preferred_tutor_id: int | None = None,
     custom_module_name: str | None = None, custom_module_year_level: int | None = None,
     institution_id: int | None = None, qualification_id: int | None = None,
-    custom_qualification_name: str | None = None,
+    custom_qualification_name: str | None = None, grade: int | None = None,
 ) -> dict:
     """A learner asking for a tutor, inDrive-style: the LEARNER sets the
     price, exact date/time, and duration right here, and the request
@@ -1711,6 +1719,7 @@ def request_tutoring_session(
             scheduled_at=scheduled_at, duration_minutes=duration_minutes,
             module_id=module_id, preferred_tutor_id=preferred_tutor_id,
             is_custom_higher_ed=bool(custom_module_name), topic=topic,
+            institution_id=institution_id, grade=grade,
         )
         req = TutoringSessionRequest(
             learner_user_id=learner_user_id,
@@ -1723,6 +1732,7 @@ def request_tutoring_session(
             qualification_id=qualification_id,
             custom_qualification_name=custom_qualification_name.strip() if custom_qualification_name else None,
             preferred_tutor_id=preferred_tutor_id,
+            grade=grade if institution_id is None else None,
             topic=topic.strip() or None,
             preferred_times_note=preferred_times_note.strip() or None,
             price_zar=price_zar,
@@ -1754,6 +1764,7 @@ def edit_tutoring_request(
     preferred_tutor_id: int | None = None, custom_module_name: str | None = None,
     custom_module_year_level: int | None = None, institution_id: int | None = None,
     qualification_id: int | None = None, custom_qualification_name: str | None = None,
+    grade: int | None = None,
 ) -> dict:
     """The learner editing their own request while it's still fully open
     (status=="requested", not yet touched by any tutor) - re-runs the
@@ -1771,6 +1782,7 @@ def edit_tutoring_request(
             scheduled_at=scheduled_at, duration_minutes=duration_minutes,
             module_id=module_id, preferred_tutor_id=preferred_tutor_id,
             exclude_request_id=req.id, is_custom_higher_ed=bool(custom_module_name), topic=topic,
+            institution_id=institution_id, grade=grade,
         )
         req.subject = subject
         req.module_id = module_id
@@ -1781,6 +1793,7 @@ def edit_tutoring_request(
         req.qualification_id = qualification_id
         req.custom_qualification_name = custom_qualification_name.strip() if custom_qualification_name else None
         req.preferred_tutor_id = preferred_tutor_id
+        req.grade = grade if institution_id is None else None
         req.topic = topic.strip() or None
         req.preferred_times_note = preferred_times_note.strip() or None
         req.price_zar = price_zar
@@ -2338,6 +2351,7 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         # qualification themselves were real catalog picks.
         "institution_id": r.institution_id,
         "qualification_id": r.qualification_id,
+        "grade": r.grade,
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
         "status": r.status,
         "status_label": SESSION_STATUS_LABELS.get(r.status, r.status),
@@ -2357,6 +2371,8 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "tutor_rating": r.tutor_rating,
         "cancelled_by": r.cancelled_by,
         "cancellation_reason": r.cancellation_reason,
+        "refund_requested_at": _iso_utc(r.refund_requested_at),
+        "refund_processed_at": _iso_utc(r.refund_processed_at),
         "lapsed_at": _iso_utc(r.lapsed_at),
         "recording_link": r.recording_link,
         "recording_shared_at": _iso_utc(r.recording_shared_at),
@@ -2366,17 +2382,35 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
 def _assign_tutor_to_request(db, req: TutoringSessionRequest, tutor: TutorAccount) -> None:
     """Shared by accept_tutoring_request, respond_to_time_proposal (on
     approval), and match_tutor_to_request (admin override) - moves the
-    request to awaiting_payment, snapshots the platform cut, and
-    best-effort creates a Google Meet session using req.scheduled_at
-    (the caller must already have set this to the agreed time). Caller
+    request to awaiting_payment and snapshots the platform cut. Caller
     has already validated the tutor is eligible; this just does the
-    assignment."""
+    assignment.
+
+    The Google Meet session is deliberately NOT created here for a
+    fresh (unpaid) match - see mark_session_paid, which creates it once
+    the learner has actually paid, so a session that never gets paid
+    for (and lapses) never had a real Meet link sitting unused. The one
+    exception: if req.paid_at is already set, this is a RE-allocation
+    after a previous tutor cancelled an already-paid session (see
+    reallocate_after_tutor_cancellation) - the learner doesn't pay
+    twice, so this skips straight to "confirmed" (leaving the original
+    m_payment_id alone) and creates the Meet link immediately, since
+    there's no future payment event left to create it at."""
     req.tutor_id = tutor.id
     req.platform_cut_percent = DEFAULT_PLATFORM_CUT_PERCENT
-    req.status = "awaiting_payment"
     req.matched_at = dt.datetime.utcnow()
-    req.m_payment_id = f"tutor-session-{req.id}-{uuid.uuid4().hex[:8]}"
+    if req.paid_at is not None:
+        req.status = "confirmed"
+        _create_meet_session_for_request(db, req, tutor)
+    else:
+        req.status = "awaiting_payment"
+        req.m_payment_id = f"tutor-session-{req.id}-{uuid.uuid4().hex[:8]}"
 
+
+def _create_meet_session_for_request(db, req: TutoringSessionRequest, tutor: TutorAccount) -> None:
+    """Best-effort - shared by _assign_tutor_to_request (only for an
+    already-paid re-allocation) and mark_session_paid (the normal path,
+    once the learner's payment actually clears)."""
     learner = db.query(User).get(req.learner_user_id)
     try:
         meet = _google_calendar.create_meet_session(
@@ -2487,7 +2521,7 @@ def accept_tutoring_request(request_id: int, tutor_id: int) -> dict:
             tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
             subject=subject, topic=topic, price_zar=price_zar,
             duration_minutes=duration_minutes, scheduled_at=scheduled_at,
-            meet_link=result["meet_link"],
+            meet_link=result["meet_link"], already_paid=result["status"] == "confirmed",
         )
     return result
 
@@ -2596,7 +2630,7 @@ def respond_to_time_proposal(request_id: int, learner_user_id: int, accept: bool
         tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, price_zar=price_zar,
         duration_minutes=duration_minutes, scheduled_at=scheduled_at,
-        meet_link=result["meet_link"],
+        meet_link=result["meet_link"], already_paid=result["status"] == "confirmed",
     )
     return result
 
@@ -2724,7 +2758,7 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
         tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, price_zar=price_zar,
         duration_minutes=duration_minutes, scheduled_at=final_scheduled_at,
-        meet_link=result["meet_link"],
+        meet_link=result["meet_link"], already_paid=result["status"] == "confirmed",
     )
     _notify_admins_of_proposal_response(tutor_name=tutor_name, subject=subject, topic=topic, accepted=True)
     return result
@@ -2811,7 +2845,7 @@ def respond_to_custom_module_claim(request_id: int, approve: bool) -> dict:
         tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
         subject=subject, topic=topic, price_zar=price_zar,
         duration_minutes=duration_minutes, scheduled_at=final_scheduled_at,
-        meet_link=result["meet_link"],
+        meet_link=result["meet_link"], already_paid=result["status"] == "confirmed",
     )
     return result
 
@@ -2997,15 +3031,26 @@ def _notify_match(
     *, learner_id: int, learner_name: str, learner_email: str,
     tutor_id: int, tutor_name: str, tutor_email: str,
     subject: str, topic: str | None, price_zar: float, duration_minutes: int,
-    scheduled_at: dt.datetime | None, meet_link: str | None = None,
+    scheduled_at: dt.datetime | None, meet_link: str | None = None, already_paid: bool = False,
 ) -> None:
     """Best-effort, same pattern as _notify_tutor_of_decision - a failed
     or unconfigured email send must never break the match/accept action
-    itself."""
+    itself. already_paid is set when this match is a re-allocation after
+    a previous tutor cancelled an already-paid session (see
+    _assign_tutor_to_request) - the learner doesn't need to be told to
+    pay again."""
     try:
         topic_str = f" ({topic})" if topic else ""
         when_str = _format_sast(scheduled_at)
-        meet_line = f"\nGoogle Meet: {meet_link}\n" if meet_link else ""
+        meet_line = (
+            f"\nGoogle Meet: {meet_link}\n" if meet_link else
+            "\nGoogle Meet link: created once payment is confirmed.\n"
+        )
+        learner_action_line = (
+            "This session is already paid for - no action needed."
+            if already_paid else
+            "Open the Malita app and pay to confirm the session."
+        )
         send_email(
             learner_email,
             "You've been matched with a tutor!",
@@ -3016,7 +3061,7 @@ def _notify_match(
                 f"Price: R{price_zar:.2f} ({duration_minutes} min)\n"
                 f"Scheduled: {when_str}\n"
                 f"{meet_line}\n"
-                "Open the Malita app and pay to confirm the session.\n\n"
+                f"{learner_action_line}\n\n"
                 "— The Malita team"
             ),
         )
@@ -3037,7 +3082,11 @@ def _notify_match(
         )
         create_notification(
             recipient_kind="user", recipient_id=learner_id, title="You've been matched with a tutor!",
-            body=f"{tutor_name} - {subject}{topic_str} - pay in the app to confirm the session.",
+            body=(
+                f"{tutor_name} - {subject}{topic_str} - already paid, no action needed."
+                if already_paid else
+                f"{tutor_name} - {subject}{topic_str} - pay in the app to confirm the session."
+            ),
         )
         create_notification(
             recipient_kind="tutor", recipient_id=tutor_id, title="You've been matched to a new session",
@@ -3055,7 +3104,13 @@ def mark_session_paid(m_payment_id: str) -> dict:
     row is NOT created here anymore (see _maybe_finalize_session): it's
     only created once BOTH the learner and the tutor have confirmed the
     session actually happened, so a no-show can't collect a payout just
-    because payment cleared."""
+    because payment cleared.
+
+    This is also where the Google Meet session gets created (see
+    _assign_tutor_to_request's docstring) - not at match time - so both
+    sides are told up front that the link only exists once payment
+    clears, instead of a link existing for a session that might never
+    get paid for and lapses."""
     with get_session() as db:
         req = db.query(TutoringSessionRequest).filter(
             TutoringSessionRequest.m_payment_id == m_payment_id
@@ -3073,7 +3128,55 @@ def mark_session_paid(m_payment_id: str) -> dict:
 
         req.status = "confirmed"
         req.paid_at = dt.datetime.utcnow()
-        return {"id": req.id, "status": req.status}
+
+        tutor = db.query(TutorAccount).get(req.tutor_id) if req.tutor_id else None
+        if tutor and not req.meet_link:
+            _create_meet_session_for_request(db, req, tutor)
+
+        result = {"id": req.id, "status": req.status}
+        should_notify = tutor is not None and req.meet_link is not None
+        if should_notify:
+            learner = db.query(User).get(req.learner_user_id)
+            learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+            tutor_id, tutor_name, tutor_email = tutor.id, tutor.name, tutor.email
+            subject, topic, scheduled_at, meet_link = req.subject, req.topic, req.scheduled_at, req.meet_link
+
+    if should_notify:
+        _notify_meet_link_ready(
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
+            subject=subject, topic=topic, scheduled_at=scheduled_at, meet_link=meet_link,
+        )
+    return result
+
+
+def _notify_meet_link_ready(
+    *, learner_id: int, learner_name: str, learner_email: str,
+    tutor_id: int, tutor_name: str, tutor_email: str,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None, meet_link: str,
+) -> None:
+    """Best-effort - tells both sides their Google Meet link is ready
+    now that payment has cleared (see mark_session_paid)."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        body = (
+            f"{subject}{topic_str} session scheduled for {when_str}.\n\n"
+            f"Google Meet: {meet_link}\n\n"
+            "— The Malita team"
+        )
+        send_email(learner_email, "Payment confirmed - your Google Meet link is ready", f"Hi {learner_name},\n\n{body}")
+        send_email(tutor_email, "Payment confirmed - your Google Meet link is ready", f"Hi {tutor_name},\n\n{body}")
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Your Google Meet link is ready",
+            body=f"{subject}{topic_str} - payment confirmed, join via the link in the app.",
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="Your Google Meet link is ready",
+            body=f"{subject}{topic_str} - payment confirmed, join via the link in the app.",
+        )
+    except Exception:
+        logger.exception("Failed to notify learner/tutor that their Meet link is ready")
 
 
 def _create_payout_row(db, req: TutoringSessionRequest) -> None:
@@ -3245,10 +3348,10 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
     above) rather than silently leaving the other side stranded. Use
     withdraw_tutoring_request instead for a request a tutor hasn't fully
     accepted yet (no time restriction, since nothing is committed yet).
-    Notifies BOTH sides - a cancelled PAID session's refund is handled
-    manually by an admin (no PayFast refund automation in v1, same
-    "deliberately manual" spirit as payouts), flagged in the learner's
-    notification.
+    Notifies BOTH sides. A tutor cancelling an already-PAID session
+    doesn't dead-end it like a learner's own cancellation does - see
+    reallocate_after_tutor_cancellation/request_refund_for_cancelled_
+    session, which the learner chooses between afterwards.
 
     `by` is "learner" or "tutor" - `person_id` must match whichever side
     is cancelling (the learner's user id or the tutor's tutor_id)."""
@@ -3272,12 +3375,18 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
                 "contact support to cancel it."
             )
         was_paid = req.status == "confirmed"
-
-        req.status = "cancelled"
-        req.cancelled_at = dt.datetime.utcnow()
-        req.cancelled_by = by
-        req.cancellation_reason = reason.strip() or None
-        result = {"id": req.id, "status": req.status}
+        # A tutor backing out before the learner has even paid leaves no
+        # money to refund - reopen the request (same as if it had never
+        # been matched) so any approved tutor can pick it up again,
+        # instead of dead-ending it and forcing the learner to submit a
+        # brand-new request from scratch. A tutor backing out of an
+        # already-PAID session is trickier (real money is involved), so
+        # it parks at "tutor_cancelled" for the LEARNER to choose between
+        # re-allocation or a refund, rather than deciding for them. Only
+        # the learner's own cancellation still dead-ends straight into
+        # "cancelled" here.
+        reopen_for_other_tutors = by == "tutor" and not was_paid
+        parks_for_learner_choice = by == "tutor" and was_paid
 
         learner = db.query(User).get(req.learner_user_id)
         tutor = db.query(TutorAccount).get(req.tutor_id)
@@ -3285,12 +3394,53 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
         tutor_id, tutor_name, tutor_email = tutor.id, tutor.name, tutor.email
         subject, topic, scheduled_at = req.subject, req.topic, req.scheduled_at
 
-    _notify_session_cancelled(
-        learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
-        tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
-        subject=subject, topic=topic, scheduled_at=scheduled_at,
-        cancelled_by=by, reason=reason, was_paid=was_paid,
-    )
+        if reopen_for_other_tutors:
+            req.status = "requested"
+            req.tutor_id = None
+            req.platform_cut_percent = None
+            req.matched_at = None
+            req.meet_link = None
+            # Broadcast to every eligible tutor again, not just directed
+            # back at the one who just backed out.
+            req.preferred_tutor_id = None
+        elif parks_for_learner_choice:
+            req.status = "tutor_cancelled"
+            req.tutor_id = None
+            req.matched_at = None
+            req.meet_link = None
+            req.preferred_tutor_id = None
+            # Recorded now (not only if the learner later picks refund) so
+            # the reason survives regardless of which way they decide -
+            # cleared again in reallocate_after_tutor_cancellation if they
+            # pick re-allocation instead, since it's then no longer
+            # heading toward "cancelled" at all.
+            req.cancelled_by = by
+            req.cancellation_reason = reason.strip() or None
+        else:
+            req.status = "cancelled"
+            req.cancelled_at = dt.datetime.utcnow()
+            req.cancelled_by = by
+            req.cancellation_reason = reason.strip() or None
+        result = {"id": req.id, "status": req.status}
+
+    if reopen_for_other_tutors:
+        _notify_request_reopened_after_tutor_cancel(
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_name=tutor_name, subject=subject, topic=topic, scheduled_at=scheduled_at, reason=reason,
+        )
+    elif parks_for_learner_choice:
+        _notify_paid_session_tutor_cancelled(
+            request_id=request_id,
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_name=tutor_name, subject=subject, topic=topic, scheduled_at=scheduled_at, reason=reason,
+        )
+    else:
+        _notify_session_cancelled(
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
+            subject=subject, topic=topic, scheduled_at=scheduled_at,
+            cancelled_by=by, reason=reason, was_paid=was_paid,
+        )
     return result
 
 
@@ -3343,6 +3493,266 @@ def _notify_session_cancelled(
         )
     except Exception:
         logger.exception("Failed to notify learner/tutor of a cancelled session")
+
+
+def _notify_request_reopened_after_tutor_cancel(
+    *, learner_id: int, learner_name: str, learner_email: str, tutor_name: str,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None, reason: str,
+) -> None:
+    """Best-effort - tells the LEARNER their tutor backed out and the
+    request is open again for another tutor to accept, rather than the
+    "your session was cancelled" wording used for a real dead-end
+    cancellation. The tutor who backed out isn't notified here - they
+    already know, since they're the one who did it."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        reason_str = f"\n\nReason given: {reason.strip()}" if reason.strip() else ""
+        send_email(
+            learner_email,
+            "Your tutor cancelled - your request is open again",
+            (
+                f"Hi {learner_name},\n\n"
+                f"{tutor_name} cancelled your {subject}{topic_str} session scheduled for "
+                f"{when_str}.{reason_str}\n\n"
+                "No need to submit a new request - it's open again for any other qualifying "
+                "tutor to accept.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Your tutor cancelled - request reopened",
+            body=(
+                f"{tutor_name} cancelled your {subject}{topic_str} session scheduled for {when_str}. "
+                "It's open again for another tutor to accept."
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to notify learner that their request reopened after a tutor cancellation")
+
+
+def _notify_paid_session_tutor_cancelled(
+    *, request_id: int, learner_id: int, learner_name: str, learner_email: str, tutor_name: str,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None, reason: str,
+) -> None:
+    """Best-effort - tells the LEARNER their tutor cancelled an
+    already-paid session and they need to choose between re-allocation
+    and a refund (see reallocate_after_tutor_cancellation/
+    request_refund_for_cancelled_session), and tells every admin the
+    same, since real money is on the line and nobody reviews the admin
+    console on a fixed schedule."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        reason_str = f"\n\nReason given: {reason.strip()}" if reason.strip() else ""
+        send_email(
+            learner_email,
+            "Your tutor cancelled - choose what happens next",
+            (
+                f"Hi {learner_name},\n\n"
+                f"{tutor_name} cancelled your {subject}{topic_str} session scheduled for "
+                f"{when_str}, which you've already paid for.{reason_str}\n\n"
+                "Open the Malita app to choose: we can find you another tutor for the same "
+                "price and time, or arrange a refund - whichever you'd prefer.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Your tutor cancelled - choose what happens next",
+            body=(
+                f"{tutor_name} cancelled your {subject}{topic_str} session scheduled for {when_str}. "
+                "Choose: find another tutor, or request a refund."
+            ),
+        )
+        with get_session() as db:
+            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        admin_body = (
+            f"{tutor_name} cancelled an already-paid session (request #{request_id} - "
+            f"{subject}{topic_str}, scheduled {when_str}) for learner {learner_name}.{reason_str}\n\n"
+            "The learner has been asked to choose between re-allocation and a refund - open the "
+            "admin console's Tutoring tab to track it, suggest a refund, or step in directly.\n"
+        )
+        for admin_id, email in admins:
+            send_email(email, f"Paid session cancelled by tutor: {subject}{topic_str}", admin_body)
+            create_notification(
+                recipient_kind="user", recipient_id=admin_id, title="Paid session cancelled by tutor",
+                body=f"Request #{request_id} - {subject}{topic_str} for {learner_name}, awaiting their choice.",
+            )
+    except Exception:
+        logger.exception("Failed to notify learner/admins of request %s's paid-session tutor cancellation", request_id)
+
+
+def reallocate_after_tutor_cancellation(request_id: int, learner_user_id: int) -> dict:
+    """The learner choosing re-allocation after a tutor cancelled their
+    already-paid session (status "tutor_cancelled" - see
+    cancel_accepted_session) - reopens the request for any eligible
+    tutor to accept, same as a brand-new broadcast request, except
+    paid_at stays set so _assign_tutor_to_request skips straight to
+    "confirmed" instead of "awaiting_payment" once a new tutor
+    accepts - the learner doesn't pay twice."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.learner_user_id != learner_user_id:
+            raise TutoringError("Request not found.")
+        if req.status != "tutor_cancelled":
+            raise TutoringError(f"This request is '{req.status}', not awaiting a re-allocation/refund choice.")
+        req.status = "requested"
+        req.cancelled_by = None
+        req.cancellation_reason = None
+        return {"id": req.id, "status": req.status}
+
+
+def request_refund_for_cancelled_session(request_id: int, learner_user_id: int) -> dict:
+    """The learner choosing a refund instead of re-allocation after a
+    tutor cancelled their already-paid session (status
+    "tutor_cancelled" - see cancel_accepted_session) - ends the request
+    as "cancelled" and flags refund_requested_at for an admin to action
+    (see mark_refund_processed; no automated PayFast refund in v1)."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.learner_user_id != learner_user_id:
+            raise TutoringError("Request not found.")
+        if req.status != "tutor_cancelled":
+            raise TutoringError(f"This request is '{req.status}', not awaiting a re-allocation/refund choice.")
+        req.status = "cancelled"
+        req.cancelled_at = dt.datetime.utcnow()
+        req.refund_requested_at = dt.datetime.utcnow()
+        result = {"id": req.id, "status": req.status}
+        price_zar, subject, topic = req.price_zar, req.subject, req.topic
+
+    _notify_admins_of_refund_request(request_id=request_id, price_zar=price_zar, subject=subject, topic=topic)
+    return result
+
+
+def _notify_admins_of_refund_request(
+    *, request_id: int, price_zar: float | None, subject: str, topic: str | None,
+) -> None:
+    """Best-effort email to every admin - same "nobody checks the
+    console on a schedule" reasoning as _notify_admins_of_custom_claim."""
+    try:
+        with get_session() as db:
+            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admins:
+            return
+        topic_str = f" ({topic})" if topic else ""
+        price_str = f"R{price_zar:.2f}" if price_zar is not None else "an unknown amount"
+        body = (
+            f"The learner on request #{request_id} - {subject}{topic_str} - chose a refund "
+            f"({price_str}) after their tutor cancelled the paid session.\n\n"
+            "Open the admin console's Tutoring tab to arrange the refund and mark it processed.\n"
+        )
+        for admin_id, email in admins:
+            send_email(email, f"Refund requested: {subject}{topic_str}", body)
+            create_notification(
+                recipient_kind="user", recipient_id=admin_id, title="Refund requested",
+                body=f"Request #{request_id} - {subject}{topic_str}, {price_str}.",
+            )
+    except Exception:
+        logger.exception("Failed to notify admins of request %s's refund request", request_id)
+
+
+def admin_suggest_refund(request_id: int) -> dict:
+    """Admin nudging the learner toward a refund instead of waiting on
+    re-allocation (status "tutor_cancelled") - just a notification, not
+    a decision made for them; the learner still has to click their own
+    Request Refund button (see request_refund_for_cancelled_session) to
+    actually act on it."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Request not found.")
+        if req.status != "tutor_cancelled":
+            raise TutoringError(f"This request is '{req.status}', not awaiting a re-allocation/refund choice.")
+        learner = db.query(User).get(req.learner_user_id)
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+        subject, topic, price_zar = req.subject, req.topic, req.price_zar
+
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        price_str = f"R{price_zar:.2f}" if price_zar is not None else ""
+        send_email(
+            learner_email,
+            "Malita suggests a refund for your cancelled session",
+            (
+                f"Hi {learner_name},\n\n"
+                f"We noticed your {subject}{topic_str} session hasn't been re-allocated yet. "
+                f"If you'd rather not wait, you can request a refund ({price_str}) in the app "
+                "instead of continuing to look for another tutor.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Malita suggests a refund",
+            body=f"We suggest a refund for your {subject}{topic_str} session - your choice either way.",
+        )
+    except Exception:
+        logger.exception("Failed to notify learner of request %s's suggested refund", request_id)
+    return {"id": request_id, "status": "tutor_cancelled"}
+
+
+def mark_refund_processed(request_id: int) -> dict:
+    """Admin confirming they've actually arranged the refund outside the
+    app (bank transfer/PayFast console) - clears it from the admin
+    console's pending-refunds list. No automated payment-gateway refund
+    in v1, same deliberately-manual spirit as payouts."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Request not found.")
+        if req.refund_requested_at is None:
+            raise TutoringError("No refund was requested for this request.")
+        if req.refund_processed_at is not None:
+            raise TutoringError("This refund has already been marked processed.")
+        req.refund_processed_at = dt.datetime.utcnow()
+        learner = db.query(User).get(req.learner_user_id)
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+        subject, topic, price_zar = req.subject, req.topic, req.price_zar
+        result = {"id": req.id, "status": req.status}
+
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        price_str = f"R{price_zar:.2f}" if price_zar is not None else ""
+        send_email(
+            learner_email,
+            "Your refund has been processed",
+            (
+                f"Hi {learner_name},\n\n"
+                f"Your refund ({price_str}) for the {subject}{topic_str} session has been processed.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Your refund has been processed",
+            body=f"Your refund ({price_str}) for {subject}{topic_str} has been processed.",
+        )
+    except Exception:
+        logger.exception("Failed to notify learner that request %s's refund was processed", request_id)
+    return result
+
+
+def list_requests_needing_attention() -> list[dict]:
+    """Admin console feed: paid sessions a tutor just cancelled (status
+    "tutor_cancelled", awaiting the learner's re-allocation/refund
+    choice) plus refunds the learner has requested but no admin has yet
+    marked processed - the two situations real money is sitting in
+    limbo on, which is exactly what nobody reviewing the console on a
+    fixed schedule would otherwise notice."""
+    with get_session() as db:
+        reqs = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                sa.or_(
+                    TutoringSessionRequest.status == "tutor_cancelled",
+                    sa.and_(
+                        TutoringSessionRequest.refund_requested_at.isnot(None),
+                        TutoringSessionRequest.refund_processed_at.is_(None),
+                    ),
+                )
+            )
+            .order_by(TutoringSessionRequest.created_at.asc())
+            .all()
+        )
+        return [_serialize_request(r) for r in reqs]
 
 
 def complete_session(request_id: int) -> None:

@@ -674,6 +674,19 @@ class TutoringSessionRequest(Base):
     # "Other" (institution stays a required catalog pick either way).
     custom_qualification_name = Column(String(200), nullable=True)
     is_custom_higher_ed = Column(Boolean, default=False, nullable=False)
+    # The learner's own CAPS grade (10/11/12) - high-school requests only
+    # (NULL for a higher-ed request). Informational for the tutor, not a
+    # matching/eligibility filter - any approved tutor for the subject can
+    # still accept regardless of the grade.
+    grade = Column(Integer, nullable=True)
+    # Set when the LEARNER, after a tutor cancelled an already-paid
+    # session (status "tutor_cancelled" -> "cancelled"), chooses a refund
+    # over re-allocation - see backend/tutoring.py's
+    # request_refund_for_cancelled_session. Cleared value means no refund
+    # is owed; refund_processed_at records when an admin has actually
+    # arranged it (no automated PayFast refund in v1).
+    refund_requested_at = Column(DateTime, nullable=True)
+    refund_processed_at = Column(DateTime, nullable=True)
     topic = Column(String(60), nullable=True)
     # Free-text extra context (e.g. "need help with proofs specifically")
     # - NOT where the learner's actual time goes anymore, that's the
@@ -949,6 +962,9 @@ def init_db():
     _ensure_column("tutoring_session_requests", "custom_module_year_level", "INTEGER")
     _ensure_column("tutoring_session_requests", "custom_qualification_name", "VARCHAR(200)")
     _ensure_column("tutoring_session_requests", "is_custom_higher_ed", "BOOLEAN DEFAULT FALSE")
+    _ensure_column("tutoring_session_requests", "grade", "INTEGER")
+    _ensure_column("tutoring_session_requests", "refund_requested_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "refund_processed_at", "TIMESTAMP")
     _ensure_column("users", "account_type", "VARCHAR(20) DEFAULT 'high_school'")
     _ensure_column("users", "higher_ed_institution_id", "INTEGER")
     _ensure_column("users", "higher_ed_qualification_id", "INTEGER")

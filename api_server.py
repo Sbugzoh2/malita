@@ -90,6 +90,8 @@ from backend.tutoring import (
     edit_tutoring_request, withdraw_tutoring_request, cancel_accepted_session,
     send_due_reminders, submit_session_recording,
     list_notifications, count_unread_notifications, mark_notification_read, mark_all_notifications_read,
+    reallocate_after_tutor_cancellation, request_refund_for_cancelled_session,
+    admin_suggest_refund, mark_refund_processed, list_requests_needing_attention,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -299,6 +301,10 @@ class TutoringRequestRequest(BaseModel):
     # (the module's own name is used instead) for a higher-ed request -
     # see module_id below.
     subject: str = ""
+    # Required for a high-school request (10/11/12) - the learner's own
+    # CAPS grade, purely informational for the tutor, not a matching
+    # filter. Ignored for a higher-ed request.
+    grade: int | None = None
     price_zar: float
     scheduled_at: str  # ISO 8601, required - not optional, see request_tutoring_session
     duration_minutes: int = 60
@@ -1584,6 +1590,7 @@ def tutoring_create_request(payload: TutoringRequestRequest, authorization: str 
             custom_module_year_level=payload.custom_module_year_level,
             institution_id=payload.institution_id, qualification_id=payload.qualification_id,
             custom_qualification_name=payload.custom_qualification_name or None,
+            grade=payload.grade,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1610,6 +1617,7 @@ def tutoring_edit_request(request_id: int, payload: TutoringRequestRequest, auth
             custom_module_year_level=payload.custom_module_year_level,
             institution_id=payload.institution_id, qualification_id=payload.qualification_id,
             custom_qualification_name=payload.custom_qualification_name or None,
+            grade=payload.grade,
         )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1636,6 +1644,28 @@ def tutoring_cancel_accepted_session(
     user = _auth_user(authorization)
     try:
         return cancel_accepted_session(request_id, by="learner", person_id=user["id"], reason=payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/reallocate")
+def tutoring_reallocate_request(request_id: int, authorization: str = Header(None)):
+    """The learner choosing re-allocation after a tutor cancelled their
+    already-paid session (see reallocate_after_tutor_cancellation)."""
+    user = _auth_user(authorization)
+    try:
+        return reallocate_after_tutor_cancellation(request_id, user["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/request-refund")
+def tutoring_request_refund(request_id: int, authorization: str = Header(None)):
+    """The learner choosing a refund after a tutor cancelled their
+    already-paid session (see request_refund_for_cancelled_session)."""
+    user = _auth_user(authorization)
+    try:
+        return request_refund_for_cancelled_session(request_id, user["id"])
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1992,6 +2022,44 @@ def admin_tutoring_complete(request_id: int, authorization: str = Header(None)):
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "completed"}
+
+
+@app.get("/admin/tutoring/requests/needing-attention")
+def admin_tutoring_requests_needing_attention(authorization: str = Header(None)):
+    """Paid sessions a tutor just cancelled (awaiting the learner's
+    re-allocation/refund choice) plus refunds the learner has requested
+    but nobody's marked processed yet - see list_requests_needing_attention."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"requests": list_requests_needing_attention()}
+
+
+@app.post("/admin/tutoring/requests/{request_id}/suggest-refund")
+def admin_tutoring_suggest_refund(request_id: int, authorization: str = Header(None)):
+    """Admin nudging the learner toward a refund instead of waiting on
+    re-allocation (see admin_suggest_refund) - just a notification, the
+    learner still has to request it themselves."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return admin_suggest_refund(request_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/tutoring/requests/{request_id}/mark-refund-processed")
+def admin_tutoring_mark_refund_processed(request_id: int, authorization: str = Header(None)):
+    """Admin confirming a refund has actually been arranged outside the
+    app (see mark_refund_processed)."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return mark_refund_processed(request_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/admin/tutoring/payouts")

@@ -68,6 +68,7 @@ from backend.tutoring import (
     approve_tutor_higher_ed, reject_tutor_higher_ed, list_learner_requests,
     list_pending_custom_claims, respond_to_custom_module_claim,
     list_notifications, count_unread_notifications, mark_all_notifications_read,
+    list_requests_needing_attention, admin_suggest_refund, mark_refund_processed,
 )
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -2025,11 +2026,11 @@ elif mode == "🛠️ Tutoring Admin":
 
         (
             tab_apps, tab_higher_ed_apps, tab_catalog, tab_match, tab_claims,
-            tab_sessions, tab_tutors, tab_payouts,
+            tab_attention, tab_sessions, tab_tutors, tab_payouts,
         ) = st.tabs(
             [
                 "Tutor Applications", "Higher-Ed Applications", "Higher-Ed Catalog",
-                "Match Requests", "Pending Claims", "All Sessions", "Tutors", "Payouts",
+                "Match Requests", "Pending Claims", "Needs Attention", "All Sessions", "Tutors", "Payouts",
             ]
         )
 
@@ -2405,6 +2406,47 @@ elif mode == "🛠️ Tutoring Admin":
                             try:
                                 respond_to_custom_module_claim(r["id"], approve=False)
                                 st.success("Rejected - reopened for another tutor.")
+                                st.rerun()
+                            except TutoringError as e:
+                                st.error(str(e))
+
+        # ---- Paid sessions a tutor just cancelled, plus refunds the
+        # learner has requested but nobody's marked processed yet - the
+        # two situations real money is sitting in limbo on (see
+        # backend/tutoring.py's list_requests_needing_attention). ----
+        with tab_attention:
+            attention_items = list_requests_needing_attention()
+            st.caption(f"{len(attention_items)} item(s) needing attention.")
+            for r in attention_items:
+                topic_str = f" ({r['topic']})" if r["topic"] else ""
+                if r["status"] == "tutor_cancelled":
+                    label = f"#{r['id']} — {r['subject']}{topic_str} — awaiting the learner's choice"
+                else:
+                    label = f"#{r['id']} — {r['subject']}{topic_str} — refund requested"
+                with st.expander(label):
+                    if r["scheduled_at"]:
+                        st.write(f"**Originally scheduled:** {to_sast_str(r['scheduled_at'])}")
+                    if r["price_zar"] is not None:
+                        st.write(f"**Price:** R{r['price_zar']:.2f} ({r['duration_minutes']} min)")
+                    if r.get("cancellation_reason"):
+                        st.write(f"**Tutor's reason:** {r['cancellation_reason']}")
+                    if r["status"] == "tutor_cancelled":
+                        st.write(
+                            "The learner has already paid and hasn't chosen yet between re-allocation "
+                            "(it's open to any eligible tutor to accept) and a refund."
+                        )
+                        if st.button("Suggest a refund to the learner", key=f"suggest_refund_{r['id']}"):
+                            try:
+                                admin_suggest_refund(r["id"])
+                                st.success("The learner has been notified.")
+                            except TutoringError as e:
+                                st.error(str(e))
+                    elif r.get("refund_requested_at") and not r.get("refund_processed_at"):
+                        st.write("The learner chose a refund - arrange it, then mark it processed below.")
+                        if st.button("Mark refund processed", key=f"mark_refund_{r['id']}"):
+                            try:
+                                mark_refund_processed(r["id"])
+                                st.success("Marked processed - the learner has been notified.")
                                 st.rerun()
                             except TutoringError as e:
                                 st.error(str(e))

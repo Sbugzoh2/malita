@@ -2352,6 +2352,8 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         # qualification themselves were real catalog picks.
         "institution_id": r.institution_id,
         "qualification_id": r.qualification_id,
+        "module_year_level": r.module.year_level if r.module else None,
+        "learner_name": r.learner.name if r.learner else None,
         "grade": r.grade,
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
         "status": r.status,

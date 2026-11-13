@@ -354,6 +354,13 @@ export type TutoringRequest = {
   // cascade without an extra lookup.
   qualification_id: number | null;
   institution_id: number | null;
+  // Set only for a real catalog module (module_id above) - YEAR_LEVEL_LABELS
+  // maps it to a display label the same way custom_module_year_level
+  // already is. Null for a high-school request or a custom ("Other") module.
+  module_year_level: number | null;
+  // The learner's name - shown to a tutor deciding whether to accept an
+  // open request, same as tutor_name/preferred_tutor_name already are.
+  learner_name: string | null;
   // Set when the learner picked "Other" for their qualification/module -
   // module_id is null in that case (no catalog Module row exists), so this
   // holds the free-text name instead and is_custom_higher_ed flags it as

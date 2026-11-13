@@ -18,6 +18,7 @@ import {
   respondToAdminMatch,
   cancelTutoringSessionAsTutor,
   submitSessionRecording,
+  YEAR_LEVEL_LABELS,
 } from "../api/client";
 import SessionDateTimePicker, {
   SessionDateTimeValue,
@@ -39,6 +40,16 @@ function formatScheduled(iso: string): string {
 
 function payoutPreview(priceZar: number, cutPercent: number): string {
   return `R${(priceZar * (1 - cutPercent / 100)).toFixed(2)}`;
+}
+
+// "Grade 12" for a high-school request, "1st Year"/"2nd Year"/etc. for a
+// higher-ed one (real catalog module or a custom/"Other" one) - previously
+// only the grade case was shown, so a module request's year never
+// appeared on its job card at all.
+function levelLabelFor(r: { grade: number | null; module_year_level: number | null; custom_module_year_level: number | null }): string | null {
+  if (r.grade) return `Grade ${r.grade}`;
+  const yearLevel = r.module_year_level ?? r.custom_module_year_level;
+  return yearLevel != null ? YEAR_LEVEL_LABELS[yearLevel] ?? null : null;
 }
 
 function lastDayOfMonth(year: number, monthIndex0: number): Date {
@@ -513,10 +524,18 @@ export default function TutorHomeScreen() {
                           >
                             <View style={styles.jobCardInfo}>
                               <Text style={styles.jobTitle}>{r.topic || r.custom_module_name || r.subject}</Text>
-                              {(r.grade || r.duration_minutes || r.scheduled_at) ? (
+                              {(() => {
+                                const levelLabel = levelLabelFor(r);
+                                return r.learner_name || levelLabel ? (
+                                  <Text style={styles.jobMetaText}>
+                                    {r.learner_name ?? ""}
+                                    {r.learner_name && levelLabel ? " · " : ""}
+                                    {levelLabel ?? ""}
+                                  </Text>
+                                ) : null;
+                              })()}
+                              {(r.duration_minutes || r.scheduled_at) ? (
                                 <Text style={styles.jobMetaText}>
-                                  {r.grade ? `Grade ${r.grade}` : ""}
-                                  {r.grade && (r.duration_minutes || r.scheduled_at) ? " · " : ""}
                                   {r.duration_minutes ? `${r.duration_minutes} min` : ""}
                                   {r.duration_minutes && r.scheduled_at ? " · " : ""}
                                   {r.scheduled_at ? formatScheduledShort(r.scheduled_at) : ""}

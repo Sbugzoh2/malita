@@ -193,11 +193,23 @@ def create_meet_session(
     backend/tutoring.py's accept_tutoring_request)."""
     access_token = _get_access_token()
     end = start + dt.timedelta(minutes=duration_minutes)
+    # `start`/`end` are naive datetimes that are actually UTC instants -
+    # the same convention as every other datetime in this codebase (see
+    # backend/tutoring.py, api_server.py's _parse_iso_datetime). Google's
+    # API treats an offset-less `dateTime` as wall-clock time IN whatever
+    # `timeZone` says, so passing the raw UTC value alongside
+    # "Africa/Johannesburg" was telling Google the session starts 2 hours
+    # EARLIER than it actually does (SAST is fixed UTC+2, no daylight
+    # saving) - e.g. a 10:00 SAST request (08:00 UTC) was creating a Meet
+    # event for 08:00 SAST instead. Converting to the SAST wall-clock
+    # equivalent here matches the timeZone we're declaring.
+    sast_start = start + dt.timedelta(hours=2)
+    sast_end = end + dt.timedelta(hours=2)
     body = {
         "summary": summary,
         "description": description,
-        "start": {"dateTime": start.isoformat(), "timeZone": "Africa/Johannesburg"},
-        "end": {"dateTime": end.isoformat(), "timeZone": "Africa/Johannesburg"},
+        "start": {"dateTime": sast_start.isoformat(), "timeZone": "Africa/Johannesburg"},
+        "end": {"dateTime": sast_end.isoformat(), "timeZone": "Africa/Johannesburg"},
         "attendees": [{"email": e} for e in attendee_emails if e],
         "conferenceData": {
             "createRequest": {

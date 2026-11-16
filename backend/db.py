@@ -752,6 +752,14 @@ class TutoringSessionRequest(Base):
     # Set when _expire_lapsed_payments() auto-transitions an unpaid
     # awaiting_payment request to "lapsed" after PAYMENT_DEADLINE_HOURS.
     lapsed_at = Column(DateTime, nullable=True)
+    # WHY it lapsed - "payment_not_completed" (_expire_lapsed_payments:
+    # was matched, learner didn't pay in time) or "no_tutor_accepted"
+    # (_expire_unaccepted_past_requests: never matched at all, its own
+    # scheduled time just passed). A single static "lapsed" label can't
+    # tell these two very different situations apart - see
+    # _status_label_for. Null for a row that lapsed before this column
+    # existed.
+    lapse_reason = Column(String(40), nullable=True)
     # Each set the moment its one-time reminder email goes out (see
     # send_due_reminders() in backend/tutoring.py) - guards against
     # re-sending the same reminder on every polling pass.
@@ -951,6 +959,7 @@ def init_db():
     _ensure_column("tutoring_session_requests", "cancelled_by", "VARCHAR(20)")
     _ensure_column("tutoring_session_requests", "cancellation_reason", "VARCHAR")
     _ensure_column("tutoring_session_requests", "lapsed_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "lapse_reason", "VARCHAR(40)")
     _ensure_column("tutoring_session_requests", "reminder_24h_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "reminder_15m_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "lapse_reminder_sent_at", "TIMESTAMP")

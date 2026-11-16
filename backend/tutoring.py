@@ -108,8 +108,25 @@ SESSION_STATUS_LABELS = {
     "tutor_cancelled": "Tutor cancelled — choose what happens next",
     "completed": "Completed",
     "cancelled": "Cancelled",
+    # Fallback only - a row with a known lapse_reason gets a more
+    # specific label from _status_label_for below. Kept as the
+    # payment-timeout wording since that was the only lapse cause before
+    # _expire_unaccepted_past_requests existed, so any row that lapsed
+    # before lapse_reason was added (and so has it NULL) is from that
+    # original, payment-only era.
     "lapsed": "Lapsed — payment wasn't made in time",
 }
+
+
+def _status_label_for(r: TutoringSessionRequest) -> str:
+    """Mirrors SESSION_STATUS_LABELS, except "lapsed" needs its own
+    per-row reason rather than one fixed label - a request that lapsed
+    because no tutor ever accepted it (_expire_unaccepted_past_requests)
+    is a very different situation from one that lapsed after being
+    matched but not paid for in time (_expire_lapsed_payments)."""
+    if r.status == "lapsed" and r.lapse_reason == "no_tutor_accepted":
+        return "Lapsed — no tutor accepted in time"
+    return SESSION_STATUS_LABELS.get(r.status, r.status)
 
 # A session must be at least this long, and no two of the same person's
 # (learner's or tutor's) sessions may be scheduled with less than this
@@ -1929,6 +1946,7 @@ def _expire_lapsed_payments() -> None:
         for req in overdue:
             req.status = "lapsed"
             req.lapsed_at = dt.datetime.utcnow()
+            req.lapse_reason = "payment_not_completed"
             learner = db.query(User).get(req.learner_user_id)
             tutor = db.query(TutorAccount).get(req.tutor_id)
             if learner and tutor:
@@ -2011,6 +2029,7 @@ def _expire_unaccepted_past_requests() -> None:
         for req in overdue:
             req.status = "lapsed"
             req.lapsed_at = now
+            req.lapse_reason = "no_tutor_accepted"
             learner = db.query(User).get(req.learner_user_id)
             if learner:
                 to_notify.append((learner.id, learner.name, learner.email, req.subject, req.topic))
@@ -2360,7 +2379,7 @@ def list_all_tutoring_sessions(
             learner = db.query(User).get(r.learner_user_id)
             result.append({
                 "id": r.id, "subject": r.subject, "topic": r.topic,
-                "status": r.status, "status_label": SESSION_STATUS_LABELS.get(r.status, r.status),
+                "status": r.status, "status_label": _status_label_for(r),
                 "learner_name": learner.name if learner else "—",
                 "learner_email": learner.email if learner else "—",
                 "tutor_name": r.tutor.name if r.tutor else "—",
@@ -2484,7 +2503,8 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "grade": r.grade,
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
         "status": r.status,
-        "status_label": SESSION_STATUS_LABELS.get(r.status, r.status),
+        "status_label": _status_label_for(r),
+        "lapse_reason": r.lapse_reason,
         "tutor_id": r.tutor_id,
         "tutor_name": r.tutor.name if r.tutor else None,
         "preferred_tutor_id": r.preferred_tutor_id,

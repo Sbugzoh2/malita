@@ -413,6 +413,13 @@ export type TutoringRequest = {
   refund_requested_at: string | null;
   refund_processed_at: string | null;
   lapsed_at: string | null;
+  // Why a "lapsed" row lapsed - "no_tutor_accepted" (nobody ever
+  // accepted it before its own scheduled time passed) or
+  // "payment_not_completed" (it was matched, but payment wasn't made in
+  // time); null for a row that lapsed before this field existed, or
+  // isn't lapsed at all. status_label already reflects this - use this
+  // field only for a more detailed message (see MyTutoringRequestsScreen).
+  lapse_reason: "no_tutor_accepted" | "payment_not_completed" | null;
   recording_link: string | null;
   recording_shared_at: string | null;
 };

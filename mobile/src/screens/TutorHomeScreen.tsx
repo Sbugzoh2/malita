@@ -694,26 +694,32 @@ export default function TutorHomeScreen() {
                     </View>
                   </View>
                 ) : null}
-                {lostSessions.length > 0 ? (
-                  <View style={styles.statCard}>
-                    <View style={styles.statCardRow}>
-                      <View>
-                        <Text style={styles.statLabel}>Lost to cancels & lapses</Text>
-                        <Text style={styles.statValue}>
-                          {lostSessions.length} session{lostSessions.length === 1 ? "" : "s"}
-                        </Text>
-                      </View>
-                      <View style={{ alignItems: "flex-end" }}>
-                        <Text style={styles.statLabel}>Payout you missed</Text>
-                        <Text style={styles.statValueLost}>R{lostAfterCut.toFixed(0)}</Text>
-                      </View>
+                <View style={styles.statCard}>
+                  <View style={styles.statCardRow}>
+                    <View>
+                      <Text style={styles.statLabel}>Lost to cancels & lapses</Text>
+                      <Text style={styles.statValue}>
+                        {lostSessions.length} session{lostSessions.length === 1 ? "" : "s"}
+                      </Text>
                     </View>
-                    <View style={styles.statCardFooterRow}>
-                      <Text style={styles.statFooterText}>R{lostRaw.toFixed(0)} total before Malita's fee</Text>
-                      <Text style={styles.statFooterText}>confirm early to avoid lapses</Text>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={styles.statLabel}>Payout you missed</Text>
+                      <Text style={lostSessions.length > 0 ? styles.statValueLost : styles.statValue}>
+                        R{lostAfterCut.toFixed(0)}
+                      </Text>
                     </View>
                   </View>
-                ) : null}
+                  <View style={styles.statCardFooterRow}>
+                    {lostSessions.length > 0 ? (
+                      <>
+                        <Text style={styles.statFooterText}>R{lostRaw.toFixed(0)} total before Malita's fee</Text>
+                        <Text style={styles.statFooterText}>confirm early to avoid lapses</Text>
+                      </>
+                    ) : (
+                      <Text style={styles.statFooterText}>Nothing missed this payment cycle - keep it up!</Text>
+                    )}
+                  </View>
+                </View>
                 <View style={styles.sectionRow}>
                   {SESSION_GROUP_TABS.map((tab) => {
                     const count = visibleSessions.filter((s) => groupForStatus(s.status) === tab.key).length;

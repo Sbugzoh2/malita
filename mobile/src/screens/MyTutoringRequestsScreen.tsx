@@ -610,7 +610,9 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
             )}
             {r.status === "lapsed" && (
               <Text style={styles.cardMeta}>
-                This match lapsed because payment wasn't completed in time - submit a new request if you still need a tutor.
+                {r.lapse_reason === "no_tutor_accepted"
+                  ? "No tutor accepted this request before the requested time passed - submit a new request with a later time if you still need a tutor."
+                  : "This match lapsed because payment wasn't completed in time - submit a new request if you still need a tutor."}
               </Text>
             )}
 

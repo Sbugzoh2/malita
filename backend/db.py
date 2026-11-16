@@ -779,7 +779,6 @@ class TutoringSessionRequest(Base):
     tutor = relationship("TutorAccount", back_populates="sessions", foreign_keys=[tutor_id])
     preferred_tutor = relationship("TutorAccount", foreign_keys=[preferred_tutor_id])
     module = relationship("Module")
-    qualification = relationship("Qualification")
     payout = relationship(
         "TutoringPayout", back_populates="session", uselist=False,
         cascade="all, delete-orphan"

@@ -196,16 +196,17 @@ export const EXAMPLE_QUESTIONS: Record<string, string[]> = {
   "Organic Chemistry": ["Give the IUPAC name of CH3-CH2-CH2-CH3."],
 };
 
-// Malita's payout cycle, mirrored from backend/tutoring.py's own copy
-// (_next_pay_day/_current_cycle_start): a half-month window, 1st-15th
-// or 16th-end of month, SAST. Used by the Sessions (tutor) and My
-// Requests (learner) screens to hide finished history (completed/
-// cancelled/lapsed) from a CLOSED cycle, automatically, once the
-// calendar rolls into the next one - no stored "cleared" state, so
-// there's nothing to reset: the boundary just moves forward on its own.
-// Lifetime stats (completed count, average rating, badge) are computed
-// server-side from everything regardless of this boundary - see
-// backend/tutoring.py's get_tutor_profile/get_learner_tutoring_stats.
+// Malita's payout/clearing cycle, mirrored from backend/tutoring.py's
+// own copy (_next_pay_day): a session closed (completed/cancelled/
+// lapsed) the 1st-15th of a month clears at the end of THAT SAME month;
+// one closed the 16th-end of a month clears on the 15th of the
+// FOLLOWING month. Used by the Sessions (tutor) and My Requests
+// (learner) screens to hide finished history once ITS OWN clearing day
+// arrives - no stored "cleared" state, so there's nothing to reset: the
+// boundary just moves forward on its own. Lifetime stats (completed
+// count, average rating, badge) are computed server-side from
+// everything regardless of this boundary - see backend/tutoring.py's
+// get_tutor_profile/get_learner_tutoring_stats.
 function sastDateParts(iso: string): { year: number; month: number; day: number } {
   // Same "+2h, read UTC getters as SAST" trick as SessionDateTimePicker's
   // isoToSessionDateTime - the stored iso is a UTC instant, SAST has no
@@ -214,14 +215,33 @@ function sastDateParts(iso: string): { year: number; month: number; day: number 
   return { year: sast.getUTCFullYear(), month: sast.getUTCMonth(), day: sast.getUTCDate() };
 }
 
-// True once `iso` (a completed_at/cancelled_at/lapsed_at timestamp) falls
-// in a payout cycle that has already closed relative to right now - i.e.
-// it belongs to "history", not the still-open current cycle.
+// The clearing day for a date falling on `{year, month, day}` - the
+// SAME 15th/end-of-month formula as backend/tutoring.py's
+// _next_pay_day, just evaluated from the session's own date instead of
+// "today" (a session's clearing day IS simply the next 15th/end-of-
+// month boundary after it).
+function clearingDayFor(year: number, month: number, day: number): { year: number; month: number; day: number } {
+  if (day <= 15) {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    return { year, month, day: lastDay };
+  }
+  if (month === 11) return { year: year + 1, month: 0, day: 15 };
+  return { year, month: month + 1, day: 15 };
+}
+
+// True once `iso` (a completed_at/cancelled_at/lapsed_at timestamp)'s
+// OWN clearing day has arrived - i.e. it belongs to "history", not the
+// still-open current cycle. Comparing bucket-to-bucket (is this session
+// in the same half-month as today) is NOT the same check and clears
+// things too early - e.g. a session closed the 16th-30th of last month
+// must stay visible until THIS month's 15th, not disappear the moment
+// the calendar turns over to a new month.
 export function isBeforeCurrentCycle(iso: string | null): boolean {
   if (!iso) return false;
-  const now = sastDateParts(new Date().toISOString());
-  const cycleStartDay = now.day <= 15 ? 1 : 16;
-  const cycleStartUtc = Date.UTC(now.year, now.month, cycleStartDay);
   const then = sastDateParts(iso);
-  return Date.UTC(then.year, then.month, then.day) < cycleStartUtc;
+  const clear = clearingDayFor(then.year, then.month, then.day);
+  const clearUtc = Date.UTC(clear.year, clear.month, clear.day);
+  const now = sastDateParts(new Date().toISOString());
+  const nowUtc = Date.UTC(now.year, now.month, now.day);
+  return nowUtc >= clearUtc;
 }

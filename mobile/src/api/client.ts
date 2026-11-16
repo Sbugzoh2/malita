@@ -358,10 +358,6 @@ export type TutoringRequest = {
   // maps it to a display label the same way custom_module_year_level
   // already is. Null for a high-school request or a custom ("Other") module.
   module_year_level: number | null;
-  // The real catalog qualification's name, when one was picked - set
-  // even for an is_custom_higher_ed request whose module alone was
-  // custom (qualification_id still points at a real catalog row then).
-  qualification_name: string | null;
   // The learner's name - shown to a tutor deciding whether to accept an
   // open request, same as tutor_name/preferred_tutor_name already are.
   learner_name: string | null;

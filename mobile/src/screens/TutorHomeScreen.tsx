@@ -57,29 +57,39 @@ function levelLabelFor(r: { grade: number | null; module_year_level: number | nu
 // (see groupKeyFor), so unlike a catalog module - whose subject is right
 // there in its group header - its card needs to carry that context
 // itself: "Statistics: Central Tendency" rather than just "Central
-// Tendency" with no subject anywhere on the card.
+// Tendency" with no subject anywhere on the card. The learner's own
+// custom module name IS that subject/course context (e.g. "Statistics"),
+// with topic as the specific thing within it they want help on (e.g.
+// "Central Tendency") - matching how the learner's own My Requests
+// screen already shows this same request ("Statistics · Central
+// Tendency"). The qualification (e.g. "Bachelor of Science (BSc)") is
+// a different, broader thing - the learner's degree, not their subject
+// - and was wrongly used here before.
 function jobTitleFor(r: {
-  topic: string | null; custom_module_name: string | null; subject: string;
-  is_custom_higher_ed: boolean; custom_qualification_name: string | null; qualification_name: string | null;
+  topic: string | null; custom_module_name: string | null; subject: string; is_custom_higher_ed: boolean;
 }): string {
-  const base = r.topic || r.custom_module_name || r.subject;
-  if (!r.is_custom_higher_ed) return base;
-  const context = r.custom_qualification_name || r.qualification_name;
-  return context ? `${context}: ${base}` : base;
+  if (!r.is_custom_higher_ed) return r.topic || r.custom_module_name || r.subject;
+  const moduleOrSubjectName = r.custom_module_name || r.subject;
+  return r.topic ? `${moduleOrSubjectName}: ${r.topic}` : moduleOrSubjectName;
 }
 
 function lastDayOfMonth(year: number, monthIndex0: number): Date {
   return new Date(year, monthIndex0 + 1, 0);
 }
 
-// Malita's payout cycle: a session completed the 16th through the end of
-// a month is paid on the 15th of the FOLLOWING month; one completed the
-// 1st through the 15th is paid at the end of that SAME month. This is a
-// plain civil-calendar rule (no particular time of day), so it works off
-// local Date components directly rather than an ISO instant.
+// Malita's payout cycle: paydays are the 15th and the last day of EVERY
+// month, fixed calendar events regardless of what they're paying for (a
+// session completed the 16th through end of a month is paid the 15th of
+// the FOLLOWING month; one completed the 1st through the 15th is paid at
+// the end of THAT SAME month). The NEXT one from today is whichever of
+// those two hasn't happened yet this month: the 15th if today is on or
+// before it, otherwise the still-upcoming end of THIS same month - not
+// next month's 15th, which is a full cycle further out. Plain civil-
+// calendar rule (no particular time of day), so it works off local Date
+// components directly rather than an ISO instant.
 function nextPayDay(from: Date = new Date()): Date {
-  if (from.getDate() <= 15) return lastDayOfMonth(from.getFullYear(), from.getMonth());
-  return new Date(from.getFullYear(), from.getMonth() + 1, 15);
+  if (from.getDate() <= 15) return new Date(from.getFullYear(), from.getMonth(), 15);
+  return lastDayOfMonth(from.getFullYear(), from.getMonth());
 }
 
 function formatPayDay(d: Date): string {
@@ -95,18 +105,6 @@ function timeAgo(iso: string | null): string {
   if (hours < 1) return "just now";
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
-}
-
-// Compact "Tue 18:00" (SAST) for a job card row - formatScheduled's full
-// "12 Nov 2026, 18:00" is reserved for the Accept button/expanded detail,
-// where the exact date actually matters.
-function formatScheduledShort(iso: string): string {
-  const d = new Date(iso);
-  const weekday = d.toLocaleString("en-ZA", { weekday: "short", timeZone: "Africa/Johannesburg" });
-  const time = d.toLocaleString("en-ZA", {
-    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Johannesburg",
-  });
-  return `${weekday} ${time}`;
 }
 
 // Same 8-hue palette as theme.ts's topicColors, but hashed by subject name
@@ -580,7 +578,7 @@ export default function TutorHomeScreen() {
                                 <Text style={styles.jobMetaText}>
                                   {r.duration_minutes ? `${r.duration_minutes} min` : ""}
                                   {r.duration_minutes && r.scheduled_at ? " · " : ""}
-                                  {r.scheduled_at ? formatScheduledShort(r.scheduled_at) : ""}
+                                  {r.scheduled_at ? formatScheduled(r.scheduled_at) : ""}
                                 </Text>
                               ) : null}
                               <Text style={styles.jobRequestedAgo}>

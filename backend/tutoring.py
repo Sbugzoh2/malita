@@ -1556,6 +1556,7 @@ def get_tutor_profile(tutor_id: int) -> dict:
     function always returns everything."""
     _expire_lapsed_payments()
     _expire_stale_admin_proposals()
+    _expire_unaccepted_past_requests()
     with get_session() as db:
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor:
@@ -1987,6 +1988,66 @@ def _notify_payment_lapsed(
         logger.exception("Failed to notify learner/tutor of a lapsed payment")
 
 
+def _expire_unaccepted_past_requests() -> None:
+    """Lazy check (same pattern as _expire_lapsed_payments) - a plain
+    broadcast request ("requested", never accepted by any tutor) whose
+    own scheduled_at has now passed is moot: nobody can conduct a
+    session at a time that's already gone. Previously these just sat
+    there forever showing as "active" on both the learner's and the
+    tutor's own screens, with no tutor able to accept a past time slot
+    anyway. Lapses it the same way a payment timeout does."""
+    to_notify = []
+    with get_session() as db:
+        now = dt.datetime.utcnow()
+        overdue = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                TutoringSessionRequest.status == "requested",
+                TutoringSessionRequest.scheduled_at.isnot(None),
+                TutoringSessionRequest.scheduled_at < now,
+            )
+            .all()
+        )
+        for req in overdue:
+            req.status = "lapsed"
+            req.lapsed_at = now
+            learner = db.query(User).get(req.learner_user_id)
+            if learner:
+                to_notify.append((learner.id, learner.name, learner.email, req.subject, req.topic))
+
+    for learner_id, learner_name, learner_email, subject, topic in to_notify:
+        _notify_unaccepted_request_lapsed(
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            subject=subject, topic=topic,
+        )
+
+
+def _notify_unaccepted_request_lapsed(
+    *, learner_id: int, learner_name: str, learner_email: str, subject: str, topic: str | None,
+) -> None:
+    """Best-effort - tells the learner their open request lapsed because
+    no tutor accepted it before the requested time passed."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        send_email(
+            learner_email,
+            "Your tutoring request has lapsed",
+            (
+                f"Hi {learner_name},\n\n"
+                f"Your request for {subject}{topic_str} has lapsed - no tutor accepted it "
+                "before the requested time passed. Please submit a new request with a "
+                "later time if you still need a tutor.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Request lapsed",
+            body=f"Your request for {subject}{topic_str} lapsed - no tutor accepted it in time.",
+        )
+    except Exception:
+        logger.exception("Failed to notify learner of an unaccepted lapsed request")
+
+
 def _expire_stale_admin_proposals() -> None:
     """Lazy check (same spirit/pattern as _expire_lapsed_payments above),
     run at the same call sites: any request still "admin_proposed" more
@@ -2227,6 +2288,7 @@ def _notify_payment_lapsing_soon(
 def list_learner_requests(learner_user_id: int) -> list[dict]:
     _expire_lapsed_payments()
     _expire_stale_admin_proposals()
+    _expire_unaccepted_past_requests()
     with get_session() as db:
         reqs = (
             db.query(TutoringSessionRequest)
@@ -2282,6 +2344,7 @@ def list_all_tutoring_sessions(
     tutor's individual profile."""
     _expire_lapsed_payments()
     _expire_stale_admin_proposals()
+    _expire_unaccepted_past_requests()
     with get_session() as db:
         q = db.query(TutoringSessionRequest).filter(TutoringSessionRequest.tutor_id.isnot(None))
         if upcoming_only:
@@ -2337,6 +2400,7 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
     outside what they were vetted for on EITHER track."""
     _expire_lapsed_payments()
     _expire_stale_admin_proposals()
+    _expire_unaccepted_past_requests()
     with get_session() as db:
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor:
@@ -2416,14 +2480,6 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "institution_id": r.institution_id,
         "qualification_id": r.qualification_id,
         "module_year_level": r.module.year_level if r.module else None,
-        # The real catalog qualification's name, when one was picked (set
-        # even for an is_custom_higher_ed request whose MODULE was custom
-        # but whose qualification wasn't) - lets the UI show "Statistics:
-        # Central Tendency" instead of just the custom module name alone,
-        # which otherwise loses all subject context once it's grouped
-        # into the catch-all "Other" bucket (every is_custom_higher_ed
-        # request lands there regardless of its real subject).
-        "qualification_name": r.qualification.name if r.qualification else None,
         "learner_name": r.learner.name if r.learner else None,
         "grade": r.grade,
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
@@ -3886,17 +3942,21 @@ def mark_payout_paid(payout_id: int, admin_user_id: int, payment_reference: str 
 
 def _next_pay_day(from_date: dt.date | None = None) -> dt.date:
     """Malita's payout cycle, mirrored from the mobile app's own copy
-    (TutorHomeScreen.tsx's nextPayDay): a session completed the 16th
-    through the end of a month is paid the 15th of the FOLLOWING month;
-    one completed the 1st through the 15th is paid at the end of THAT
-    SAME month. A plain civil-calendar rule, not tied to any instant."""
+    (TutorHomeScreen.tsx's nextPayDay): paydays are the 15th and the
+    last day of EVERY month, fixed calendar events regardless of what
+    they're paying for (a session completed the 16th through the end of
+    a month is paid the 15th of the FOLLOWING month; one completed the
+    1st through the 15th is paid at the end of THAT SAME month). The
+    NEXT one from today is simply whichever of those two hasn't
+    happened yet this month: the 15th if today is on or before it,
+    otherwise the still-upcoming end of this same month - NOT next
+    month's 15th, which is a full cycle further out. A plain
+    civil-calendar rule, not tied to any instant."""
     d = from_date or dt.date.today()
     if d.day <= 15:
-        last_day = calendar.monthrange(d.year, d.month)[1]
-        return dt.date(d.year, d.month, last_day)
-    if d.month == 12:
-        return dt.date(d.year + 1, 1, 15)
-    return dt.date(d.year, d.month + 1, 15)
+        return dt.date(d.year, d.month, 15)
+    last_day = calendar.monthrange(d.year, d.month)[1]
+    return dt.date(d.year, d.month, last_day)
 
 
 def summarize_pending_payouts() -> dict:

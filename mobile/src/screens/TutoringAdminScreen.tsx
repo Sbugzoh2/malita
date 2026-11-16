@@ -53,10 +53,29 @@ import {
   deleteModuleAdmin,
   YEAR_LEVEL_LABELS,
   API_BASE_URL,
+  AdminAccountSummary,
+  fetchAdminAccounts,
+  suspendAccountAdmin,
+  blockAccountAdmin,
+  reinstateAccountAdmin,
+  AdminTutorAccountSummary,
+  fetchAdminTutorAccounts,
+  suspendTutorAccountAdmin,
+  blockTutorAccountAdmin,
+  reinstateTutorAccountAdmin,
+  SupportTicketSummary,
+  SupportTicket,
+  fetchAdminSupportTickets,
+  fetchAdminSupportTicket,
+  replyToSupportTicketAdmin,
+  resolveSupportTicketAdmin,
+  reopenSupportTicketAdmin,
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
 
-type Section = "applications" | "higherEdApplications" | "catalog" | "match" | "sessions" | "tutors" | "payouts";
+type Section =
+  | "applications" | "higherEdApplications" | "catalog" | "match" | "sessions" | "tutors" | "payouts"
+  | "accounts" | "support";
 
 // Shared by ApplicationsSection/HigherEdApplicationsSection/PayoutsSection
 // below - falls back to the free-text note for a tutor who applied before
@@ -110,6 +129,8 @@ export default function TutoringAdminScreen({ navigation }: any) {
           { key: "sessions", label: "All Sessions" },
           { key: "tutors", label: "Tutors" },
           { key: "payouts", label: "Payouts" },
+          { key: "accounts", label: "Accounts" },
+          { key: "support", label: "Support" },
         ] as { key: Section; label: string }[]).map((s) => (
           <Pressable
             key={s.key}
@@ -130,6 +151,8 @@ export default function TutoringAdminScreen({ navigation }: any) {
       {token && section === "sessions" && <SessionsSection token={token} />}
       {token && section === "tutors" && <TutorsSection token={token} />}
       {token && section === "payouts" && <PayoutsSection token={token} />}
+      {token && section === "accounts" && <AccountsSection token={token} />}
+      {token && section === "support" && <SupportSection token={token} />}
     </ScrollView>
   );
 }
@@ -991,6 +1014,8 @@ function TutorsSection({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [profiles, setProfiles] = useState<Record<number, TutorProfile>>({});
+  const [standingReason, setStandingReason] = useState<Record<number, string>>({});
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     fetchApprovedTutors(token)
@@ -1012,6 +1037,50 @@ function TutorsSection({ token }: { token: string }) {
       } catch (e) {
         setError(e instanceof ApiError ? e.message : "Could not load tutor profile.");
       }
+    }
+  }
+
+  async function refreshProfile(tutorId: number) {
+    const profile = await fetchTutorProfile(token, tutorId);
+    setProfiles((prev) => ({ ...prev, [tutorId]: profile }));
+  }
+
+  async function handleSuspendTutor(tutorId: number) {
+    setBusyId(tutorId);
+    setError(null);
+    try {
+      await suspendTutorAccountAdmin(token, tutorId, standingReason[tutorId] || "");
+      await refreshProfile(tutorId);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not suspend this tutor.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleBlockTutor(tutorId: number) {
+    setBusyId(tutorId);
+    setError(null);
+    try {
+      await blockTutorAccountAdmin(token, tutorId, standingReason[tutorId] || "");
+      await refreshProfile(tutorId);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not block this tutor.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleReinstateTutor(tutorId: number) {
+    setBusyId(tutorId);
+    setError(null);
+    try {
+      await reinstateTutorAccountAdmin(token, tutorId);
+      await refreshProfile(tutorId);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not reinstate this tutor.");
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -1067,6 +1136,49 @@ function TutorsSection({ token }: { token: string }) {
                           );
                         })
                       )}
+
+                      <View style={styles.standingBox}>
+                        <Text style={styles.detailLabel}>
+                          Account standing: {profile.account_status_label}
+                          {profile.account_status_reason ? ` — ${profile.account_status_reason}` : ""}
+                        </Text>
+                        {profile.account_status === "active" ? (
+                          <>
+                            <TextInput
+                              style={styles.input}
+                              placeholder="Reason (e.g. pending investigation)"
+                              value={standingReason[t.id] || ""}
+                              onChangeText={(v) => setStandingReason((prev) => ({ ...prev, [t.id]: v }))}
+                            />
+                            <View style={styles.standingButtonRow}>
+                              <Pressable
+                                style={[styles.smallButton, styles.suspendButton]}
+                                onPress={() => handleSuspendTutor(t.id)}
+                                disabled={busyId === t.id}
+                              >
+                                <Text style={styles.smallButtonText}>Suspend</Text>
+                              </Pressable>
+                              <Pressable
+                                style={[styles.smallButton, styles.blockButton]}
+                                onPress={() => handleBlockTutor(t.id)}
+                                disabled={busyId === t.id}
+                              >
+                                <Text style={styles.smallButtonText}>Block</Text>
+                              </Pressable>
+                            </View>
+                          </>
+                        ) : (
+                          <Pressable
+                            style={[styles.smallButton, styles.reinstateButton]}
+                            onPress={() => handleReinstateTutor(t.id)}
+                            disabled={busyId === t.id}
+                          >
+                            <Text style={styles.smallButtonText}>
+                              {profile.account_status === "blocked" ? "Unblock" : "Unsuspend"}
+                            </Text>
+                          </Pressable>
+                        )}
+                      </View>
                     </>
                   )}
                 </View>
@@ -1074,6 +1186,344 @@ function TutorsSection({ token }: { token: string }) {
             </View>
           );
         })
+      )}
+    </View>
+  );
+}
+
+// Learner account management (suspend/block/reinstate) - there was NO
+// admin view at all for learner accounts before this (every other admin
+// screen is tutoring-marketplace-specific). Tutor accounts get the same
+// three actions inside TutorsSection above, next to their own profile.
+const ACCOUNT_STATUS_COLOR: Record<string, string> = {
+  active: colors.success, suspended: colors.textSecondary, blocked: colors.error,
+};
+
+function AccountsSection({ token }: { token: string }) {
+  const [kind, setKind] = useState<"user" | "tutor">("user");
+  const [search, setSearch] = useState("");
+  const [accounts, setAccounts] = useState<AdminAccountSummary[] | null>(null);
+  const [tutorAccounts, setTutorAccounts] = useState<AdminTutorAccountSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reasonDraft, setReasonDraft] = useState<Record<number, string>>({});
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    if (kind === "user") {
+      fetchAdminAccounts(token, search)
+        .then((res) => setAccounts(res.users))
+        .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load accounts."));
+    } else {
+      fetchAdminTutorAccounts(token, search)
+        .then((res) => setTutorAccounts(res.tutors))
+        .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load tutor accounts."));
+    }
+  }, [token, search, kind]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleSuspend(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      if (kind === "user") await suspendAccountAdmin(token, id, reasonDraft[id] || "");
+      else await suspendTutorAccountAdmin(token, id, reasonDraft[id] || "");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not suspend this account.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleBlock(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      if (kind === "user") await blockAccountAdmin(token, id, reasonDraft[id] || "");
+      else await blockTutorAccountAdmin(token, id, reasonDraft[id] || "");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not block this account.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleReinstate(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      if (kind === "user") await reinstateAccountAdmin(token, id);
+      else await reinstateTutorAccountAdmin(token, id);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not reinstate this account.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Normalize both AdminAccountSummary (learner) and AdminTutorAccountSummary
+  // (tutor) to the same shape, so the list below renders either one with
+  // one chunk of markup instead of two near-duplicate branches.
+  const rows = (kind === "user" ? accounts : tutorAccounts)?.map((a) => ({
+    id: a.id,
+    name: a.name,
+    email: a.email,
+    account_status: a.account_status,
+    account_status_label: a.account_status_label,
+    account_status_reason: a.account_status_reason,
+    isAdmin: kind === "user" ? (a as AdminAccountSummary).is_admin : false,
+  })) ?? null;
+
+  return (
+    <View>
+      <View style={styles.sectionRow}>
+        {([{ key: "user" as const, label: "Learners" }, { key: "tutor" as const, label: "Tutors" }]).map((k) => (
+          <Pressable
+            key={k.key}
+            style={[styles.sectionChip, kind === k.key && styles.sectionChipActive]}
+            onPress={() => {
+              setAccounts(null);
+              setTutorAccounts(null);
+              setKind(k.key);
+            }}
+          >
+            <Text style={[styles.sectionChipText, kind === k.key && styles.sectionChipTextActive]}>{k.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search by name or email..."
+        value={search}
+        onChangeText={setSearch}
+      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!rows ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      ) : rows.length === 0 ? (
+        <Text style={styles.empty}>No accounts found.</Text>
+      ) : (
+        rows.map((a) => (
+          <View key={a.id} style={styles.card}>
+            <Text style={styles.cardTitle}>{a.name}</Text>
+            <Text style={styles.cardSubtitle}>{a.email}</Text>
+            <View style={[styles.accountStatusPill, { backgroundColor: ACCOUNT_STATUS_COLOR[a.account_status] }]}>
+              <Text style={styles.accountStatusPillText}>{a.account_status_label}</Text>
+            </View>
+            {a.account_status_reason ? (
+              <Text style={styles.detailLine}>Reason: {a.account_status_reason}</Text>
+            ) : null}
+            {a.isAdmin ? (
+              <Text style={styles.detailLine}>Admin accounts can't be suspended or blocked here.</Text>
+            ) : a.account_status === "active" ? (
+              <View style={styles.standingBox}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Reason (e.g. pending investigation)"
+                  value={reasonDraft[a.id] || ""}
+                  onChangeText={(v) => setReasonDraft((prev) => ({ ...prev, [a.id]: v }))}
+                />
+                <View style={styles.standingButtonRow}>
+                  <Pressable
+                    style={[styles.smallButton, styles.suspendButton]}
+                    onPress={() => handleSuspend(a.id)}
+                    disabled={busyId === a.id}
+                  >
+                    <Text style={styles.smallButtonText}>Suspend</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.smallButton, styles.blockButton]}
+                    onPress={() => handleBlock(a.id)}
+                    disabled={busyId === a.id}
+                  >
+                    <Text style={styles.smallButtonText}>Block</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <Pressable
+                style={[styles.smallButton, styles.reinstateButton]}
+                onPress={() => handleReinstate(a.id)}
+                disabled={busyId === a.id}
+              >
+                <Text style={styles.smallButtonText}>{a.account_status === "blocked" ? "Unblock" : "Unsuspend"}</Text>
+              </Pressable>
+            )}
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
+// The admin's "contact admin" queue (see backend/support.py) - a real
+// back-and-forth thread per ticket, not a one-shot message.
+function SupportSection({ token }: { token: string }) {
+  const [statusFilter, setStatusFilter] = useState<"open" | "resolved" | undefined>("open");
+  const [tickets, setTickets] = useState<SupportTicketSummary[] | null>(null);
+  const [thread, setThread] = useState<SupportTicket | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const loadList = useCallback(() => {
+    fetchAdminSupportTickets(token, statusFilter)
+      .then((res) => setTickets(res.tickets))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load support tickets."));
+  }, [token, statusFilter]);
+
+  useEffect(() => {
+    if (!thread) loadList();
+  }, [loadList, thread]);
+
+  async function openTicket(ticketId: number) {
+    setError(null);
+    try {
+      const t = await fetchAdminSupportTicket(token, ticketId);
+      setThread(t);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not load this ticket.");
+    }
+  }
+
+  async function handleReply() {
+    if (!thread || !reply.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const t = await replyToSupportTicketAdmin(token, thread.id, reply.trim());
+      setThread(t);
+      setReply("");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not send your reply.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResolve() {
+    if (!thread) return;
+    setBusy(true);
+    try {
+      const t = await resolveSupportTicketAdmin(token, thread.id);
+      setThread(t);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not resolve this ticket.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleReopen() {
+    if (!thread) return;
+    setBusy(true);
+    try {
+      const t = await reopenSupportTicketAdmin(token, thread.id);
+      setThread(t);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not reopen this ticket.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (thread) {
+    return (
+      <View>
+        <Pressable onPress={() => setThread(null)}>
+          <Text style={styles.cardLink}>‹ All tickets</Text>
+        </Pressable>
+        <Text style={styles.cardTitle}>{thread.subject}</Text>
+        <Text style={styles.cardSubtitle}>
+          {thread.sender_kind === "tutor" ? "Tutor" : "Learner"}: {thread.sender_name} ({thread.sender_email})
+        </Text>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {thread.messages.map((m) => {
+          const isAdmin = m.sender_kind === "admin";
+          return (
+            <View key={m.id} style={[styles.bubble, isAdmin ? styles.bubbleMine : styles.bubbleTheirs]}>
+              <Text style={isAdmin ? styles.bubbleSenderDark : styles.bubbleSender}>
+                {isAdmin ? "You (admin)" : thread.sender_name}
+              </Text>
+              <Text style={isAdmin ? styles.bubbleBodyDark : styles.bubbleBody}>{m.body}</Text>
+              <Text style={isAdmin ? styles.bubbleDateDark : styles.bubbleDate}>{m.created_at}</Text>
+            </View>
+          );
+        })}
+
+        <TextInput
+          style={[styles.input, { minHeight: 90, textAlignVertical: "top", marginTop: 12 }]}
+          placeholder="Write a reply..."
+          value={reply}
+          onChangeText={setReply}
+          multiline
+        />
+        <View style={styles.standingButtonRow}>
+          <Pressable style={[styles.smallButton, styles.suspendButton]} onPress={handleReply} disabled={busy}>
+            <Text style={styles.smallButtonText}>Reply</Text>
+          </Pressable>
+          {thread.status === "open" ? (
+            <Pressable style={[styles.smallButton, styles.reinstateButton, { flex: 1, marginTop: 0 }]} onPress={handleResolve} disabled={busy}>
+              <Text style={styles.smallButtonText}>Mark Resolved</Text>
+            </Pressable>
+          ) : (
+            <Pressable style={[styles.smallButton, styles.blockButton]} onPress={handleReopen} disabled={busy}>
+              <Text style={styles.smallButtonText}>Reopen</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      <View style={styles.sectionRow}>
+        {([
+          { key: "open" as const, label: "Open" },
+          { key: "resolved" as const, label: "Resolved" },
+          { key: undefined, label: "All" },
+        ]).map((f) => (
+          <Pressable
+            key={f.label}
+            style={[styles.sectionChip, statusFilter === f.key && styles.sectionChipActive]}
+            onPress={() => setStatusFilter(f.key)}
+          >
+            <Text style={[styles.sectionChipText, statusFilter === f.key && styles.sectionChipTextActive]}>
+              {f.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!tickets ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      ) : tickets.length === 0 ? (
+        <Text style={styles.empty}>No tickets here.</Text>
+      ) : (
+        tickets.map((t) => (
+          <Pressable key={t.id} style={styles.card} onPress={() => openTicket(t.id)}>
+            <Text style={styles.cardTitle}>{t.subject}</Text>
+            <Text style={styles.cardSubtitle}>
+              {t.sender_kind === "tutor" ? "Tutor" : "Learner"}: {t.sender_name} ({t.sender_email})
+            </Text>
+            <View
+              style={[
+                styles.ticketStatusPill,
+                t.status === "open" ? styles.ticketStatusOpen : styles.ticketStatusResolved,
+                { alignSelf: "flex-start", marginTop: 8 },
+              ]}
+            >
+              <Text style={styles.ticketStatusPillText}>{t.status === "open" ? "Open" : "Resolved"}</Text>
+            </View>
+          </Pressable>
+        ))
       )}
     </View>
   );
@@ -1435,4 +1885,37 @@ const styles = StyleSheet.create({
   payoutsByTutorName: { fontSize: 13, color: "#fff", fontWeight: "600", flex: 1, marginRight: 8 },
   payoutsByTutorAmount: { fontSize: 13, color: "#fff", fontWeight: "700" },
   payoutsByTutorGross: { fontSize: 11, color: "#8a8984", fontWeight: "500" },
+  standingBox: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  standingButtonRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  smallButton: { flex: 1, borderRadius: 999, paddingVertical: 10, alignItems: "center" },
+  smallButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  suspendButton: { backgroundColor: colors.textSecondary },
+  blockButton: { backgroundColor: colors.error },
+  reinstateButton: { backgroundColor: colors.success, marginTop: 10, alignSelf: "flex-start", paddingHorizontal: 20 },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text,
+    backgroundColor: "#fff",
+    marginBottom: 16,
+  },
+  accountStatusPill: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10, alignSelf: "flex-start", marginTop: 6 },
+  accountStatusPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  ticketStatusPill: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
+  ticketStatusOpen: { backgroundColor: colors.primary },
+  ticketStatusResolved: { backgroundColor: colors.success },
+  ticketStatusPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  bubble: { borderRadius: 16, padding: 14, marginBottom: 10, maxWidth: "90%" },
+  bubbleMine: { backgroundColor: "#0b0b0b", alignSelf: "flex-end" },
+  bubbleTheirs: { backgroundColor: colors.surface, alignSelf: "flex-start" },
+  bubbleSender: { fontSize: 11, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 },
+  bubbleSenderDark: { fontSize: 11, fontWeight: "700", color: "#b9b8b3", marginBottom: 4 },
+  bubbleBody: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  bubbleBodyDark: { fontSize: 14, color: "#fff", lineHeight: 20 },
+  bubbleDate: { fontSize: 11, color: colors.textSecondary, marginTop: 6 },
+  bubbleDateDark: { fontSize: 11, color: "#8a8984", marginTop: 6 },
 });

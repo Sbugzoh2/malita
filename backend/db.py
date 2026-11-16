@@ -45,6 +45,13 @@ SA_PROVINCES = (
 # higher-ed request/matching path.
 ACCOUNT_TYPES = ("high_school", "higher_ed")
 
+# An admin's standing decision on an account (User.account_status or
+# TutorAccount.account_status) - orthogonal to tier/subscription or tutor
+# vetting status. "suspended" is meant as temporary (e.g. pending an
+# investigation); "blocked" as a permanent decision reached afterward.
+ACCOUNT_STANDINGS = ("active", "suspended", "blocked")
+ACCOUNT_STANDING_LABELS = {"active": "Active", "suspended": "Suspended", "blocked": "Blocked"}
+
 # A module's year level, used for the "must be at least one year ahead"
 # tutoring-eligibility rule (see TutorHigherEdModule) - an integer so
 # eligibility is a plain comparison, not a lookup table.
@@ -94,6 +101,16 @@ class User(Base):
     # for every learner, not just this one.
     cross_segment_access = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
+    # An admin's standing decision on this account, entirely separate from
+    # tier/subscription - "active" (default) | "suspended" (temporary, e.g.
+    # pending an investigation) | "blocked" (permanent). A suspended/
+    # blocked learner can still log in (so they're never silently locked
+    # out with no explanation) but every feature screen is gated behind
+    # this - see mobile/src/navigation/RootNavigator.tsx. See
+    # backend/auth.py's suspend_user/block_user/reinstate_user.
+    account_status = Column(String(20), default="active", nullable=False)
+    account_status_reason = Column(String, nullable=True)
+    account_status_changed_at = Column(DateTime, nullable=True)
 
     subscription = relationship(
         "Subscription", back_populates="user", uselist=False,
@@ -518,6 +535,14 @@ class TutorAccount(Base):
     higher_ed_qualification_certificate_path = Column(String, nullable=True)
     higher_ed_reviewed_at = Column(DateTime, nullable=True)
 
+    # An admin's standing decision on this account - entirely separate
+    # from the high-school/higher-ed VETTING statuses above (status/
+    # higher_ed_status), which this never touches. See User.account_status
+    # for the full reasoning (same field, same meaning, mirrored here).
+    account_status = Column(String(20), default="active", nullable=False)
+    account_status_reason = Column(String, nullable=True)
+    account_status_changed_at = Column(DateTime, nullable=True)
+
     subjects = relationship(
         "TutorSubject", back_populates="tutor", cascade="all, delete-orphan"
     )
@@ -693,7 +718,7 @@ class TutoringSessionRequest(Base):
     # required scheduled_at below. Column name kept as-is to avoid a
     # rename migration.
     preferred_times_note = Column(String, nullable=True)
-    status = Column(String(20), default="requested", nullable=False)
+    status = Column(String(32), default="requested", nullable=False)
     tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=True)
     # Set when the learner picked a specific tutor from the directory
     # (see backend/tutoring.py's list_approved_tutors/request_tutoring_
@@ -877,6 +902,46 @@ class Notification(Base):
     read_at = Column(DateTime, nullable=True)
 
 
+class SupportTicket(Base):
+    """A learner's or tutor's own query to Malita's admin - the "contact
+    admin" feature neither side had before. A real back-and-forth thread
+    (see SupportTicketMessage), not a one-shot message: both sides keep
+    replying inside the app. sender_kind/sender_id identify who OPENED
+    it, same "user"/"tutor" convention as Notification.recipient_kind;
+    the thread's own messages can also come from "admin" (see
+    SupportTicketMessage.sender_kind)."""
+    __tablename__ = "support_tickets"
+
+    id = Column(Integer, primary_key=True)
+    sender_kind = Column(String(10), nullable=False)  # "user" | "tutor"
+    sender_id = Column(Integer, nullable=False, index=True)
+    subject = Column(String(200), nullable=False)
+    status = Column(String(20), default="open", nullable=False)  # open | resolved
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+    messages = relationship(
+        "SupportTicketMessage", back_populates="ticket", cascade="all, delete-orphan",
+        order_by="SupportTicketMessage.created_at",
+    )
+
+
+class SupportTicketMessage(Base):
+    """One message in a SupportTicket's thread - sender_kind is "user",
+    "tutor", OR "admin" (an admin's own reply), unlike the ticket's own
+    sender_kind which is only ever who opened it."""
+    __tablename__ = "support_ticket_messages"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("support_tickets.id"), nullable=False)
+    sender_kind = Column(String(10), nullable=False)  # "user" | "tutor" | "admin"
+    sender_id = Column(Integer, nullable=False)
+    body = Column(String, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+
+    ticket = relationship("SupportTicket", back_populates="messages")
+
+
 def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
     """Add one column to an already-existing table if it's missing.
 
@@ -898,6 +963,35 @@ def _ensure_column(table_name: str, column_name: str, ddl_type: str) -> None:
         return
     with engine.begin() as conn:
         conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_type}")
+
+
+def _ensure_column_width(table_name: str, column_name: str, min_length: int) -> None:
+    """Widen a VARCHAR column that was declared too short for a value the
+    code now needs to store in it - e.g. TutoringSessionRequest.status's
+    "pending_admin_approval" is 22 characters, which didn't fit the
+    original String(20). SQLite doesn't enforce VARCHAR length, so this
+    was silently fine there, but a hard DataError on Postgres/Supabase
+    (caught as an unhandled exception, not a TutoringError, so it
+    reached the tutor as a generic "Something went wrong"). No-op if the
+    column is already wide enough, missing, or on SQLite (where it's
+    never actually enforced, so there's nothing to fix)."""
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    if table_name not in inspector.get_table_names():
+        return
+    columns = {c["name"]: c for c in inspector.get_columns(table_name)}
+    col = columns.get(column_name)
+    if col is None:
+        return
+    current_length = getattr(col["type"], "length", None)
+    if current_length is not None and current_length >= min_length:
+        return
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            f"ALTER TABLE {table_name} ALTER COLUMN {column_name} TYPE VARCHAR({min_length})"
+        )
 
 
 def _migrate_removed_tier(old_tier: str, new_tier: str) -> None:
@@ -961,6 +1055,13 @@ def init_db():
     _ensure_column("tutoring_session_requests", "lapsed_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "lapse_reason", "VARCHAR(40)")
     _ensure_column("tutoring_session_requests", "reminder_24h_sent_at", "TIMESTAMP")
+    _ensure_column_width("tutoring_session_requests", "status", 32)
+    _ensure_column("users", "account_status", "VARCHAR(20) DEFAULT 'active'")
+    _ensure_column("users", "account_status_reason", "VARCHAR")
+    _ensure_column("users", "account_status_changed_at", "TIMESTAMP")
+    _ensure_column("tutor_accounts", "account_status", "VARCHAR(20) DEFAULT 'active'")
+    _ensure_column("tutor_accounts", "account_status_reason", "VARCHAR")
+    _ensure_column("tutor_accounts", "account_status_changed_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "reminder_15m_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "lapse_reminder_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "recording_link", "VARCHAR")

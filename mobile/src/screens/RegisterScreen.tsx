@@ -19,6 +19,13 @@ import {
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
 
+// Mirrors backend/db.py's SA_PROVINCES - used only if fetchProvinces()
+// can't reach the API, so the dropdown always has options to pick from.
+const FALLBACK_PROVINCES = [
+  "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
+  "Mpumalanga", "Northern Cape", "North West", "Western Cape",
+];
+
 export default function RegisterScreen({ navigation }: any) {
   const { register } = useAuth();
   const [accountType, setAccountType] = useState<"high_school" | "higher_ed">("high_school");
@@ -30,7 +37,7 @@ export default function RegisterScreen({ navigation }: any) {
   const [idNumber, setIdNumber] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [provinces, setProvinces] = useState<string[]>([]);
+  const [provinces, setProvinces] = useState<string[]>(FALLBACK_PROVINCES);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -50,7 +57,7 @@ export default function RegisterScreen({ navigation }: any) {
     fetchProvinces()
       .then((res) => setProvinces(res.provinces))
       .catch(() => {
-        // Non-fatal - the user can still type a province manually below.
+        // Non-fatal - FALLBACK_PROVINCES is already in state.
       });
   }, []);
 
@@ -168,10 +175,12 @@ export default function RegisterScreen({ navigation }: any) {
             keyboardType="email-address"
           />
 
-          <Text style={styles.label}>
-            Province{provinces.length > 0 ? ` (e.g. ${provinces[0]})` : ""}
-          </Text>
-          <TextInput style={styles.input} value={province} onChangeText={setProvince} />
+          <Dropdown
+            label="Province"
+            options={provinces.map((p) => ({ label: p, value: p }))}
+            value={province || null}
+            onChange={setProvince}
+          />
 
           <Text style={styles.label}>City / Town</Text>
           <TextInput style={styles.input} value={cityTown} onChangeText={setCityTown} />

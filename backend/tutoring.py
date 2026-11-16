@@ -66,6 +66,7 @@ from .db import (
     get_session, User, TutorAccount, TutorSubject, TutoringSessionRequest,
     TutoringPayout, TutorApiToken, TutorPasswordReset, Notification,
     Institution, Qualification, Module, TutorHigherEdModule, TutorCustomHigherEdModule, YEAR_LEVEL_LABELS,
+    ACCOUNT_STANDING_LABELS,
 )
 from . import storage as _storage
 from . import google_calendar as _google_calendar
@@ -292,6 +293,9 @@ def _serialize_tutor_self(tutor: TutorAccount) -> dict:
             TUTOR_STATUS_LABELS.get(tutor.higher_ed_status, tutor.higher_ed_status)
             if tutor.higher_ed_status else None
         ),
+        "account_status": tutor.account_status,
+        "account_status_label": ACCOUNT_STANDING_LABELS.get(tutor.account_status, tutor.account_status),
+        "account_status_reason": tutor.account_status_reason,
     }
 
 
@@ -378,6 +382,103 @@ def revoke_tutor_api_token(token: str) -> None:
     """Log out a single device."""
     with get_session() as db:
         db.query(TutorApiToken).filter(TutorApiToken.token == token).delete()
+
+
+def delete_tutor_account(tutor_id: int) -> dict:
+    """Permanently delete a tutor's own account, for the same in-app
+    "Delete My Account" requirement backend/auth.py's delete_account
+    already covers for learners - but a tutor's sessions and payouts are
+    also the LEARNER's own history and Malita's financial record, not
+    just the tutor's own data, so they can't be blindly cascade-deleted
+    the way a learner's usage logs are.
+
+    Blocked outright while there's unresolved business: an active/
+    upcoming session (anything not completed/cancelled/lapsed, whether
+    matched via tutor_id or just directed to this tutor via
+    preferred_tutor_id while still "requested") or a pending (unpaid)
+    payout - clearing bank details out from under a payout Malita still
+    owes them would make it impossible to actually pay them.
+
+    Otherwise: a tutor with NO session history at all (literally never
+    matched to anything) is hard-deleted outright, same as any other
+    never-used row. A tutor WITH finished session history is instead
+    anonymized in place - every personally identifying field cleared and
+    status set to "deleted" so the account can never log in again - while
+    leaving the TutoringSessionRequest/TutoringPayout rows themselves
+    untouched, since a learner's own session history and Malita's payout
+    ledger both depend on that tutor_id still resolving to *something*."""
+    with get_session() as db:
+        tutor = db.query(TutorAccount).get(tutor_id)
+        if not tutor:
+            raise TutoringError("Tutor account not found.")
+
+        has_any_session = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                (TutoringSessionRequest.tutor_id == tutor_id)
+                | (TutoringSessionRequest.preferred_tutor_id == tutor_id)
+            )
+            .first()
+            is not None
+        )
+        has_active_session = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                (TutoringSessionRequest.tutor_id == tutor_id)
+                | (TutoringSessionRequest.preferred_tutor_id == tutor_id),
+                TutoringSessionRequest.status.notin_(["completed", "cancelled", "lapsed"]),
+            )
+            .first()
+            is not None
+        )
+        if has_active_session:
+            raise TutoringError(
+                "You have an active or upcoming session. Please cancel or complete it before deleting your account."
+            )
+        has_pending_payout = (
+            db.query(TutoringPayout)
+            .filter(TutoringPayout.tutor_id == tutor_id, TutoringPayout.status == "pending")
+            .first()
+            is not None
+        )
+        if has_pending_payout:
+            raise TutoringError(
+                "You have a pending payout. Please wait until it's marked paid before deleting your account."
+            )
+
+        db.query(TutorApiToken).filter(TutorApiToken.tutor_id == tutor_id).delete()
+        db.query(TutorPasswordReset).filter(TutorPasswordReset.tutor_id == tutor_id).delete()
+
+        if not has_any_session:
+            db.delete(tutor)
+            return {"deleted": True, "anonymized": False}
+
+        tutor.name = "Deleted Tutor"
+        tutor.email = f"deleted-tutor-{tutor_id}@malita.invalid"
+        tutor.password_hash = "!deleted!"
+        tutor.phone = None
+        tutor.id_number = None
+        tutor.id_verification_note = None
+        tutor.id_document_path = None
+        tutor.matric_certificate_note = None
+        tutor.matric_certificate_path = None
+        tutor.cv_note = None
+        tutor.cv_document_path = None
+        tutor.availability_note = None
+        tutor.bank_account_holder = None
+        tutor.bank_name = None
+        tutor.bank_branch_code = None
+        tutor.bank_account_number = None
+        tutor.bank_account_type = None
+        tutor.bank_proof_document_path = None
+        tutor.bank_account_note = None
+        tutor.bio = None
+        tutor.status = "deleted"
+        tutor.higher_ed_status = None
+        tutor.higher_ed_transcript_note = None
+        tutor.higher_ed_transcript_path = None
+        tutor.higher_ed_qualification_certificate_path = None
+        return {"deleted": True, "anonymized": True}
 
 
 def list_tutor_own_payouts(tutor_id: int) -> list[dict]:
@@ -1374,6 +1475,108 @@ def reject_tutor(tutor_id: int, reason: str = "") -> None:
     _notify_tutor_of_decision(tutor_id, email, name, approved=False, reason=reason)
 
 
+def _set_tutor_standing(tutor_id: int, new_status: str, reason: str = "") -> dict:
+    """Shared by suspend_tutor/block_tutor/reinstate_tutor - entirely
+    separate from the high-school/higher-ed VETTING statuses above
+    (status/higher_ed_status), which this never touches (see
+    TutorAccount.account_status). Mirrors backend/auth.py's learner-side
+    _set_account_standing."""
+    with get_session() as db:
+        tutor = db.query(TutorAccount).get(tutor_id)
+        if not tutor:
+            raise TutoringError("Tutor account not found.")
+        tutor.account_status = new_status
+        tutor.account_status_reason = (reason or "").strip() or None
+        tutor.account_status_changed_at = dt.datetime.utcnow()
+        name, email = tutor.name, tutor.email
+    _notify_tutor_of_standing_change(tutor_id, email, name, new_status=new_status, reason=reason)
+    return {"id": tutor_id, "name": name, "email": email}
+
+
+def suspend_tutor(tutor_id: int, reason: str = "") -> dict:
+    """Temporarily disables a tutor account - e.g. while an investigation
+    is ongoing. They can still log in and see why (get_tutor_profile/
+    _serialize_tutor_self both return account_status) but every feature
+    screen is gated behind it client-side. See reinstate_tutor to lift
+    this."""
+    return _set_tutor_standing(tutor_id, "suspended", reason)
+
+
+def block_tutor(tutor_id: int, reason: str = "") -> dict:
+    """Permanently disables a tutor account, same gating as suspend_tutor
+    but meant as a final decision rather than a holding pattern. See
+    reinstate_tutor to lift this."""
+    return _set_tutor_standing(tutor_id, "blocked", reason)
+
+
+def reinstate_tutor(tutor_id: int) -> dict:
+    """Lifts a suspension or a block - the same action either way, since
+    both just mean "back to normal." The admin console labels the button
+    "Unsuspend" or "Unblock" depending on which one applies."""
+    return _set_tutor_standing(tutor_id, "active", "")
+
+
+def list_tutors_for_admin(search: str = "", limit: int = 50) -> list[dict]:
+    """A plain, searchable list of EVERY tutor account (regardless of
+    vetting status or which segment they applied to) for the admin
+    console's Accounts tab - list_tutor_applications/
+    list_tutor_higher_ed_applications are each scoped to one vetting
+    track, which would miss half of a "find this tutor to suspend them"
+    search. `search` matches name or email, case-insensitively; empty
+    search returns the most recently created accounts first."""
+    search = (search or "").strip().lower()
+    with get_session() as db:
+        q = db.query(TutorAccount)
+        if search:
+            like = f"%{search}%"
+            q = q.filter((TutorAccount.name.ilike(like)) | (TutorAccount.email.ilike(like)))
+        tutors = q.order_by(TutorAccount.created_at.desc()).limit(limit).all()
+        return [
+            {
+                "id": t.id, "name": t.name, "email": t.email,
+                "status": t.status, "status_label": TUTOR_STATUS_LABELS.get(t.status, t.status),
+                "account_status": t.account_status,
+                "account_status_label": ACCOUNT_STANDING_LABELS.get(t.account_status, t.account_status),
+                "account_status_reason": t.account_status_reason,
+                "created_at": _iso_utc(t.created_at),
+            }
+            for t in tutors
+        ]
+
+
+def _notify_tutor_of_standing_change(
+    tutor_id: int, email: str, name: str, *, new_status: str, reason: str = "",
+) -> None:
+    """Best-effort, same pattern as _notify_tutor_of_decision."""
+    try:
+        reason = (reason or "").strip()
+        if new_status == "suspended":
+            subject = "Your Malita tutor account has been suspended"
+            body = (
+                f"Hi {name},\n\nYour Malita tutor account has been temporarily suspended while "
+                "we look into a matter."
+            )
+            notif_title = "Account suspended"
+            notif_body = "Your tutor account has been temporarily suspended."
+        elif new_status == "blocked":
+            subject = "Your Malita tutor account has been blocked"
+            body = f"Hi {name},\n\nYour Malita tutor account has been blocked."
+            notif_title = "Account blocked"
+            notif_body = "Your tutor account has been blocked."
+        else:
+            subject = "Your Malita tutor account has been reinstated"
+            body = f"Hi {name},\n\nYour Malita tutor account is active again - you have full access."
+            notif_title = "Account reinstated"
+            notif_body = "Your tutor account is active again."
+        if reason and new_status != "active":
+            body += f"\n\nReason given: {reason}"
+        body += "\n\n— The Malita team"
+        send_email(email, subject, body)
+        create_notification(recipient_kind="tutor", recipient_id=tutor_id, title=notif_title, body=notif_body)
+    except Exception:
+        logger.exception("Failed to notify tutor %s of account standing change", email)
+
+
 def approve_tutor_higher_ed(tutor_id: int) -> None:
     """Approves the HIGHER-ED track only - independent of the high-school
     `status` field, which this never touches (see TutorAccount docstring)."""
@@ -1592,6 +1795,10 @@ def get_tutor_profile(tutor_id: int) -> dict:
             "phone": tutor.phone, "bio": tutor.bio,
             "status": tutor.status,
             "status_label": TUTOR_STATUS_LABELS.get(tutor.status, tutor.status),
+            "created_at": tutor.created_at.isoformat() if tutor.created_at else None,
+            "account_status": tutor.account_status,
+            "account_status_label": ACCOUNT_STANDING_LABELS.get(tutor.account_status, tutor.account_status),
+            "account_status_reason": tutor.account_status_reason,
             "availability_note": tutor.availability_note,
             "subjects": [
                 {"subject": s.subject, "matric_percentage": s.matric_percentage,

@@ -61,8 +61,15 @@ export type UserInfo = {
   // true, this account sees BOTH the high_school and higher_ed
   // experiences at once, regardless of its own account_type.
   cross_segment_access?: boolean;
+  created_at: string;
+  // An admin's standing decision on this account - "active" | "suspended"
+  // | "blocked" - entirely separate from tier/subscription. See
+  // RootNavigator.tsx's gating and AccountStatusScreen.tsx.
+  account_status: "active" | "suspended" | "blocked";
+  account_status_reason: string | null;
   higher_ed_institution_id?: number | null;
   higher_ed_qualification_id?: number | null;
+  higher_ed_qualification_custom_name?: string | null;
   higher_ed_year_of_study?: number | null;
   student_number?: string | null;
 };
@@ -339,6 +346,23 @@ export function deleteAccount(token: string) {
     "/account",
     { method: "DELETE", token }
   );
+}
+
+export function deleteTutorAccount(token: string) {
+  return request<{ deleted: boolean; anonymized: boolean }>("/tutor/account", { method: "DELETE", token });
+}
+
+export function updateStudyDetails(
+  token: string,
+  body: {
+    higher_ed_institution_id: number | null;
+    higher_ed_qualification_id: number | null;
+    higher_ed_qualification_custom_name: string;
+    higher_ed_year_of_study: number | null;
+    student_number: string;
+  }
+) {
+  return request<{ ok: boolean }>("/me/study-details", { method: "PATCH", body, token });
 }
 
 // 1-on-1 tutoring, billed separately from the subscription - available
@@ -636,6 +660,9 @@ export type TutorMe = {
   wants_higher_ed: boolean;
   higher_ed_status: TutorApplication["status"] | null;
   higher_ed_status_label: string | null;
+  account_status: "active" | "suspended" | "blocked";
+  account_status_label: string;
+  account_status_reason: string | null;
 };
 
 export function tutorLogin(email: string, password: string) {
@@ -1018,6 +1045,10 @@ export type TutorProfile = {
   bio: string | null;
   status: TutorApplication["status"];
   status_label: string;
+  created_at: string | null;
+  account_status: "active" | "suspended" | "blocked";
+  account_status_label: string;
+  account_status_reason: string | null;
   availability_note: string | null;
   sessions_completed: number;
   // Lifetime - from every rated session ever, not just what the
@@ -1411,5 +1442,146 @@ export function markTutorNotificationRead(token: string, notificationId: number)
 
 export function markAllTutorNotificationsRead(token: string) {
   return request<{ status: string }>("/tutor/notifications/read-all", { method: "POST", token });
+}
+
+// ---- Admin: account standing (suspend/block/reinstate) ----
+// See backend/auth.py's suspend_user/block_user/reinstate_user and
+// backend/tutoring.py's suspend_tutor/block_tutor/reinstate_tutor.
+
+export type AdminAccountSummary = {
+  id: number;
+  name: string;
+  email: string;
+  account_type: "high_school" | "higher_ed";
+  is_admin: boolean;
+  account_status: "active" | "suspended" | "blocked";
+  account_status_label: string;
+  account_status_reason: string | null;
+  created_at: string | null;
+};
+
+export function fetchAdminAccounts(token: string, search: string = "") {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  return request<{ users: AdminAccountSummary[] }>(`/admin/accounts${qs}`, { token });
+}
+
+export function suspendAccountAdmin(token: string, userId: number, reason: string) {
+  return request<{ ok: boolean }>(`/admin/accounts/${userId}/suspend`, { method: "POST", body: { reason }, token });
+}
+
+export function blockAccountAdmin(token: string, userId: number, reason: string) {
+  return request<{ ok: boolean }>(`/admin/accounts/${userId}/block`, { method: "POST", body: { reason }, token });
+}
+
+export function reinstateAccountAdmin(token: string, userId: number) {
+  return request<{ ok: boolean }>(`/admin/accounts/${userId}/reinstate`, { method: "POST", token });
+}
+
+export type AdminTutorAccountSummary = {
+  id: number;
+  name: string;
+  email: string;
+  status: TutorApplication["status"];
+  status_label: string;
+  account_status: "active" | "suspended" | "blocked";
+  account_status_label: string;
+  account_status_reason: string | null;
+  created_at: string | null;
+};
+
+export function fetchAdminTutorAccounts(token: string, search: string = "") {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  return request<{ tutors: AdminTutorAccountSummary[] }>(`/admin/tutor-accounts${qs}`, { token });
+}
+
+export function suspendTutorAccountAdmin(token: string, tutorId: number, reason: string) {
+  return request<{ ok: boolean }>(`/admin/tutor-accounts/${tutorId}/suspend`, { method: "POST", body: { reason }, token });
+}
+
+export function blockTutorAccountAdmin(token: string, tutorId: number, reason: string) {
+  return request<{ ok: boolean }>(`/admin/tutor-accounts/${tutorId}/block`, { method: "POST", body: { reason }, token });
+}
+
+export function reinstateTutorAccountAdmin(token: string, tutorId: number) {
+  return request<{ ok: boolean }>(`/admin/tutor-accounts/${tutorId}/reinstate`, { method: "POST", token });
+}
+
+// ---- Support tickets ("Contact Admin") ----
+// See backend/support.py. A real back-and-forth thread, not a one-shot
+// message - a learner/tutor opens a ticket and both sides keep replying.
+
+export type SupportMessage = {
+  id: number;
+  sender_kind: "user" | "tutor" | "admin";
+  sender_id: number;
+  body: string;
+  created_at: string | null;
+};
+
+export type SupportTicketSummary = {
+  id: number;
+  sender_kind: "user" | "tutor";
+  sender_id: number;
+  sender_name: string;
+  sender_email: string;
+  subject: string;
+  status: "open" | "resolved";
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type SupportTicket = SupportTicketSummary & { messages: SupportMessage[] };
+
+export function createMySupportTicket(token: string, subject: string, message: string) {
+  return request<SupportTicket>("/support/tickets", { method: "POST", body: { subject, message }, token });
+}
+
+export function fetchMySupportTickets(token: string) {
+  return request<{ tickets: SupportTicketSummary[] }>("/support/tickets", { token });
+}
+
+export function fetchMySupportTicket(token: string, ticketId: number) {
+  return request<SupportTicket>(`/support/tickets/${ticketId}`, { token });
+}
+
+export function replyToMySupportTicket(token: string, ticketId: number, body: string) {
+  return request<SupportTicket>(`/support/tickets/${ticketId}/reply`, { method: "POST", body: { body }, token });
+}
+
+export function createMyTutorSupportTicket(token: string, subject: string, message: string) {
+  return request<SupportTicket>("/tutor/support/tickets", { method: "POST", body: { subject, message }, token });
+}
+
+export function fetchMyTutorSupportTickets(token: string) {
+  return request<{ tickets: SupportTicketSummary[] }>("/tutor/support/tickets", { token });
+}
+
+export function fetchMyTutorSupportTicket(token: string, ticketId: number) {
+  return request<SupportTicket>(`/tutor/support/tickets/${ticketId}`, { token });
+}
+
+export function replyToMyTutorSupportTicket(token: string, ticketId: number, body: string) {
+  return request<SupportTicket>(`/tutor/support/tickets/${ticketId}/reply`, { method: "POST", body: { body }, token });
+}
+
+export function fetchAdminSupportTickets(token: string, status?: "open" | "resolved") {
+  const qs = status ? `?status=${status}` : "";
+  return request<{ tickets: SupportTicketSummary[] }>(`/admin/support/tickets${qs}`, { token });
+}
+
+export function fetchAdminSupportTicket(token: string, ticketId: number) {
+  return request<SupportTicket>(`/admin/support/tickets/${ticketId}`, { token });
+}
+
+export function replyToSupportTicketAdmin(token: string, ticketId: number, body: string) {
+  return request<SupportTicket>(`/admin/support/tickets/${ticketId}/reply`, { method: "POST", body: { body }, token });
+}
+
+export function resolveSupportTicketAdmin(token: string, ticketId: number) {
+  return request<SupportTicket>(`/admin/support/tickets/${ticketId}/resolve`, { method: "POST", token });
+}
+
+export function reopenSupportTicketAdmin(token: string, ticketId: number) {
+  return request<SupportTicket>(`/admin/support/tickets/${ticketId}/reopen`, { method: "POST", token });
 }
 

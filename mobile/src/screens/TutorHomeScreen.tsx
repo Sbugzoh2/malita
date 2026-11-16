@@ -18,6 +18,7 @@ import {
   respondToAdminMatch,
   cancelTutoringSessionAsTutor,
   submitSessionRecording,
+  deleteTutorAccount,
   YEAR_LEVEL_LABELS,
 } from "../api/client";
 import SessionDateTimePicker, {
@@ -202,9 +203,51 @@ const SESSION_GROUP_EMPTY_LABEL: Record<SessionGroup, string> = {
   lapsed: "No lapsed sessions.",
 };
 
+// The stat card above the Active/Completed/Cancelled/Lapsed tabs shows
+// whichever tab is currently selected - "expected payout" for the still-
+// open Active group, "payout earned" for Completed, and "payout missed"
+// (in red) for Cancelled/Lapsed - rather than one fixed cancelled+lapsed
+// total regardless of which tab a tutor is actually looking at.
+const STAT_CARD_COPY: Record<SessionGroup, {
+  countLabel: string;
+  amountLabel: string;
+  isLoss: boolean;
+  emptyFooter: string;
+  nonEmptyFooterRight: string;
+}> = {
+  active: {
+    countLabel: "Active sessions",
+    amountLabel: "Expected payout",
+    isLoss: false,
+    emptyFooter: "No active sessions right now.",
+    nonEmptyFooterRight: "once confirmed & paid",
+  },
+  completed: {
+    countLabel: "Completed sessions",
+    amountLabel: "Payout earned",
+    isLoss: false,
+    emptyFooter: "No completed sessions this payment cycle yet.",
+    nonEmptyFooterRight: "after Malita's fee",
+  },
+  cancelled: {
+    countLabel: "Cancelled sessions",
+    amountLabel: "Payout missed",
+    isLoss: true,
+    emptyFooter: "Nothing missed to cancellations this payment cycle.",
+    nonEmptyFooterRight: "reschedule early to avoid cancellations",
+  },
+  lapsed: {
+    countLabel: "Lapsed sessions",
+    amountLabel: "Payout missed",
+    isLoss: true,
+    emptyFooter: "Nothing missed to lapses this payment cycle.",
+    nonEmptyFooterRight: "confirm early to avoid lapses",
+  },
+};
+
 // Built from plain Views (no SVG dependency, no emoji) - same icon
 // language as the My Requests screen's bottom tab bar.
-function SectionTabIcon({ name, size = 20, color }: { name: Section; size?: number; color: string }) {
+function SectionTabIcon({ name, size = 20, color }: { name: Section | "profile"; size?: number; color: string }) {
   const box = { width: size, height: size, alignItems: "center" as const, justifyContent: "center" as const, position: "relative" as const };
   switch (name) {
     case "open":
@@ -254,6 +297,35 @@ function SectionTabIcon({ name, size = 20, color }: { name: Section; size?: numb
           </View>
         </View>
       );
+    case "profile":
+      return (
+        <View style={[box, { position: "relative" }]}>
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              width: size * 0.4,
+              height: size * 0.4,
+              borderRadius: 999,
+              borderWidth: 1.6,
+              borderColor: color,
+            }}
+          />
+          <View
+            style={{
+              position: "absolute",
+              bottom: 0,
+              width: size * 0.78,
+              height: size * 0.4,
+              borderTopLeftRadius: size * 0.4,
+              borderTopRightRadius: size * 0.4,
+              borderWidth: 1.6,
+              borderColor: color,
+              borderBottomWidth: 0,
+            }}
+          />
+        </View>
+      );
     default:
       return null;
   }
@@ -271,7 +343,7 @@ function StarPicker({ value, onChange }: { value: number; onChange: (v: number) 
   );
 }
 
-export default function TutorHomeScreen() {
+export default function TutorHomeScreen({ navigation }: any) {
   const { token, me, logout } = useTutorAuth();
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<TutorProfile | null>(null);
@@ -296,6 +368,7 @@ export default function TutorHomeScreen() {
   const [sessionGroup, setSessionGroup] = useState<SessionGroup>("active");
   const [jobFilter, setJobFilter] = useState<string>("All");
   const [expandedJobId, setExpandedJobId] = useState<number | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -432,6 +505,32 @@ export default function TutorHomeScreen() {
       [
         { text: "Never mind", style: "cancel" },
         { text: "Cancel Session", style: "destructive", onPress: () => handleCancel(requestId) },
+      ]
+    );
+  }
+
+  async function runDeleteAccount() {
+    if (!token) return;
+    setDeletingAccount(true);
+    setError(null);
+    try {
+      await deleteTutorAccount(token);
+      await logout();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not delete your account. Please try again.");
+      setDeletingAccount(false);
+    }
+  }
+
+  function handleDeleteAccount() {
+    Alert.alert(
+      "Delete your account?",
+      "This permanently deletes your Malita tutor account. If you have any completed session history, your " +
+        "personal details are removed but that history stays on record (it's also part of the learners' own " +
+        "history and Malita's payout records). This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete my account", style: "destructive", onPress: runDeleteAccount },
       ]
     );
   }
@@ -665,15 +764,13 @@ export default function TutorHomeScreen() {
               // are still in `profile.sessions` (lifetime stats need
               // them), just not shown here any more.
               const visibleSessions = profile.sessions.filter((s) => !isHiddenHistory(s));
-              const lostSessions = visibleSessions.filter((s) => {
-                const g = groupForStatus(s.status);
-                return g === "cancelled" || g === "lapsed";
-              });
-              const lostRaw = lostSessions.reduce((sum, s) => sum + (s.price_zar ?? 0), 0);
-              const lostAfterCut = lostSessions.reduce(
+              const statSessions = visibleSessions.filter((s) => groupForStatus(s.status) === sessionGroup);
+              const statRaw = statSessions.reduce((sum, s) => sum + (s.price_zar ?? 0), 0);
+              const statAfterCut = statSessions.reduce(
                 (sum, s) => sum + (s.price_zar ?? 0) * (1 - (s.platform_cut_percent ?? openCutPercent) / 100),
                 0
               );
+              const statCopy = STAT_CARD_COPY[sessionGroup];
               return (
               <>
                 {profile.sessions_completed > 0 ? (
@@ -697,26 +794,34 @@ export default function TutorHomeScreen() {
                 <View style={styles.statCard}>
                   <View style={styles.statCardRow}>
                     <View>
-                      <Text style={styles.statLabel}>Lost to cancels & lapses</Text>
+                      <Text style={styles.statLabel}>{statCopy.countLabel}</Text>
                       <Text style={styles.statValue}>
-                        {lostSessions.length} session{lostSessions.length === 1 ? "" : "s"}
+                        {statSessions.length} session{statSessions.length === 1 ? "" : "s"}
                       </Text>
                     </View>
                     <View style={{ alignItems: "flex-end" }}>
-                      <Text style={styles.statLabel}>Payout you missed</Text>
-                      <Text style={lostSessions.length > 0 ? styles.statValueLost : styles.statValue}>
-                        R{lostAfterCut.toFixed(0)}
+                      <Text style={styles.statLabel}>{statCopy.amountLabel}</Text>
+                      <Text
+                        style={
+                          statSessions.length === 0
+                            ? styles.statValue
+                            : statCopy.isLoss
+                            ? styles.statValueLost
+                            : styles.statValuePayout
+                        }
+                      >
+                        R{statAfterCut.toFixed(0)}
                       </Text>
                     </View>
                   </View>
                   <View style={styles.statCardFooterRow}>
-                    {lostSessions.length > 0 ? (
+                    {statSessions.length > 0 ? (
                       <>
-                        <Text style={styles.statFooterText}>R{lostRaw.toFixed(0)} total before Malita's fee</Text>
-                        <Text style={styles.statFooterText}>confirm early to avoid lapses</Text>
+                        <Text style={styles.statFooterText}>R{statRaw.toFixed(0)} total before Malita's fee</Text>
+                        <Text style={styles.statFooterText}>{statCopy.nonEmptyFooterRight}</Text>
                       </>
                     ) : (
-                      <Text style={styles.statFooterText}>Nothing missed this payment cycle - keep it up!</Text>
+                      <Text style={styles.statFooterText}>{statCopy.emptyFooter}</Text>
                     )}
                   </View>
                 </View>
@@ -982,6 +1087,17 @@ export default function TutorHomeScreen() {
         </>
       )}
 
+      <View style={styles.deleteAccountSection}>
+        <Text style={styles.deleteAccountTitle}>Account</Text>
+        <Pressable style={styles.deleteAccountButton} onPress={handleDeleteAccount} disabled={deletingAccount}>
+          {deletingAccount ? (
+            <ActivityIndicator color={colors.error} />
+          ) : (
+            <Text style={styles.deleteAccountButtonText}>Delete My Account</Text>
+          )}
+        </Pressable>
+      </View>
+
       <Pressable style={styles.logoutButton} onPress={logout}>
         <Text style={styles.logoutText}>Log Out</Text>
       </Pressable>
@@ -994,14 +1110,15 @@ export default function TutorHomeScreen() {
           { key: "open", label: "Jobs" },
           { key: "sessions", label: "Sessions" },
           { key: "payouts", label: "Payouts" },
-        ] as { key: Section; label: string }[]).map((s) => {
-          const active = section === s.key;
+          { key: "profile", label: "Profile", route: "TutorProfile" },
+        ] as { key: Section | "profile"; label: string; route?: string }[]).map((s) => {
+          const active = !s.route && section === s.key;
           const tint = active ? colors.primary : "#8a8984";
           return (
             <Pressable
               key={s.key}
               style={styles.bottomBarItem}
-              onPress={() => setSection(s.key)}
+              onPress={() => (s.route ? navigation.navigate(s.route) : setSection(s.key as Section))}
               accessibilityRole="button"
               accessibilityLabel={s.label}
             >
@@ -1210,6 +1327,15 @@ const styles = StyleSheet.create({
   confirmLabel: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 8 },
   starRow: { flexDirection: "row", gap: 6 },
   star: { fontSize: 26 },
+  deleteAccountSection: {
+    marginTop: 32,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  deleteAccountTitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 8 },
+  deleteAccountButton: { alignSelf: "flex-start" },
+  deleteAccountButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
   logoutButton: {
     marginTop: 24,
     marginBottom: 24,

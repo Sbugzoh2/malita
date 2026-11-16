@@ -319,6 +319,16 @@ function TileIcon({ name, size = 20, color = "#fff" }: { name: string; size?: nu
 // top-level screens (stack pushes) rather than switching an in-screen
 // section, since Home/Requests/Browse/Account are separate registered
 // routes, not sections of one screen.
+// White-on-near-black (the pill's own background) made every plan read as
+// the same washed-out pill regardless of tier - Premium in particular
+// didn't stand out as the plan worth noticing. Free keeps white (nothing
+// to draw attention to); Learner and Premium each get their own accent.
+const PLAN_PILL_TEXT_COLOR: Record<string, string> = {
+  free: "#fff",
+  learner: colors.primary,
+  premium: "#eda100",
+};
+
 const HOME_BOTTOM_TABS: { key: string; label: string; icon: string; route?: string }[] = [
   { key: "home", label: "Home", icon: "home" },
   { key: "requests", label: "Requests", icon: "calendarCheck", route: "MyTutoringRequests" },
@@ -425,7 +435,9 @@ export default function HomeScreen({ navigation }: any) {
                   <Text style={styles.statUnlimited}>Unlimited solves on your plan.</Text>
                 )}
                 <Pressable style={styles.planPill} onPress={() => navigation.navigate("Subscription")}>
-                  <Text style={styles.planPillText}>{me?.tier_label ?? "Free"} plan</Text>
+                  <Text style={[styles.planPillText, { color: PLAN_PILL_TEXT_COLOR[me?.effective_tier ?? "free"] ?? "#fff" }]}>
+                    {me?.tier_label ?? "Free"} plan
+                  </Text>
                   <TileIcon name="chevron" size={12} />
                 </Pressable>
               </View>

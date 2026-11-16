@@ -1,14 +1,18 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, TextInput, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 import NotificationBell from "../components/NotificationBell";
+import Dropdown from "../components/Dropdown";
 import {
+  ApiError,
   fetchNotificationsUnreadCount,
   fetchInstitutions,
   fetchQualifications,
+  fetchMyTutoringRequests,
+  updateStudyDetails,
   Institution,
   Qualification,
   YEAR_LEVEL_LABELS,
@@ -19,12 +23,33 @@ const ACCOUNT_TYPE_LABEL: Record<string, string> = {
   higher_ed: "Higher Ed",
 };
 
+function formatDateJoined(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default function AccountScreen({ navigation }: any) {
-  const { token, me, logout } = useAuth();
+  const { token, me, logout, refreshMe } = useAuth();
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState(0);
   const [institutions, setInstitutions] = useState<Institution[] | null>(null);
   const [qualifications, setQualifications] = useState<Qualification[] | null>(null);
+  const [sessionsCompleted, setSessionsCompleted] = useState<number | null>(null);
+
+  // Editing study details (institution/qualification/year/student number)
+  // - lets a learner fill these in themselves if they're missing (e.g. an
+  // account created some other way than the normal higher-ed registration
+  // flow), rather than being stuck seeing "—" forever with no fix.
+  const [editingStudyDetails, setEditingStudyDetails] = useState(false);
+  const [draftInstitutionId, setDraftInstitutionId] = useState<number | null>(null);
+  const [draftQualificationId, setDraftQualificationId] = useState<number | null>(null);
+  const [draftIsCustomQualification, setDraftIsCustomQualification] = useState(false);
+  const [draftCustomQualificationName, setDraftCustomQualificationName] = useState("");
+  const [draftYearOfStudy, setDraftYearOfStudy] = useState<number | null>(null);
+  const [draftStudentNumber, setDraftStudentNumber] = useState("");
+  const [draftQualifications, setDraftQualifications] = useState<Qualification[]>([]);
+  const [savingStudyDetails, setSavingStudyDetails] = useState(false);
+  const [studyDetailsError, setStudyDetailsError] = useState<string | null>(null);
 
   const isHigherEd = me?.user.account_type === "higher_ed";
   const firstName = me?.user.name.split(" ")[0] ?? "";
@@ -33,6 +58,7 @@ export default function AccountScreen({ navigation }: any) {
     useCallback(() => {
       if (!token) return;
       fetchNotificationsUnreadCount(token).then((res) => setUnreadCount(res.count)).catch(() => {});
+      fetchMyTutoringRequests(token).then((res) => setSessionsCompleted(res.completed_count)).catch(() => {});
     }, [token])
   );
 
@@ -50,8 +76,54 @@ export default function AccountScreen({ navigation }: any) {
       .catch(() => {});
   }, [me?.user.higher_ed_institution_id]);
 
+  // The edit form's own institution picker needs qualifications re-fetched
+  // whenever ITS selection changes, independent of the committed value above.
+  useEffect(() => {
+    setDraftQualificationId(null);
+    if (!draftInstitutionId) {
+      setDraftQualifications([]);
+      return;
+    }
+    fetchQualifications(draftInstitutionId).then((res) => setDraftQualifications(res.qualifications)).catch(() => {});
+  }, [draftInstitutionId]);
+
   const institutionName = institutions?.find((i) => i.id === me?.user.higher_ed_institution_id)?.name;
-  const qualificationName = qualifications?.find((q) => q.id === me?.user.higher_ed_qualification_id)?.name;
+  const qualificationName =
+    me?.user.higher_ed_qualification_custom_name ||
+    qualifications?.find((q) => q.id === me?.user.higher_ed_qualification_id)?.name;
+
+  function openEditStudyDetails() {
+    setStudyDetailsError(null);
+    setDraftInstitutionId(me?.user.higher_ed_institution_id ?? null);
+    const hasCustom = !!me?.user.higher_ed_qualification_custom_name;
+    setDraftIsCustomQualification(hasCustom);
+    setDraftCustomQualificationName(me?.user.higher_ed_qualification_custom_name ?? "");
+    setDraftQualificationId(hasCustom ? null : me?.user.higher_ed_qualification_id ?? null);
+    setDraftYearOfStudy(me?.user.higher_ed_year_of_study ?? null);
+    setDraftStudentNumber(me?.user.student_number ?? "");
+    setEditingStudyDetails(true);
+  }
+
+  async function handleSaveStudyDetails() {
+    if (!token) return;
+    setStudyDetailsError(null);
+    setSavingStudyDetails(true);
+    try {
+      await updateStudyDetails(token, {
+        higher_ed_institution_id: draftInstitutionId,
+        higher_ed_qualification_id: draftIsCustomQualification ? null : draftQualificationId,
+        higher_ed_qualification_custom_name: draftIsCustomQualification ? draftCustomQualificationName.trim() : "",
+        higher_ed_year_of_study: draftYearOfStudy,
+        student_number: draftStudentNumber.trim(),
+      });
+      await refreshMe();
+      setEditingStudyDetails(false);
+    } catch (e) {
+      setStudyDetailsError(e instanceof ApiError ? e.message : "Could not save your study details.");
+    } finally {
+      setSavingStudyDetails(false);
+    }
+  }
 
   if (!me) return null;
 
@@ -90,29 +162,113 @@ export default function AccountScreen({ navigation }: any) {
         ) : null}
       </View>
 
+      <View style={styles.card}>
+        <Text style={styles.sectionLabel}>Lifetime</Text>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Sessions held</Text>
+          <Text style={styles.detailValue}>{sessionsCompleted ?? "—"}</Text>
+        </View>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Date joined</Text>
+          <Text style={styles.detailValue}>{formatDateJoined(me.user.created_at)}</Text>
+        </View>
+      </View>
+
       {isHigherEd ? (
         <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Study details</Text>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Institution</Text>
-            <Text style={styles.detailValue}>{institutionName ?? "—"}</Text>
+          <View style={styles.sectionLabelRow}>
+            <Text style={styles.sectionLabel}>Study details</Text>
+            {!editingStudyDetails ? (
+              <Pressable onPress={openEditStudyDetails}>
+                <Text style={styles.editLinkText}>Edit</Text>
+              </Pressable>
+            ) : null}
           </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Qualification</Text>
-            <Text style={styles.detailValue}>{qualificationName ?? "—"}</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Year of study</Text>
-            <Text style={styles.detailValue}>
-              {me.user.higher_ed_year_of_study != null ? YEAR_LEVEL_LABELS[me.user.higher_ed_year_of_study] ?? "—" : "—"}
-            </Text>
-          </View>
-          {me.user.student_number ? (
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Student number</Text>
-              <Text style={styles.detailValue}>{me.user.student_number}</Text>
-            </View>
-          ) : null}
+
+          {editingStudyDetails ? (
+            <>
+              <Dropdown
+                label="Institution"
+                options={(institutions ?? []).map((i) => ({ label: i.name, value: String(i.id) }))}
+                value={draftInstitutionId != null ? String(draftInstitutionId) : null}
+                onChange={(v) => setDraftInstitutionId(parseInt(v, 10))}
+              />
+              <Dropdown
+                label="Qualification"
+                options={[
+                  ...draftQualifications.map((q) => ({ label: q.name, value: String(q.id) })),
+                  { label: "Other (not listed)", value: "other" },
+                ]}
+                value={
+                  draftIsCustomQualification ? "other" : draftQualificationId != null ? String(draftQualificationId) : null
+                }
+                onChange={(v) => {
+                  if (v === "other") {
+                    setDraftIsCustomQualification(true);
+                    setDraftQualificationId(null);
+                  } else {
+                    setDraftIsCustomQualification(false);
+                    setDraftQualificationId(parseInt(v, 10));
+                  }
+                }}
+              />
+              {draftIsCustomQualification && (
+                <>
+                  <Text style={styles.fieldLabel}>Your qualification</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={draftCustomQualificationName}
+                    onChangeText={setDraftCustomQualificationName}
+                    placeholder="e.g. BCom Investment Management"
+                  />
+                </>
+              )}
+              <Dropdown
+                label="Year of study"
+                options={Object.entries(YEAR_LEVEL_LABELS).map(([k, v]) => ({ label: v, value: k }))}
+                value={draftYearOfStudy != null ? String(draftYearOfStudy) : null}
+                onChange={(v) => setDraftYearOfStudy(parseInt(v, 10))}
+              />
+              <Text style={styles.fieldLabel}>Student number</Text>
+              <TextInput style={styles.input} value={draftStudentNumber} onChangeText={setDraftStudentNumber} />
+
+              {studyDetailsError ? <Text style={styles.error}>{studyDetailsError}</Text> : null}
+
+              <View style={styles.editButtonRow}>
+                <Pressable
+                  style={styles.cancelEditButton}
+                  onPress={() => setEditingStudyDetails(false)}
+                  disabled={savingStudyDetails}
+                >
+                  <Text style={styles.cancelEditButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={styles.saveEditButton} onPress={handleSaveStudyDetails} disabled={savingStudyDetails}>
+                  {savingStudyDetails ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveEditButtonText}>Save</Text>}
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Institution</Text>
+                <Text style={styles.detailValue}>{institutionName ?? "—"}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Qualification</Text>
+                <Text style={styles.detailValue}>{qualificationName ?? "—"}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Year of study</Text>
+                <Text style={styles.detailValue}>
+                  {me.user.higher_ed_year_of_study != null ? YEAR_LEVEL_LABELS[me.user.higher_ed_year_of_study] ?? "—" : "—"}
+                </Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Student number</Text>
+                <Text style={styles.detailValue}>{me.user.student_number ?? "—"}</Text>
+              </View>
+            </>
+          )}
         </View>
       ) : (
         <View style={styles.card}>
@@ -134,6 +290,11 @@ export default function AccountScreen({ navigation }: any) {
           </Pressable>
         </View>
       )}
+
+      <Pressable style={styles.supportCard} onPress={() => navigation.navigate("Support")}>
+        <Text style={styles.supportCardText}>Contact Support</Text>
+        <Text style={styles.supportCardChevron}>›</Text>
+      </Pressable>
 
       <Pressable style={styles.logoutButton} onPress={logout}>
         <Text style={styles.logoutText}>Log Out</Text>
@@ -175,11 +336,48 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   sectionLabel: { fontSize: 12, fontWeight: "700", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 10 },
+  sectionLabelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  editLinkText: { fontSize: 12, fontWeight: "700", color: colors.primary, marginBottom: 10 },
   detailRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 7 },
   detailLabel: { fontSize: 13, color: colors.textSecondary },
   detailValue: { fontSize: 13, fontWeight: "700", color: colors.text },
+  fieldLabel: { fontSize: 13, color: colors.textSecondary, marginTop: 10, marginBottom: 6 },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text,
+    backgroundColor: "#fff",
+  },
+  editButtonRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  cancelEditButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cancelEditButtonText: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  saveEditButton: { flex: 1, backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 12, alignItems: "center" },
+  saveEditButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  error: { color: colors.error, marginTop: 12, fontSize: 13 },
   managePlanLink: { marginTop: 6 },
   managePlanLinkText: { fontSize: 13, fontWeight: "700", color: colors.primary },
+  supportCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  supportCardText: { fontSize: 14, fontWeight: "700", color: colors.text },
+  supportCardChevron: { fontSize: 16, color: colors.textSecondary },
   logoutButton: {
     marginTop: 28,
     alignSelf: "center",

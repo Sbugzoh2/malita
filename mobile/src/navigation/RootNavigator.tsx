@@ -13,6 +13,10 @@ import RegisterScreen from "../screens/RegisterScreen";
 import TutorLoginScreen from "../screens/TutorLoginScreen";
 import TutorApplyScreen from "../screens/TutorApplyScreen";
 import TutorHomeScreen from "../screens/TutorHomeScreen";
+import TutorProfileScreen from "../screens/TutorProfileScreen";
+import AccountStatusScreen from "../screens/AccountStatusScreen";
+import SupportScreen from "../screens/SupportScreen";
+import TutorSupportScreen from "../screens/TutorSupportScreen";
 import HomeScreen from "../screens/HomeScreen";
 import AccountScreen from "../screens/AccountScreen";
 import AITutorScreen from "../screens/AITutorScreen";
@@ -50,6 +54,21 @@ function AuthNavigator() {
 // just one screen for now (sessions + payouts), since a tutor's app
 // surface is intentionally small in v1.
 function TutorAppNavigator() {
+  const { me } = useTutorAuth();
+  // A suspended/blocked tutor can still log in (see AccountStatusScreen's
+  // own docstring) but gets ONLY this screen and Support registered at
+  // all - not hidden behind a client-side check on the normal screens,
+  // which there'd be no way to enforce against a deep link or the back
+  // button; there is simply no OTHER route to navigate to.
+  if (me && me.account_status !== "active") {
+    return (
+      <TutorStack.Navigator screenOptions={{ headerShown: false }}>
+        <TutorStack.Screen name="AccountStatus" component={AccountStatusScreen} />
+        <TutorStack.Screen name="TutorSupport" component={TutorSupportScreen} />
+      </TutorStack.Navigator>
+    );
+  }
+
   return (
     <TutorStack.Navigator
       screenOptions={{
@@ -67,6 +86,16 @@ function TutorAppNavigator() {
         name="TutorNotifications"
         component={TutorNotificationsScreen}
         options={{ title: "Notifications" }}
+      />
+      <TutorStack.Screen
+        name="TutorProfile"
+        component={TutorProfileScreen}
+        options={{ title: "Profile" }}
+      />
+      <TutorStack.Screen
+        name="TutorSupport"
+        component={TutorSupportScreen}
+        options={{ title: "Contact Support" }}
       />
     </TutorStack.Navigator>
   );
@@ -106,6 +135,20 @@ function AppNavigator() {
   // registers every screen regardless of the account's own account_type.
   const isHigherEd = me?.user.account_type === "higher_ed" && !me?.user.cross_segment_access;
 
+  // A suspended/blocked learner can still log in (see AccountStatusScreen's
+  // own docstring) but gets ONLY this screen and Support registered at
+  // all - not hidden behind a client-side check on the normal screens,
+  // which there'd be no way to enforce against a deep link or the back
+  // button; there is simply no OTHER route to navigate to.
+  if (me && me.user.account_status !== "active") {
+    return (
+      <AppStack.Navigator screenOptions={{ headerShown: false }}>
+        <AppStack.Screen name="AccountStatus" component={AccountStatusScreen} />
+        <AppStack.Screen name="Support" component={SupportScreen} />
+      </AppStack.Navigator>
+    );
+  }
+
   return (
     <AppStack.Navigator
       screenOptions={{
@@ -119,6 +162,7 @@ function AppNavigator() {
           than stacking a second native header bar above it. */}
       <AppStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
       <AppStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
+      <AppStack.Screen name="Support" component={SupportScreen} options={{ title: "Contact Support" }} />
       <AppStack.Screen name="RequestTutor" component={RequestTutorScreen} options={{ title: "Request a Tutor" }} />
       {/* Same reasoning as Home: this screen builds its own header (back
           link, title, notification bell) rather than stacking a second

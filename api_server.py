@@ -49,8 +49,10 @@ from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
-    schedule_downgrade, delete_account,
+    schedule_downgrade, delete_account, update_study_details,
+    suspend_user, block_user, reinstate_user, list_users_for_admin,
 )
+from backend import support as support_module
 from backend.email_util import send_email
 from backend.tiers import TIER_CONFIG, TIER_ORDER, daily_limit, can_use_ocr, can_use_pdf, can_use_past_papers, can_use_llm_fallback, can_use_collab, can_use_ai_teacher, GOOGLE_PLAY_PRODUCT_IDS, GOOGLE_PLAY_TIER_BY_PRODUCT_ID
 from backend.google_play import verify_subscription_purchase, acknowledge_purchase, GooglePlayVerificationError
@@ -83,6 +85,7 @@ from backend.tutoring import (
     get_tutor_document_url, get_tutor_profile, login_tutor,
     create_tutor_api_token, get_tutor_by_token, revoke_tutor_api_token,
     list_tutor_own_payouts, create_tutor_password_reset, reset_tutor_password,
+    delete_tutor_account,
     DEFAULT_PLATFORM_CUT_PERCENT,
     list_institutions, add_institution, list_qualifications, add_qualification,
     list_modules, add_module, seed_default_higher_ed_catalog,
@@ -93,6 +96,7 @@ from backend.tutoring import (
     list_notifications, count_unread_notifications, mark_notification_read, mark_all_notifications_read,
     reallocate_after_tutor_cancellation, request_refund_for_cancelled_session,
     admin_suggest_refund, mark_refund_processed, list_requests_needing_attention,
+    suspend_tutor, block_tutor, reinstate_tutor, list_tutors_for_admin,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -288,6 +292,27 @@ class GoogleChoiceRequest(BaseModel):
 
 class DowngradeRequest(BaseModel):
     tier: str
+
+
+class StudyDetailsRequest(BaseModel):
+    higher_ed_institution_id: int | None = None
+    higher_ed_qualification_id: int | None = None
+    higher_ed_qualification_custom_name: str = ""
+    higher_ed_year_of_study: int | None = None
+    student_number: str = ""
+
+
+class ReasonRequest(BaseModel):
+    reason: str = ""
+
+
+class SupportTicketCreateRequest(BaseModel):
+    subject: str
+    message: str
+
+
+class SupportTicketReplyRequest(BaseModel):
+    body: str
 
 
 class TutorSubjectInput(BaseModel):
@@ -780,6 +805,113 @@ def delete_my_account(authorization: str = Header(None)):
     return result
 
 
+@app.patch("/me/study-details")
+def update_my_study_details(payload: StudyDetailsRequest, authorization: str = Header(None)):
+    """Lets a higher-ed learner fill in/correct their own institution,
+    qualification, year of study and student number from the Account
+    screen - see backend/auth.py's update_study_details for why this
+    exists (these are required at signup, but an account created some
+    other way can end up with them blank, with no in-app way to fix it
+    until now)."""
+    user = _auth_user(authorization)
+    try:
+        update_study_details(
+            user["id"],
+            institution_id=payload.higher_ed_institution_id,
+            qualification_id=payload.higher_ed_qualification_id,
+            qualification_custom_name=payload.higher_ed_qualification_custom_name,
+            year_of_study=payload.higher_ed_year_of_study,
+            student_number=payload.student_number,
+        )
+    except AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.get("/admin/accounts")
+def admin_list_accounts(search: str = "", authorization: str = Header(None)):
+    """Admin console's Accounts tab - a plain, searchable list of learner
+    accounts, so an admin can actually find one to suspend/block (there
+    was no account-management view at all before this - every other
+    admin screen is tutoring-marketplace-specific)."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"users": list_users_for_admin(search)}
+
+
+@app.post("/admin/accounts/{user_id}/suspend")
+def admin_suspend_account(user_id: int, payload: ReasonRequest, authorization: str = Header(None)):
+    admin = _auth_user(authorization)
+    if not is_user_admin(admin["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        suspend_user(user_id, payload.reason)
+    except AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/admin/accounts/{user_id}/block")
+def admin_block_account(user_id: int, payload: ReasonRequest, authorization: str = Header(None)):
+    admin = _auth_user(authorization)
+    if not is_user_admin(admin["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        block_user(user_id, payload.reason)
+    except AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/admin/accounts/{user_id}/reinstate")
+def admin_reinstate_account(user_id: int, authorization: str = Header(None)):
+    admin = _auth_user(authorization)
+    if not is_user_admin(admin["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        reinstate_user(user_id)
+    except AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/support/tickets")
+def create_my_support_ticket(payload: SupportTicketCreateRequest, authorization: str = Header(None)):
+    """A learner's own "contact admin" entry point - see backend/support.py."""
+    user = _auth_user(authorization)
+    try:
+        return support_module.create_support_ticket("user", user["id"], payload.subject, payload.message)
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/support/tickets")
+def list_my_support_tickets_endpoint(authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    return {"tickets": support_module.list_my_support_tickets("user", user["id"])}
+
+
+@app.get("/support/tickets/{ticket_id}")
+def get_my_support_ticket(ticket_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    try:
+        return support_module.get_support_ticket(ticket_id, "user", user["id"])
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/support/tickets/{ticket_id}/reply")
+def reply_to_my_support_ticket(ticket_id: int, payload: SupportTicketReplyRequest, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    try:
+        return support_module.reply_to_support_ticket(
+            ticket_id, "user", user["id"], payload.body, owner_kind="user", owner_id=user["id"],
+        )
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/billing/downgrade")
 def billing_downgrade(payload: DowngradeRequest, authorization: str = Header(None)):
     """Schedules a move to a lower tier at the end of the current paid
@@ -1240,9 +1372,62 @@ def tutor_logout(authorization: str = Header(None)):
     return {"ok": True}
 
 
+@app.delete("/tutor/account")
+def delete_my_tutor_account(authorization: str = Header(None)):
+    """Same in-app account-deletion requirement as the learner's DELETE
+    /account, for a tutor's own account - see backend/tutoring.py's
+    delete_tutor_account for exactly what is and isn't removed (an
+    active session or a pending payout blocks it; a tutor with session
+    history is anonymized rather than hard-deleted)."""
+    tutor = _auth_tutor(authorization)
+    try:
+        result = delete_tutor_account(tutor["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
 @app.get("/tutor/me")
 def tutor_me(authorization: str = Header(None)):
     return _auth_tutor(authorization)
+
+
+@app.post("/tutor/support/tickets")
+def create_my_tutor_support_ticket(payload: SupportTicketCreateRequest, authorization: str = Header(None)):
+    """A tutor's own "contact admin" entry point - see backend/support.py."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return support_module.create_support_ticket("tutor", tutor["id"], payload.subject, payload.message)
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/tutor/support/tickets")
+def list_my_tutor_support_tickets(authorization: str = Header(None)):
+    tutor = _auth_tutor(authorization)
+    return {"tickets": support_module.list_my_support_tickets("tutor", tutor["id"])}
+
+
+@app.get("/tutor/support/tickets/{ticket_id}")
+def get_my_tutor_support_ticket(ticket_id: int, authorization: str = Header(None)):
+    tutor = _auth_tutor(authorization)
+    try:
+        return support_module.get_support_ticket(ticket_id, "tutor", tutor["id"])
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/tutor/support/tickets/{ticket_id}/reply")
+def reply_to_my_tutor_support_ticket(
+    ticket_id: int, payload: SupportTicketReplyRequest, authorization: str = Header(None)
+):
+    tutor = _auth_tutor(authorization)
+    try:
+        return support_module.reply_to_support_ticket(
+            ticket_id, "tutor", tutor["id"], payload.body, owner_kind="tutor", owner_id=tutor["id"],
+        )
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/tutor/me/profile")
@@ -1963,6 +2148,107 @@ def admin_tutoring_tutors(subject: str | None = None, authorization: str = Heade
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
     return {"tutors": list_approved_tutors(subject)}
+
+
+@app.get("/admin/tutor-accounts")
+def admin_list_tutor_accounts(search: str = "", authorization: str = Header(None)):
+    """Admin console's Accounts tab, tutor side - EVERY tutor account
+    regardless of vetting status (unlike /admin/tutoring/tutors, which
+    is approved-only), so an admin can find one to suspend/block."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"tutors": list_tutors_for_admin(search)}
+
+
+@app.post("/admin/tutor-accounts/{tutor_id}/suspend")
+def admin_suspend_tutor_account(tutor_id: int, payload: ReasonRequest, authorization: str = Header(None)):
+    admin = _auth_user(authorization)
+    if not is_user_admin(admin["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        suspend_tutor(tutor_id, payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/admin/tutor-accounts/{tutor_id}/block")
+def admin_block_tutor_account(tutor_id: int, payload: ReasonRequest, authorization: str = Header(None)):
+    admin = _auth_user(authorization)
+    if not is_user_admin(admin["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        block_tutor(tutor_id, payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/admin/tutor-accounts/{tutor_id}/reinstate")
+def admin_reinstate_tutor_account(tutor_id: int, authorization: str = Header(None)):
+    admin = _auth_user(authorization)
+    if not is_user_admin(admin["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        reinstate_tutor(tutor_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.get("/admin/support/tickets")
+def admin_list_support_tickets(status: str | None = None, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"tickets": support_module.list_all_support_tickets_admin(status)}
+
+
+@app.get("/admin/support/tickets/{ticket_id}")
+def admin_get_support_ticket(ticket_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return support_module.get_support_ticket(ticket_id)
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/admin/support/tickets/{ticket_id}/reply")
+def admin_reply_to_support_ticket(
+    ticket_id: int, payload: SupportTicketReplyRequest, authorization: str = Header(None)
+):
+    admin = _auth_user(authorization)
+    if not is_user_admin(admin["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return support_module.reply_to_support_ticket(ticket_id, "admin", admin["id"], payload.body)
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/support/tickets/{ticket_id}/resolve")
+def admin_resolve_support_ticket(ticket_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return support_module.resolve_support_ticket(ticket_id)
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/admin/support/tickets/{ticket_id}/reopen")
+def admin_reopen_support_ticket(ticket_id: int, authorization: str = Header(None)):
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return support_module.reopen_support_ticket(ticket_id)
+    except support_module.SupportError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/admin/tutoring/tutors/{tutor_id}/profile")

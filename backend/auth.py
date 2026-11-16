@@ -15,6 +15,7 @@ import bcrypt
 from .db import (
     get_session, User, Subscription, PasswordReset, ApiToken, LoginEvent,
     Institution, Qualification, ACCOUNT_TYPES, YEAR_LEVEL_LABELS,
+    ACCOUNT_STANDING_LABELS,
 )
 from .payfast import cancel_payfast_subscription
 from .tiers import TIER_ORDER
@@ -170,6 +171,51 @@ def register_user(
         return {"id": user.id, "name": user.name, "email": user.email, "account_type": user.account_type}
 
 
+def update_study_details(
+    user_id: int, *,
+    institution_id: int | None,
+    qualification_id: int | None,
+    qualification_custom_name: str = "",
+    year_of_study: int | None,
+    student_number: str = "",
+) -> None:
+    """Lets a higher-ed learner fill in/correct their own institution,
+    qualification, year of study and student number after registration
+    - these are REQUIRED at signup (see register_user above), but an
+    account created some other way (e.g. seeded directly, or switched to
+    higher_ed by an admin) can end up with them blank, with no way for
+    the learner to fix that themselves until now. Same validation as
+    register_user's higher-ed block, just applied to an existing row
+    instead of a new one."""
+    qualification_custom_name = (qualification_custom_name or "").strip()
+    student_number = (student_number or "").strip()
+
+    if not institution_id or not (qualification_id or qualification_custom_name):
+        raise AuthError("Please select your institution and qualification.")
+    if not year_of_study or not (1 <= year_of_study <= max(YEAR_LEVEL_LABELS)):
+        raise AuthError("Please select your year of study.")
+    if not student_number:
+        raise AuthError("Please enter your student number.")
+
+    with get_session() as db:
+        user = db.query(User).get(user_id)
+        if not user:
+            raise AuthError("Account not found.")
+        if user.account_type != "higher_ed":
+            raise AuthError("Only a university/college account has study details.")
+
+        if qualification_id and not qualification_custom_name:
+            qual = db.query(Qualification).get(qualification_id)
+            if not qual or qual.institution_id != institution_id:
+                raise AuthError("That qualification doesn't belong to the selected institution.")
+
+        user.higher_ed_institution_id = institution_id
+        user.higher_ed_qualification_id = qualification_id if not qualification_custom_name else None
+        user.higher_ed_qualification_custom_name = qualification_custom_name or None
+        user.higher_ed_year_of_study = year_of_study
+        user.student_number = student_number
+
+
 def login_user(email: str, password: str, source: str = None) -> dict:
     email = (email or "").strip().lower()
 
@@ -192,8 +238,12 @@ def login_user(email: str, password: str, source: str = None) -> dict:
             "is_admin": user.is_admin,
             "account_type": user.account_type,
             "cross_segment_access": user.cross_segment_access,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "account_status": user.account_status,
+            "account_status_reason": user.account_status_reason,
             "higher_ed_institution_id": user.higher_ed_institution_id,
             "higher_ed_qualification_id": user.higher_ed_qualification_id,
+            "higher_ed_qualification_custom_name": user.higher_ed_qualification_custom_name,
             "higher_ed_year_of_study": user.higher_ed_year_of_study,
             "student_number": user.student_number,
         }
@@ -398,8 +448,12 @@ def get_user_by_token(token: str):
             "is_admin": user.is_admin,
             "account_type": user.account_type,
             "cross_segment_access": user.cross_segment_access,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "account_status": user.account_status,
+            "account_status_reason": user.account_status_reason,
             "higher_ed_institution_id": user.higher_ed_institution_id,
             "higher_ed_qualification_id": user.higher_ed_qualification_id,
+            "higher_ed_qualification_custom_name": user.higher_ed_qualification_custom_name,
             "higher_ed_year_of_study": user.higher_ed_year_of_study,
             "student_number": user.student_number,
         }
@@ -428,3 +482,73 @@ def reset_password(token: str, new_password: str) -> None:
 
         user.password_hash = _hash_password(new_password)
         reset.used = True
+
+
+def _set_account_standing(user_id: int, new_status: str, reason: str = "") -> dict:
+    """Shared by suspend_user/block_user/reinstate_user - an admin can
+    never be suspended/blocked through this (a deliberate safety check,
+    same spirit as backend/set_admin.py being a server-shell-only
+    action): an admin locking out their OWN account, or another admin's,
+    this way would have no in-app way back. Returns the info the caller
+    (api_server.py) needs to email/notify the account - this module
+    doesn't send email/notifications itself, same as every other
+    function here (see reset_password/create_password_reset)."""
+    with get_session() as db:
+        user = db.query(User).get(user_id)
+        if not user:
+            raise AuthError("Account not found.")
+        if user.is_admin:
+            raise AuthError("An admin account can't be suspended or blocked this way.")
+        user.account_status = new_status
+        user.account_status_reason = (reason or "").strip() or None
+        user.account_status_changed_at = dt.datetime.utcnow()
+        return {"id": user.id, "name": user.name, "email": user.email}
+
+
+def suspend_user(user_id: int, reason: str = "") -> dict:
+    """Temporarily disables a learner account - e.g. while an investigation
+    is ongoing. They can still log in (see login_user/get_user_by_token
+    returning account_status) and see why, but every feature screen is
+    gated behind it client-side. See reinstate_user to lift this."""
+    return _set_account_standing(user_id, "suspended", reason)
+
+
+def block_user(user_id: int, reason: str = "") -> dict:
+    """Permanently disables a learner account, same gating as
+    suspend_user but meant as a final decision rather than a holding
+    pattern. See reinstate_user to lift this."""
+    return _set_account_standing(user_id, "blocked", reason)
+
+
+def reinstate_user(user_id: int) -> dict:
+    """Lifts a suspension or a block - the same action either way, since
+    both just mean "back to normal." The admin console labels the button
+    "Unsuspend" or "Unblock" depending on which one applies."""
+    return _set_account_standing(user_id, "active", "")
+
+
+def list_users_for_admin(search: str = "", limit: int = 50) -> list[dict]:
+    """A plain, searchable list of learner accounts for the admin console's
+    new Accounts tab - nothing like this existed before (the only admin
+    account-management view was tutor-specific), since suspending/blocking
+    a learner needs a way to actually find the account first. `search`
+    matches name or email, case-insensitively; empty search returns the
+    most recently created accounts first."""
+    search = (search or "").strip().lower()
+    with get_session() as db:
+        q = db.query(User)
+        if search:
+            like = f"%{search}%"
+            q = q.filter((User.name.ilike(like)) | (User.email.ilike(like)))
+        users = q.order_by(User.created_at.desc()).limit(limit).all()
+        return [
+            {
+                "id": u.id, "name": u.name, "email": u.email,
+                "account_type": u.account_type, "is_admin": u.is_admin,
+                "account_status": u.account_status,
+                "account_status_label": ACCOUNT_STANDING_LABELS.get(u.account_status, u.account_status),
+                "account_status_reason": u.account_status_reason,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            }
+            for u in users
+        ]

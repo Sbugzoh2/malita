@@ -352,6 +352,25 @@ export function deleteTutorAccount(token: string) {
   return request<{ deleted: boolean; anonymized: boolean }>("/tutor/account", { method: "DELETE", token });
 }
 
+export function updateTutorProfile(
+  token: string,
+  body: { phone: string; bio: string; availability_note: string }
+) {
+  return request<{ ok: boolean }>("/tutor/me/profile", { method: "PATCH", body, token });
+}
+
+export function updateTutorStudyDetails(
+  token: string,
+  body: {
+    higher_ed_institution_id: number | null;
+    higher_ed_qualification_id: number | null;
+    higher_ed_qualification_custom_name: string;
+    higher_ed_year_of_study: number | null;
+  }
+) {
+  return request<{ ok: boolean }>("/tutor/me/study-details", { method: "PATCH", body, token });
+}
+
 export function updateStudyDetails(
   token: string,
   body: {
@@ -1050,6 +1069,13 @@ export type TutorProfile = {
   account_status_label: string;
   account_status_reason: string | null;
   availability_note: string | null;
+  wants_higher_ed: boolean;
+  higher_ed_status: TutorApplication["status"] | null;
+  higher_ed_status_label: string | null;
+  higher_ed_institution_id: number | null;
+  higher_ed_qualification_id: number | null;
+  higher_ed_qualification_custom_name: string | null;
+  higher_ed_year_of_study: number | null;
   sessions_completed: number;
   // Lifetime - from every rated session ever, not just what the
   // Sessions tab's own cycle-based history filtering still shows.

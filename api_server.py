@@ -97,6 +97,7 @@ from backend.tutoring import (
     reallocate_after_tutor_cancellation, request_refund_for_cancelled_session,
     admin_suggest_refund, mark_refund_processed, list_requests_needing_attention,
     suspend_tutor, block_tutor, reinstate_tutor, list_tutors_for_admin,
+    update_tutor_profile, update_tutor_study_details,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -304,6 +305,19 @@ class StudyDetailsRequest(BaseModel):
 
 class ReasonRequest(BaseModel):
     reason: str = ""
+
+
+class TutorProfileUpdateRequest(BaseModel):
+    phone: str = ""
+    bio: str = ""
+    availability_note: str = ""
+
+
+class TutorStudyDetailsRequest(BaseModel):
+    higher_ed_institution_id: int | None = None
+    higher_ed_qualification_id: int | None = None
+    higher_ed_qualification_custom_name: str = ""
+    higher_ed_year_of_study: int | None = None
 
 
 class SupportTicketCreateRequest(BaseModel):
@@ -1440,6 +1454,37 @@ def tutor_me_profile(authorization: str = Header(None)):
         return get_tutor_profile(tutor["id"])
     except TutoringError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.patch("/tutor/me/profile")
+def update_my_tutor_profile(payload: TutorProfileUpdateRequest, authorization: str = Header(None)):
+    """Lets a tutor edit their own phone/bio/availability from the
+    Profile screen - see backend/tutoring.py's update_tutor_profile."""
+    tutor = _auth_tutor(authorization)
+    try:
+        update_tutor_profile(tutor["id"], phone=payload.phone, bio=payload.bio, availability_note=payload.availability_note)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.patch("/tutor/me/study-details")
+def update_my_tutor_study_details(payload: TutorStudyDetailsRequest, authorization: str = Header(None)):
+    """Lets a tutor who applied for the higher-ed track fill in/correct
+    their own institution, qualification and year of study - see
+    backend/tutoring.py's update_tutor_study_details."""
+    tutor = _auth_tutor(authorization)
+    try:
+        update_tutor_study_details(
+            tutor["id"],
+            institution_id=payload.higher_ed_institution_id,
+            qualification_id=payload.higher_ed_qualification_id,
+            qualification_custom_name=payload.higher_ed_qualification_custom_name,
+            year_of_study=payload.higher_ed_year_of_study,
+        )
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
 
 
 @app.get("/tutor/me/payouts")

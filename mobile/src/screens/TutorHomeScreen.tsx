@@ -18,7 +18,6 @@ import {
   respondToAdminMatch,
   cancelTutoringSessionAsTutor,
   submitSessionRecording,
-  deleteTutorAccount,
   YEAR_LEVEL_LABELS,
 } from "../api/client";
 import SessionDateTimePicker, {
@@ -368,7 +367,6 @@ export default function TutorHomeScreen({ navigation }: any) {
   const [sessionGroup, setSessionGroup] = useState<SessionGroup>("active");
   const [jobFilter, setJobFilter] = useState<string>("All");
   const [expandedJobId, setExpandedJobId] = useState<number | null>(null);
-  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -505,32 +503,6 @@ export default function TutorHomeScreen({ navigation }: any) {
       [
         { text: "Never mind", style: "cancel" },
         { text: "Cancel Session", style: "destructive", onPress: () => handleCancel(requestId) },
-      ]
-    );
-  }
-
-  async function runDeleteAccount() {
-    if (!token) return;
-    setDeletingAccount(true);
-    setError(null);
-    try {
-      await deleteTutorAccount(token);
-      await logout();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not delete your account. Please try again.");
-      setDeletingAccount(false);
-    }
-  }
-
-  function handleDeleteAccount() {
-    Alert.alert(
-      "Delete your account?",
-      "This permanently deletes your Malita tutor account. If you have any completed session history, your " +
-        "personal details are removed but that history stays on record (it's also part of the learners' own " +
-        "history and Malita's payout records). This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete my account", style: "destructive", onPress: runDeleteAccount },
       ]
     );
   }
@@ -1087,17 +1059,6 @@ export default function TutorHomeScreen({ navigation }: any) {
         </>
       )}
 
-      <View style={styles.deleteAccountSection}>
-        <Text style={styles.deleteAccountTitle}>Account</Text>
-        <Pressable style={styles.deleteAccountButton} onPress={handleDeleteAccount} disabled={deletingAccount}>
-          {deletingAccount ? (
-            <ActivityIndicator color={colors.error} />
-          ) : (
-            <Text style={styles.deleteAccountButtonText}>Delete My Account</Text>
-          )}
-        </Pressable>
-      </View>
-
       <Pressable style={styles.logoutButton} onPress={logout}>
         <Text style={styles.logoutText}>Log Out</Text>
       </Pressable>
@@ -1327,15 +1288,6 @@ const styles = StyleSheet.create({
   confirmLabel: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 8 },
   starRow: { flexDirection: "row", gap: 6 },
   star: { fontSize: 26 },
-  deleteAccountSection: {
-    marginTop: 32,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  deleteAccountTitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 8 },
-  deleteAccountButton: { alignSelf: "flex-start" },
-  deleteAccountButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
   logoutButton: {
     marginTop: 24,
     marginBottom: 24,

@@ -1800,6 +1800,16 @@ def get_tutor_profile(tutor_id: int) -> dict:
             "account_status_label": ACCOUNT_STANDING_LABELS.get(tutor.account_status, tutor.account_status),
             "account_status_reason": tutor.account_status_reason,
             "availability_note": tutor.availability_note,
+            "wants_higher_ed": tutor.wants_higher_ed,
+            "higher_ed_status": tutor.higher_ed_status,
+            "higher_ed_status_label": (
+                TUTOR_STATUS_LABELS.get(tutor.higher_ed_status, tutor.higher_ed_status)
+                if tutor.higher_ed_status else None
+            ),
+            "higher_ed_institution_id": tutor.higher_ed_institution_id,
+            "higher_ed_qualification_id": tutor.higher_ed_qualification_id,
+            "higher_ed_qualification_custom_name": tutor.higher_ed_qualification_custom_name,
+            "higher_ed_year_of_study": tutor.higher_ed_year_of_study,
             "subjects": [
                 {"subject": s.subject, "matric_percentage": s.matric_percentage,
                  "topics": s.topics, "hourly_rate_zar": s.hourly_rate_zar, "is_active": s.is_active}
@@ -1812,6 +1822,61 @@ def get_tutor_profile(tutor_id: int) -> dict:
             "badge": _badge_for(sessions_completed, average_rating),
             "sessions": [_serialize_request(s) for s in sessions],
         }
+
+
+def update_tutor_profile(tutor_id: int, *, phone: str = "", bio: str = "", availability_note: str = "") -> None:
+    """Lets a tutor edit their own personal info from the Profile screen -
+    phone, bio, and availability, same free-text fields collected at
+    apply time (see apply_as_tutor). Deliberately NOT here: name/email
+    (identity, not a casual edit), subjects/rates (TutorApplyScreen's
+    own flow), and bank details (sensitive enough to leave admin-
+    reviewed for now, same as at apply time)."""
+    with get_session() as db:
+        tutor = db.query(TutorAccount).get(tutor_id)
+        if not tutor:
+            raise TutoringError("Tutor account not found.")
+        tutor.phone = phone.strip() or None
+        tutor.bio = bio.strip() or None
+        tutor.availability_note = availability_note.strip() or None
+
+
+def update_tutor_study_details(
+    tutor_id: int, *,
+    institution_id: int | None,
+    qualification_id: int | None,
+    qualification_custom_name: str = "",
+    year_of_study: int | None,
+) -> None:
+    """Lets a tutor who already applied for the higher-ed track (wants_
+    higher_ed) fill in/correct their own institution, qualification and
+    year of study after the fact - mirrors backend/auth.py's learner-
+    side update_study_details. Only valid for a tutor who applied for
+    higher-ed at all; doesn't let a high-school-only tutor opt into the
+    higher-ed track here (that's a bigger step - a fresh application -
+    not a profile edit)."""
+    qualification_custom_name = (qualification_custom_name or "").strip()
+
+    if not institution_id or not (qualification_id or qualification_custom_name):
+        raise TutoringError("Please select your institution and qualification.")
+    if not year_of_study or not (1 <= year_of_study <= max(YEAR_LEVEL_LABELS)):
+        raise TutoringError("Please select your year of study.")
+
+    with get_session() as db:
+        tutor = db.query(TutorAccount).get(tutor_id)
+        if not tutor:
+            raise TutoringError("Tutor account not found.")
+        if not tutor.wants_higher_ed:
+            raise TutoringError("You haven't applied for the higher-ed tutoring track.")
+
+        if qualification_id and not qualification_custom_name:
+            qual = db.query(Qualification).get(qualification_id)
+            if not qual or qual.institution_id != institution_id:
+                raise TutoringError("That qualification doesn't belong to the selected institution.")
+
+        tutor.higher_ed_institution_id = institution_id
+        tutor.higher_ed_qualification_id = qualification_id if not qualification_custom_name else None
+        tutor.higher_ed_qualification_custom_name = qualification_custom_name or None
+        tutor.higher_ed_year_of_study = year_of_study
 
 
 def get_learner_tutoring_stats(learner_user_id: int) -> dict:

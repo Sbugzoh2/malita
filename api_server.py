@@ -49,7 +49,7 @@ from backend.auth import (
     register_user, login_user, AuthError, is_user_admin,
     create_api_token, get_user_by_token, revoke_api_token,
     create_password_reset, reset_password, cancel_subscription,
-    schedule_downgrade, delete_account, update_study_details,
+    schedule_downgrade, delete_account, update_study_details, update_personal_info,
     suspend_user, block_user, reinstate_user, list_users_for_admin,
 )
 from backend import support as support_module
@@ -301,6 +301,13 @@ class StudyDetailsRequest(BaseModel):
     higher_ed_qualification_custom_name: str = ""
     higher_ed_year_of_study: int | None = None
     student_number: str = ""
+
+
+class PersonalInfoUpdateRequest(BaseModel):
+    province: str
+    city_town: str
+    school: str = ""
+    grade: int | None = None
 
 
 class ReasonRequest(BaseModel):
@@ -836,6 +843,21 @@ def update_my_study_details(payload: StudyDetailsRequest, authorization: str = H
             qualification_custom_name=payload.higher_ed_qualification_custom_name,
             year_of_study=payload.higher_ed_year_of_study,
             student_number=payload.student_number,
+        )
+    except AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.patch("/me/personal-info")
+def update_my_personal_info(payload: PersonalInfoUpdateRequest, authorization: str = Header(None)):
+    """Lets a learner edit their own province/city/school/grade from the
+    Account screen - see backend/auth.py's update_personal_info."""
+    user = _auth_user(authorization)
+    try:
+        update_personal_info(
+            user["id"], province=payload.province, city_town=payload.city_town,
+            school=payload.school, grade=payload.grade,
         )
     except AuthError as e:
         raise HTTPException(status_code=400, detail=str(e))

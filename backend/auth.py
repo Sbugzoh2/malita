@@ -216,6 +216,44 @@ def update_study_details(
         user.student_number = student_number
 
 
+def update_personal_info(
+    user_id: int, *,
+    province: str,
+    city_town: str,
+    school: str = "",
+    grade: int | None = None,
+) -> None:
+    """Lets a learner edit their own personal info from the Account
+    screen - province and city/town for everyone, school and grade for
+    a high-school account only (silently ignored for a higher_ed
+    account, which tracks the equivalent via update_study_details
+    instead). Deliberately NOT editable here: name/email (identity,
+    not a casual edit) and id_number (tied to date_of_birth and a
+    uniqueness constraint - changing it post-registration is a bigger
+    deal than a profile edit, same reasoning as a tutor's bank details
+    staying out of their own self-service edit)."""
+    province = (province or "").strip()
+    city_town = (city_town or "").strip()
+    school = (school or "").strip()
+
+    if not province:
+        raise AuthError("Please select your province.")
+    if not city_town:
+        raise AuthError("Please enter your city or town.")
+    if grade is not None and grade not in (10, 11, 12):
+        raise AuthError("Grade must be 10, 11, or 12.")
+
+    with get_session() as db:
+        user = db.query(User).get(user_id)
+        if not user:
+            raise AuthError("Account not found.")
+        user.province = province
+        user.city_town = city_town
+        if user.account_type == "high_school":
+            user.school = school or None
+            user.grade = grade
+
+
 def login_user(email: str, password: str, source: str = None) -> dict:
     email = (email or "").strip().lower()
 
@@ -241,6 +279,11 @@ def login_user(email: str, password: str, source: str = None) -> dict:
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "account_status": user.account_status,
             "account_status_reason": user.account_status_reason,
+            "school": user.school,
+            "grade": user.grade,
+            "province": user.province,
+            "city_town": user.city_town,
+            "id_number": user.id_number,
             "higher_ed_institution_id": user.higher_ed_institution_id,
             "higher_ed_qualification_id": user.higher_ed_qualification_id,
             "higher_ed_qualification_custom_name": user.higher_ed_qualification_custom_name,
@@ -451,6 +494,11 @@ def get_user_by_token(token: str):
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "account_status": user.account_status,
             "account_status_reason": user.account_status_reason,
+            "school": user.school,
+            "grade": user.grade,
+            "province": user.province,
+            "city_town": user.city_town,
+            "id_number": user.id_number,
             "higher_ed_institution_id": user.higher_ed_institution_id,
             "higher_ed_qualification_id": user.higher_ed_qualification_id,
             "higher_ed_qualification_custom_name": user.higher_ed_qualification_custom_name,

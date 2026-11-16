@@ -1164,14 +1164,21 @@ const styles = StyleSheet.create({
   statValueDate: { fontSize: 20, color: "#fff", fontWeight: "800", marginTop: 4 },
   statCardFooterRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
+    rowGap: 4,
+    columnGap: 12,
     marginTop: 14,
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "#2b2b29",
   },
-  statFooterText: { fontSize: 11, color: "#8a8984", fontWeight: "500" },
+  // flexShrink lets a long footer string wrap within its own line instead
+  // of the row squeezing both Texts together with no gap between them -
+  // reported as "R600 total before Malita's feereschedule early to avoid
+  // cancellations" running together with no space at all.
+  statFooterText: { fontSize: 11, color: "#8a8984", fontWeight: "500", flexShrink: 1 },
   filterRow: { flexGrow: 0, marginBottom: 16 },
   filterRowContent: { gap: 8, paddingRight: 8 },
   filterChip: {

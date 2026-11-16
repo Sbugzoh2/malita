@@ -69,6 +69,13 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     school = Column(String(255), nullable=True)
+    # A high-school learner's own current grade (10/11/12) - distinct
+    # from TutoringSessionRequest.grade, which is per-request and was
+    # the only place this ever lived before; nullable since this is new
+    # and every existing high-school account predates it. Meaningless
+    # for a higher_ed account (year of study is tracked separately via
+    # higher_ed_year_of_study below).
+    grade = Column(Integer, nullable=True)
     province = Column(String(50), nullable=True, index=True)
     city_town = Column(String(120), nullable=True, index=True)
     # Nullable so existing rows (predating ID-number collection) stay valid -
@@ -1056,6 +1063,7 @@ def init_db():
     _ensure_column("tutoring_session_requests", "lapse_reason", "VARCHAR(40)")
     _ensure_column("tutoring_session_requests", "reminder_24h_sent_at", "TIMESTAMP")
     _ensure_column_width("tutoring_session_requests", "status", 32)
+    _ensure_column("users", "grade", "INTEGER")
     _ensure_column("users", "account_status", "VARCHAR(20) DEFAULT 'active'")
     _ensure_column("users", "account_status_reason", "VARCHAR")
     _ensure_column("users", "account_status_changed_at", "TIMESTAMP")

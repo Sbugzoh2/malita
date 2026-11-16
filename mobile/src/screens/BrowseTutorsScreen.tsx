@@ -20,6 +20,7 @@ function textMatches(haystack: string | null | undefined, query: string): boolea
 // tutor avatars - a tutor's name has no fixed catalog to hand-map a
 // color from.
 const AVATAR_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+const BADGE_COLORS: Record<string, string> = { bronze: "#cd7f32", silver: "#9aa0a6", gold: "#eda100" };
 function colorForName(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
@@ -166,8 +167,18 @@ export default function BrowseTutorsScreen({ navigation }: any) {
                 <Text style={styles.cardAvatarText}>{tutor.name.charAt(0).toUpperCase()}</Text>
               </View>
               <View style={styles.cardHeaderTextCol}>
-                <Text style={styles.cardTitle}>{tutor.name}</Text>
-                <Text style={styles.cardMeta}>{tutor.sessions_completed} session(s) completed on Malita</Text>
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.cardTitle}>{tutor.name}</Text>
+                  {tutor.badge ? (
+                    <View style={[styles.badgePill, { backgroundColor: BADGE_COLORS[tutor.badge] }]}>
+                      <Text style={styles.badgePillText}>{tutor.badge.toUpperCase()}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.cardMeta}>
+                  {tutor.sessions_completed} session(s) completed on Malita
+                  {tutor.average_rating != null ? ` · ${tutor.average_rating.toFixed(1)}★ avg` : ""}
+                </Text>
               </View>
             </View>
             {tutor.bio ? <Text style={styles.bio}>{tutor.bio}</Text> : null}
@@ -252,7 +263,10 @@ const styles = StyleSheet.create({
   cardAvatar: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   cardAvatarText: { fontSize: 17, fontWeight: "800", color: "#fff" },
   cardHeaderTextCol: { flex: 1, minWidth: 0 },
+  cardTitleRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
   cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
+  badgePill: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
+  badgePillText: { fontSize: 10, fontWeight: "800", color: "#fff", letterSpacing: 0.4 },
   cardMeta: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
   bio: { fontSize: 13, color: colors.text, marginTop: 8, lineHeight: 18 },
   offerRow: {

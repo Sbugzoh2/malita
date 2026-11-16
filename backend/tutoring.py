@@ -1455,11 +1455,19 @@ def list_approved_tutors(subject: str | None = None, module_id: int | None = Non
             )
             if module_id and not any(m.module_id == module_id for m in higher_ed_modules):
                 continue
-            sessions_completed = (
+            tutor_sessions = (
                 db.query(TutoringSessionRequest)
-                .filter(TutoringSessionRequest.tutor_id == t.id, TutoringSessionRequest.status == "completed")
-                .count()
+                .filter(TutoringSessionRequest.tutor_id == t.id)
+                .all()
             )
+            sessions_completed = sum(1 for s in tutor_sessions if s.status == "completed")
+            # Same lifetime rating + badge a tutor's own Sessions tab and
+            # admin's tutor-profile view show (get_tutor_profile) - a
+            # learner browsing the public directory should be able to see
+            # the same reputation before picking a specific tutor.
+            tutor_ratings = [s.learner_rating for s in tutor_sessions if s.learner_rating is not None]
+            average_rating = round(sum(tutor_ratings) / len(tutor_ratings), 2) if tutor_ratings else None
+            badge = _badge_for(sessions_completed, average_rating)
             # The tutor's OWN declared higher-ed qualification (not the
             # per-module catalog rows below) - this, not a catalog match,
             # is what an admin actually needs to judge whether a tutor
@@ -1485,6 +1493,8 @@ def list_approved_tutors(subject: str | None = None, module_id: int | None = Non
                 "id": t.id, "name": t.name, "email": t.email,
                 "bio": t.bio, "availability_note": t.availability_note,
                 "sessions_completed": sessions_completed,
+                "average_rating": average_rating,
+                "badge": badge,
                 "higher_ed_profile": higher_ed_profile,
                 "subjects": [
                     {"subject": s.subject, "matric_percentage": s.matric_percentage,
@@ -1513,13 +1523,37 @@ def list_approved_tutors(subject: str | None = None, module_id: int | None = Non
         return out
 
 
+def _badge_for(completed_count: int, average_rating: float | None) -> str | None:
+    """A simple reputation badge from LIFETIME completed-session count
+    and average rating received - deliberately unaffected by the
+    Sessions/My Requests screens' own cycle-based history filtering
+    (mobile/src/theme.ts's isBeforeCurrentCycle), since a badge should
+    reflect a tutor's or learner's whole track record, not just what's
+    still visible this cycle. Thresholds are a reasonable starting point
+    (volume AND quality both required for each tier), not a fixed spec -
+    easy to retune later without touching any caller."""
+    if average_rating is None:
+        return None
+    if completed_count >= 25 and average_rating >= 4.5:
+        return "gold"
+    if completed_count >= 10 and average_rating >= 4.0:
+        return "silver"
+    if completed_count >= 3 and average_rating >= 3.5:
+        return "bronze"
+    return None
+
+
 def get_tutor_profile(tutor_id: int) -> dict:
     """A tutor's full standing record - their application details,
     subjects, and every session they've ever been matched to (newest
     first) - so an admin can review a tutor's track record before
     re-matching them to a new request. An approved tutor's history
     persists here indefinitely, exactly like an employee's record,
-    rather than being thrown away once a session ends."""
+    rather than being thrown away once a session ends. This is also
+    what the tutor's OWN app reuses for "my sessions" (see
+    api_server.py's /tutor/me/profile) - the mobile app does its own
+    cycle-based filtering of the `sessions` list for display, this
+    function always returns everything."""
     _expire_lapsed_payments()
     _expire_stale_admin_proposals()
     with get_session() as db:
@@ -1533,6 +1567,8 @@ def get_tutor_profile(tutor_id: int) -> dict:
             .all()
         )
         sessions_completed = sum(1 for s in sessions if s.status == "completed")
+        ratings = [s.learner_rating for s in sessions if s.learner_rating is not None]
+        average_rating = round(sum(ratings) / len(ratings), 2) if ratings else None
         return {
             "id": tutor.id, "name": tutor.name, "email": tutor.email,
             "phone": tutor.phone, "bio": tutor.bio,
@@ -1545,7 +1581,34 @@ def get_tutor_profile(tutor_id: int) -> dict:
                 for s in tutor.subjects
             ],
             "sessions_completed": sessions_completed,
+            # Lifetime, from every rated session ever - not just this
+            # cycle's (see this function's own docstring above).
+            "average_rating": average_rating,
+            "badge": _badge_for(sessions_completed, average_rating),
             "sessions": [_serialize_request(s) for s in sessions],
+        }
+
+
+def get_learner_tutoring_stats(learner_user_id: int) -> dict:
+    """A learner's lifetime standing as a tutoring-marketplace
+    participant - completed-session count and average rating RECEIVED
+    (from tutors, i.e. each session's tutor_rating) - mirrors
+    get_tutor_profile's own sessions_completed/average_rating/badge,
+    computed from every session ever regardless of the My Requests
+    screen's own cycle-based history filtering."""
+    with get_session() as db:
+        reqs = (
+            db.query(TutoringSessionRequest)
+            .filter(TutoringSessionRequest.learner_user_id == learner_user_id)
+            .all()
+        )
+        completed_count = sum(1 for r in reqs if r.status == "completed")
+        ratings = [r.tutor_rating for r in reqs if r.tutor_rating is not None]
+        average_rating = round(sum(ratings) / len(ratings), 2) if ratings else None
+        return {
+            "completed_count": completed_count,
+            "average_rating": average_rating,
+            "badge": _badge_for(completed_count, average_rating),
         }
 
 
@@ -2353,6 +2416,14 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "institution_id": r.institution_id,
         "qualification_id": r.qualification_id,
         "module_year_level": r.module.year_level if r.module else None,
+        # The real catalog qualification's name, when one was picked (set
+        # even for an is_custom_higher_ed request whose MODULE was custom
+        # but whose qualification wasn't) - lets the UI show "Statistics:
+        # Central Tendency" instead of just the custom module name alone,
+        # which otherwise loses all subject context once it's grouped
+        # into the catch-all "Other" bucket (every is_custom_higher_ed
+        # request lands there regardless of its real subject).
+        "qualification_name": r.qualification.name if r.qualification else None,
         "learner_name": r.learner.name if r.learner else None,
         "grade": r.grade,
         "topic": r.topic, "preferred_times_note": r.preferred_times_note,
@@ -2372,6 +2443,8 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "learner_rating": r.learner_rating,
         "tutor_confirmed": r.tutor_confirmed_at is not None,
         "tutor_rating": r.tutor_rating,
+        "completed_at": _iso_utc(r.completed_at),
+        "cancelled_at": _iso_utc(r.cancelled_at),
         "cancelled_by": r.cancelled_by,
         "cancellation_reason": r.cancellation_reason,
         "refund_requested_at": _iso_utc(r.refund_requested_at),

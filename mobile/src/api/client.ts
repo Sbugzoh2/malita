@@ -358,6 +358,10 @@ export type TutoringRequest = {
   // maps it to a display label the same way custom_module_year_level
   // already is. Null for a high-school request or a custom ("Other") module.
   module_year_level: number | null;
+  // The real catalog qualification's name, when one was picked - set
+  // even for an is_custom_higher_ed request whose module alone was
+  // custom (qualification_id still points at a real catalog row then).
+  qualification_name: string | null;
   // The learner's name - shown to a tutor deciding whether to accept an
   // open request, same as tutor_name/preferred_tutor_name already are.
   learner_name: string | null;
@@ -399,6 +403,11 @@ export type TutoringRequest = {
   learner_rating: number | null;
   tutor_confirmed: boolean;
   tutor_rating: number | null;
+  // When the session finished, by whichever path - used by the Sessions/
+  // My Requests screens' own cycle-based history filtering (see
+  // theme.ts's isBeforeCurrentCycle), not just for display.
+  completed_at: string | null;
+  cancelled_at: string | null;
   cancelled_by: "learner" | "tutor" | "admin" | null;
   cancellation_reason: string | null;
   // Set once the learner chooses a refund after a tutor cancelled an
@@ -545,6 +554,10 @@ export type DirectoryTutor = {
   bio: string | null;
   availability_note: string | null;
   sessions_completed: number;
+  // Lifetime rating received + badge - same fields and thresholds as
+  // the tutor's own Sessions tab (see backend/tutoring.py's _badge_for).
+  average_rating: number | null;
+  badge: Badge;
   subjects: { subject: string; matric_percentage: number; topics: string | null; hourly_rate_zar: number | null }[];
   higher_ed_modules: {
     id: number; name: string; year_level: number; year_level_label: string;
@@ -582,8 +595,20 @@ export function confirmTutoringSessionAsLearner(
   });
 }
 
+// A badge tier - "bronze"/"silver"/"gold", computed server-side from
+// lifetime completed-session count + average rating (see backend/
+// tutoring.py's _badge_for); null means no badge yet.
+export type Badge = "bronze" | "silver" | "gold" | null;
+
 export function fetchMyTutoringRequests(token: string) {
-  return request<{ requests: TutoringRequest[] }>("/tutoring/requests/mine", { token });
+  return request<{
+    requests: TutoringRequest[];
+    // Lifetime stats (unaffected by any cycle-based history filtering
+    // the screen itself does on `requests`) - see get_learner_tutoring_stats.
+    completed_count: number;
+    average_rating: number | null;
+    badge: Badge;
+  }>("/tutoring/requests/mine", { token });
 }
 
 // Linking.openURL can't attach an Authorization header, so (same pattern
@@ -989,6 +1014,10 @@ export type TutorProfile = {
   status_label: string;
   availability_note: string | null;
   sessions_completed: number;
+  // Lifetime - from every rated session ever, not just what the
+  // Sessions tab's own cycle-based history filtering still shows.
+  average_rating: number | null;
+  badge: Badge;
   subjects: {
     subject: string;
     matric_percentage: number;

@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linki
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
-import { colors } from "../theme";
+import { colors, isBeforeCurrentCycle } from "../theme";
 import NotificationBell from "../components/NotificationBell";
 import {
   ApiError,
@@ -17,7 +17,28 @@ import {
   reallocateAfterTutorCancellation,
   requestRefundForCancelledSession,
   TutoringRequest,
+  Badge,
 } from "../api/client";
+
+const BADGE_COLORS: Record<string, string> = { bronze: "#cd7f32", silver: "#9aa0a6", gold: "#eda100" };
+
+// Whichever timestamp actually closed this request, by status.
+function closedAtFor(r: TutoringRequest): string | null {
+  if (r.status === "completed") return r.completed_at;
+  if (r.status === "cancelled") return r.cancelled_at;
+  if (r.status === "lapsed") return r.lapsed_at;
+  return null;
+}
+
+// Same automatic, calendar-based "clear session history each payment
+// cycle" as TutorHomeScreen's own isHiddenHistory - an active (still
+// open) request is never hidden, only a finished one from an
+// already-closed cycle. Nothing is deleted: lifetimeStats above comes
+// from the backend's own unfiltered count, so it's unaffected.
+function isHiddenHistory(r: TutoringRequest): boolean {
+  if (groupForStatus(r.status) === "active") return false;
+  return isBeforeCurrentCycle(closedAtFor(r));
+}
 
 // Same hash-by-name palette as the tutor Jobs screen's subject avatars -
 // requests can carry any subject string, so there's no fixed catalog to
@@ -161,6 +182,11 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState(0);
   const [requests, setRequests] = useState<TutoringRequest[] | null>(null);
+  // Lifetime standing - unaffected by this screen's own cycle-based
+  // history filtering below (see theme.ts's isBeforeCurrentCycle).
+  const [lifetimeStats, setLifetimeStats] = useState<{
+    completed_count: number; average_rating: number | null; badge: Badge;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ratingDraft, setRatingDraft] = useState<Record<number, number>>({});
   const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
@@ -177,7 +203,12 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const load = useCallback(() => {
     if (!token) return;
     fetchMyTutoringRequests(token)
-      .then((res) => setRequests(res.requests))
+      .then((res) => {
+        setRequests(res.requests);
+        setLifetimeStats({
+          completed_count: res.completed_count, average_rating: res.average_rating, badge: res.badge,
+        });
+      })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load your requests."));
   }, [token]);
 
@@ -317,8 +348,12 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     }
   }
 
-  const activeCount = requests ? requests.filter((r) => groupForStatus(r.status) === "active").length : 0;
-  const paymentDueCount = requests ? requests.filter((r) => r.status === "awaiting_payment").length : 0;
+  // Everything still open, plus only this cycle's finished requests -
+  // last cycle's completed/cancelled/lapsed ones are still in
+  // `requests` (lifetimeStats needs them), just not shown here any more.
+  const visibleRequests = (requests ?? []).filter((r) => !isHiddenHistory(r));
+  const activeCount = visibleRequests.filter((r) => groupForStatus(r.status) === "active").length;
+  const paymentDueCount = visibleRequests.filter((r) => r.status === "awaiting_payment").length;
 
   return (
     <View style={styles.screen}>
@@ -335,6 +370,25 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
         />
       </View>
       <Text style={styles.title}>My Requests</Text>
+
+      {lifetimeStats && lifetimeStats.completed_count > 0 && (
+        <View style={styles.standingCard}>
+          <View style={styles.standingRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.standingLabel}>Lifetime</Text>
+              <Text style={styles.standingValue}>
+                {lifetimeStats.completed_count} session{lifetimeStats.completed_count === 1 ? "" : "s"} completed
+                {lifetimeStats.average_rating != null ? ` · ${lifetimeStats.average_rating.toFixed(1)}★ avg` : ""}
+              </Text>
+            </View>
+            {lifetimeStats.badge ? (
+              <View style={[styles.badgePill, { backgroundColor: BADGE_COLORS[lifetimeStats.badge] }]}>
+                <Text style={styles.badgePillText}>{lifetimeStats.badge.toUpperCase()}</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      )}
 
       {requests && requests.length > 0 && (
         <View style={styles.statCard}>
@@ -361,10 +415,10 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : requests.length === 0 ? (
         <Text style={styles.empty}>You haven't requested a tutor yet.</Text>
-      ) : requests.filter((r) => groupForStatus(r.status) === group).length === 0 ? (
+      ) : visibleRequests.filter((r) => groupForStatus(r.status) === group).length === 0 ? (
         <Text style={styles.empty}>{GROUP_EMPTY_LABEL[group]}</Text>
       ) : (
-        requests.filter((r) => groupForStatus(r.status) === group).map((r) => (
+        visibleRequests.filter((r) => groupForStatus(r.status) === group).map((r) => (
           <View key={r.id} style={styles.card}>
             <View style={styles.cardHeaderRow}>
               <View style={[styles.cardAvatar, { backgroundColor: colorForSubject(r.subject) }]}>
@@ -604,7 +658,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     {requests && requests.length > 0 && (
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {GROUP_TABS.map((tab) => {
-          const count = requests.filter((r) => groupForStatus(r.status) === tab.key).length;
+          const count = visibleRequests.filter((r) => groupForStatus(r.status) === tab.key).length;
           const active = group === tab.key;
           const tint = active ? colors.primary : "#8a8984";
           return (
@@ -636,6 +690,15 @@ const styles = StyleSheet.create({
   backLinkText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
   title: { fontSize: 22, fontWeight: "800", color: colors.text, marginTop: 4, marginBottom: 16 },
   statCard: { backgroundColor: "#0b0b0b", borderRadius: 20, padding: 18, marginBottom: 16 },
+  standingCard: {
+    backgroundColor: colors.surface, borderRadius: 16, padding: 16, marginBottom: 16,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  standingRow: { flexDirection: "row", alignItems: "center" },
+  standingLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  standingValue: { fontSize: 14, color: colors.text, fontWeight: "700", marginTop: 4 },
+  badgePill: { borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12, marginLeft: 10 },
+  badgePillText: { fontSize: 11, fontWeight: "800", color: "#fff", letterSpacing: 0.4 },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   statLabel: { fontSize: 11, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
   statValue: { fontSize: 26, color: "#fff", fontWeight: "800", marginTop: 4 },

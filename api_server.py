@@ -74,7 +74,7 @@ from backend.payfast import build_checkout_payload, build_checkout_page_html
 from backend.tutoring import (
     TutoringError, apply_as_tutor, list_tutor_applications, approve_tutor,
     reject_tutor, list_approved_tutors, request_tutoring_session,
-    list_learner_requests, list_open_requests, list_open_requests_for_tutor,
+    list_learner_requests, get_learner_tutoring_stats, list_open_requests, list_open_requests_for_tutor,
     list_all_tutoring_sessions,
     match_tutor_to_request, tutor_respond_to_admin_match, accept_tutoring_request, propose_new_time,
     respond_to_time_proposal, confirm_session_by_learner, confirm_session_by_tutor,
@@ -1703,7 +1703,7 @@ def tutoring_respond_to_proposal(
 @app.get("/tutoring/requests/mine")
 def tutoring_my_requests(authorization: str = Header(None)):
     user = _auth_user(authorization)
-    return {"requests": list_learner_requests(user["id"])}
+    return {"requests": list_learner_requests(user["id"]), **get_learner_tutoring_stats(user["id"])}
 
 
 @app.get("/tutoring/requests/{request_id}/checkout-page", response_class=HTMLResponse)

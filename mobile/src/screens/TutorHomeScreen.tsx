@@ -3,7 +3,7 @@ import { Alert, View, Text, Pressable, TextInput, StyleSheet, ScrollView, Activi
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
-import { colors } from "../theme";
+import { colors, isBeforeCurrentCycle } from "../theme";
 import {
   ApiError,
   TutorProfile,
@@ -50,6 +50,22 @@ function levelLabelFor(r: { grade: number | null; module_year_level: number | nu
   if (r.grade) return `Grade ${r.grade}`;
   const yearLevel = r.module_year_level ?? r.custom_module_year_level;
   return yearLevel != null ? YEAR_LEVEL_LABELS[yearLevel] ?? null : null;
+}
+
+// A custom higher-ed request (module not in the catalog) always lands in
+// the Jobs tab's catch-all "Other" bucket regardless of its real subject
+// (see groupKeyFor), so unlike a catalog module - whose subject is right
+// there in its group header - its card needs to carry that context
+// itself: "Statistics: Central Tendency" rather than just "Central
+// Tendency" with no subject anywhere on the card.
+function jobTitleFor(r: {
+  topic: string | null; custom_module_name: string | null; subject: string;
+  is_custom_higher_ed: boolean; custom_qualification_name: string | null; qualification_name: string | null;
+}): string {
+  const base = r.topic || r.custom_module_name || r.subject;
+  if (!r.is_custom_higher_ed) return base;
+  const context = r.custom_qualification_name || r.qualification_name;
+  return context ? `${context}: ${base}` : base;
 }
 
 function lastDayOfMonth(year: number, monthIndex0: number): Date {
@@ -147,6 +163,32 @@ function groupForStatus(status: string): SessionGroup {
   if (status === "completed") return "completed";
   return "active";
 }
+
+// Whichever timestamp actually closed this session, by status - the one
+// isBeforeCurrentCycle checks to decide if it's old enough to drop from
+// the Sessions tab's history view.
+function closedAtFor(s: {
+  status: string; completed_at: string | null; cancelled_at: string | null; lapsed_at: string | null;
+}): string | null {
+  if (s.status === "completed") return s.completed_at;
+  if (s.status === "cancelled") return s.cancelled_at;
+  if (s.status === "lapsed") return s.lapsed_at;
+  return null;
+}
+
+// Automatic, calendar-based "clear session history each payment cycle" -
+// an "active" (still-open) session is never hidden this way, only a
+// finished one (completed/cancelled/lapsed) from a cycle that's already
+// closed. Nothing is deleted: this only affects what this screen shows -
+// see theme.ts's isBeforeCurrentCycle for why no stored "last cleared"
+// state is needed, and get_tutor_profile for why lifetime stats (the
+// completed count/rating/badge a tutor's profile shows) are unaffected.
+function isHiddenHistory(s: Parameters<typeof closedAtFor>[0] & { status: string }): boolean {
+  if (groupForStatus(s.status) === "active") return false;
+  return isBeforeCurrentCycle(closedAtFor(s));
+}
+
+const BADGE_COLORS: Record<string, string> = { bronze: "#cd7f32", silver: "#9aa0a6", gold: "#eda100" };
 
 const SESSION_GROUP_TABS: { key: SessionGroup; label: string }[] = [
   { key: "active", label: "Active" },
@@ -523,7 +565,7 @@ export default function TutorHomeScreen() {
                             onPress={() => setExpandedJobId(expandedJobId === r.id ? null : r.id)}
                           >
                             <View style={styles.jobCardInfo}>
-                              <Text style={styles.jobTitle}>{r.topic || r.custom_module_name || r.subject}</Text>
+                              <Text style={styles.jobTitle}>{jobTitleFor(r)}</Text>
                               {(() => {
                                 const levelLabel = levelLabelFor(r);
                                 return r.learner_name || levelLabel ? (
@@ -620,7 +662,12 @@ export default function TutorHomeScreen() {
             ) : profile.sessions.length === 0 ? (
               <Text style={styles.empty}>No sessions yet - accept an open request to get started.</Text>
             ) : (() => {
-              const lostSessions = profile.sessions.filter((s) => {
+              // Everything still open, plus only this cycle's finished
+              // sessions - last cycle's completed/cancelled/lapsed items
+              // are still in `profile.sessions` (lifetime stats need
+              // them), just not shown here any more.
+              const visibleSessions = profile.sessions.filter((s) => !isHiddenHistory(s));
+              const lostSessions = visibleSessions.filter((s) => {
                 const g = groupForStatus(s.status);
                 return g === "cancelled" || g === "lapsed";
               });
@@ -631,6 +678,24 @@ export default function TutorHomeScreen() {
               );
               return (
               <>
+                {profile.sessions_completed > 0 ? (
+                  <View style={styles.standingCard}>
+                    <View style={styles.standingRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.standingLabel}>Lifetime</Text>
+                        <Text style={styles.standingValue}>
+                          {profile.sessions_completed} session{profile.sessions_completed === 1 ? "" : "s"} completed
+                          {profile.average_rating != null ? ` · ${profile.average_rating.toFixed(1)}★ avg` : ""}
+                        </Text>
+                      </View>
+                      {profile.badge ? (
+                        <View style={[styles.badgePill, { backgroundColor: BADGE_COLORS[profile.badge] }]}>
+                          <Text style={styles.badgePillText}>{profile.badge.toUpperCase()}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                ) : null}
                 {lostSessions.length > 0 ? (
                   <View style={styles.statCard}>
                     <View style={styles.statCardRow}>
@@ -653,7 +718,7 @@ export default function TutorHomeScreen() {
                 ) : null}
                 <View style={styles.sectionRow}>
                   {SESSION_GROUP_TABS.map((tab) => {
-                    const count = profile.sessions.filter((s) => groupForStatus(s.status) === tab.key).length;
+                    const count = visibleSessions.filter((s) => groupForStatus(s.status) === tab.key).length;
                     return (
                       <Pressable
                         key={tab.key}
@@ -667,10 +732,10 @@ export default function TutorHomeScreen() {
                     );
                   })}
                 </View>
-                {profile.sessions.filter((s) => groupForStatus(s.status) === sessionGroup).length === 0 ? (
+                {visibleSessions.filter((s) => groupForStatus(s.status) === sessionGroup).length === 0 ? (
                   <Text style={styles.empty}>{SESSION_GROUP_EMPTY_LABEL[sessionGroup]}</Text>
                 ) : (
-                  profile.sessions
+                  visibleSessions
                     .filter((s) => groupForStatus(s.status) === sessionGroup)
                     .map((sess) => (
                 <View key={sess.id} style={styles.card}>
@@ -1084,6 +1149,19 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
   },
+  standingCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  standingRow: { flexDirection: "row", alignItems: "center" },
+  standingLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  standingValue: { fontSize: 14, color: colors.text, fontWeight: "700", marginTop: 4 },
+  badgePill: { borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12, marginLeft: 10 },
+  badgePillText: { fontSize: 11, fontWeight: "800", color: "#fff", letterSpacing: 0.4 },
   cardText: { fontSize: 14, color: colors.text, lineHeight: 20 },
   cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
   cardStatus: { fontSize: 13, fontWeight: "700", color: colors.primary, marginTop: 4 },

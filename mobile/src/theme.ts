@@ -195,3 +195,33 @@ export const EXAMPLE_QUESTIONS: Record<string, string[]> = {
   Electrochemistry: ["Given Cu2+/Cu, E°=+0.34 V and Zn2+/Zn, E°=-0.76 V, calculate E°cell."],
   "Organic Chemistry": ["Give the IUPAC name of CH3-CH2-CH2-CH3."],
 };
+
+// Malita's payout cycle, mirrored from backend/tutoring.py's own copy
+// (_next_pay_day/_current_cycle_start): a half-month window, 1st-15th
+// or 16th-end of month, SAST. Used by the Sessions (tutor) and My
+// Requests (learner) screens to hide finished history (completed/
+// cancelled/lapsed) from a CLOSED cycle, automatically, once the
+// calendar rolls into the next one - no stored "cleared" state, so
+// there's nothing to reset: the boundary just moves forward on its own.
+// Lifetime stats (completed count, average rating, badge) are computed
+// server-side from everything regardless of this boundary - see
+// backend/tutoring.py's get_tutor_profile/get_learner_tutoring_stats.
+function sastDateParts(iso: string): { year: number; month: number; day: number } {
+  // Same "+2h, read UTC getters as SAST" trick as SessionDateTimePicker's
+  // isoToSessionDateTime - the stored iso is a UTC instant, SAST has no
+  // daylight saving, so this is exact, not an approximation.
+  const sast = new Date(new Date(iso).getTime() + 2 * 60 * 60 * 1000);
+  return { year: sast.getUTCFullYear(), month: sast.getUTCMonth(), day: sast.getUTCDate() };
+}
+
+// True once `iso` (a completed_at/cancelled_at/lapsed_at timestamp) falls
+// in a payout cycle that has already closed relative to right now - i.e.
+// it belongs to "history", not the still-open current cycle.
+export function isBeforeCurrentCycle(iso: string | null): boolean {
+  if (!iso) return false;
+  const now = sastDateParts(new Date().toISOString());
+  const cycleStartDay = now.day <= 15 ? 1 : 16;
+  const cycleStartUtc = Date.UTC(now.year, now.month, cycleStartDay);
+  const then = sastDateParts(iso);
+  return Date.UTC(then.year, then.month, then.day) < cycleStartUtc;
+}

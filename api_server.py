@@ -1682,9 +1682,17 @@ def tutoring_tutors_directory(
     """Public "Browse Tutors" directory a learner can pick a specific
     tutor from instead of broadcasting a request - see
     list_approved_tutors. Requires login (any tier) but not any
-    particular subscription."""
+    particular subscription. Strips each subject's matric_percentage -
+    that's for admin vetting only (see approve_tutor's
+    MIN_MATRIC_PERCENTAGE check), not something a learner should see or
+    judge a tutor by; a tutor's own /tutor/me/profile is unaffected,
+    since seeing their own mark is fine."""
     _auth_user(authorization)
-    return {"tutors": list_approved_tutors(subject, module_id)}
+    tutors = list_approved_tutors(subject, module_id)
+    for t in tutors:
+        for s in t["subjects"]:
+            s.pop("matric_percentage", None)
+    return {"tutors": tutors}
 
 
 @app.post("/tutoring/requests/{request_id}/respond-to-proposal")

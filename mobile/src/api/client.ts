@@ -558,7 +558,10 @@ export type DirectoryTutor = {
   // the tutor's own Sessions tab (see backend/tutoring.py's _badge_for).
   average_rating: number | null;
   badge: Badge;
-  subjects: { subject: string; matric_percentage: number; topics: string | null; hourly_rate_zar: number | null }[];
+  // No matric_percentage here - a tutor's own matric mark is for admin
+  // vetting only (see ApprovedTutor/TutorProfile, which do carry it);
+  // the server strips it from this learner-facing endpoint.
+  subjects: { subject: string; topics: string | null; hourly_rate_zar: number | null }[];
   higher_ed_modules: {
     id: number; name: string; year_level: number; year_level_label: string;
     qualification: string | null; qualification_id: number | null;

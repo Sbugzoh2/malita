@@ -192,9 +192,9 @@ export default function BrowseTutorsScreen({ navigation }: any) {
                   <View style={styles.offerTextCol}>
                     <Text style={styles.offerTitle}>{s.subject}</Text>
                     <Text style={styles.offerMeta}>
-                      {s.matric_percentage}% matric
-                      {s.hourly_rate_zar != null ? ` · R${s.hourly_rate_zar}/hr` : ""}
-                      {s.topics ? ` · ${s.topics}` : ""}
+                      {s.hourly_rate_zar != null ? `R${s.hourly_rate_zar}/hr` : ""}
+                      {s.hourly_rate_zar != null && s.topics ? " · " : ""}
+                      {s.topics ?? ""}
                     </Text>
                   </View>
                   <Pressable style={styles.requestButton} onPress={() => requestSubject(tutor, s.subject)}>

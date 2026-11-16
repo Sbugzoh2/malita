@@ -7,18 +7,40 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "channel": "development"
+      "channel": "development",
+      "env": { "APP_VARIANT": "highschool" }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       },
-      "channel": "preview"
+      "channel": "preview",
+      "env": { "APP_VARIANT": "highschool" }
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "env": { "APP_VARIANT": "highschool" }
+    },
+    "development-campus": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development-campus",
+      "env": { "APP_VARIANT": "campus" }
+    },
+    "preview-campus": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "channel": "preview-campus",
+      "env": { "APP_VARIANT": "campus" }
+    },
+    "production-campus": {
+      "autoIncrement": true,
+      "channel": "production-campus",
+      "env": { "APP_VARIANT": "campus" }
     }
   }
 }

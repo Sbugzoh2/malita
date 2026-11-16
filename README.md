@@ -77,9 +77,10 @@ in test mode — no real money moves in Sandbox.
    PayFast's dashboard (Sandbox → Settings → "Signature validator") lets you
    paste a sample parameter set and see what signature *they* compute.
    Compare it against `backend/payfast.generate_signature()`'s output for
-   the same inputs. PayFast's documentation has been inconsistent over the
-   years about field ordering for outgoing signatures — this one manual
-   check catches that before it costs you a failed payment in production.
+   the same inputs. PayFast's own reference SDK signs whatever field order
+   the data is already in rather than a fixed documented order — this one
+   manual check catches a mismatch before it costs you a failed payment in
+   production.
 5. Only once that all checks out, switch `PAYFAST_SANDBOX=false` and put in
    your real Merchant ID / Key / Passphrase from your live PayFast account.
 
@@ -165,10 +166,8 @@ and banking details — but here's exactly what to do:
    there's a signature-testing tool) with a sample parameter set, and
    compare the signature it produces to what
    `backend/payfast.generate_signature()` produces for the identical
-   input. This is the one manual check worth doing every time — PayFast's
-   documentation has been genuinely inconsistent about field ordering
-   across different doc pages, and this check catches a mismatch before a
-   real learner's payment fails on it.
+   input. This is the one manual check worth doing every time — it
+   catches a mismatch before a real learner's payment fails on it.
 6. **Do one real payment yourself** first (small amount, your own card)
    through the live checkout end-to-end before telling anyone else the
    subscription is open, and confirm:

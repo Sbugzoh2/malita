@@ -3552,21 +3552,44 @@ def mark_session_paid(m_payment_id: str) -> dict:
 
         req.status = "confirmed"
         req.paid_at = dt.datetime.utcnow()
+        req_id, tutor_id_for_meet = req.id, req.tutor_id
 
-        tutor = db.query(TutorAccount).get(req.tutor_id) if req.tutor_id else None
-        if tutor and not req.meet_link:
-            _create_meet_session_for_request(db, req, tutor)
+    # Meet-link creation happens in ITS OWN transaction, deliberately
+    # AFTER the one above has already committed - the payment
+    # confirmation just written must never be put back at risk by
+    # anything that happens from here on, including a bug in this
+    # code itself (not just a handled GoogleCalendarError): an
+    # unwrapped plain network exception here once rolled back a real
+    # learner's payment confirmation along with it, which is exactly
+    # the kind of silent, expensive failure this split exists to rule
+    # out for good. See create_meet_session's own now-hardened
+    # exception handling in backend/google_calendar.py too.
+    if tutor_id_for_meet:
+        try:
+            with get_session() as db:
+                req = db.query(TutoringSessionRequest).get(req_id)
+                tutor = db.query(TutorAccount).get(tutor_id_for_meet)
+                if req and tutor and not req.meet_link:
+                    _create_meet_session_for_request(db, req, tutor)
+        except Exception:
+            logger.exception("Could not create a Google Meet session for request %s after payment", req_id)
 
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(req_id)
         result = {"id": req.id, "status": req.status}
-        should_notify = tutor is not None and req.meet_link is not None
-        if should_notify:
-            learner = db.query(User).get(req.learner_user_id)
-            learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
-            tutor_id, tutor_name, tutor_email = tutor.id, tutor.name, tutor.email
-            subject, topic, scheduled_at, meet_link = req.subject, req.topic, req.scheduled_at, req.meet_link
+        tutor = db.query(TutorAccount).get(req.tutor_id) if req.tutor_id else None
+        learner = db.query(User).get(req.learner_user_id)
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+        tutor_id, tutor_name, tutor_email = (tutor.id, tutor.name, tutor.email) if tutor else (None, None, None)
+        subject, topic, scheduled_at, meet_link = req.subject, req.topic, req.scheduled_at, req.meet_link
 
-    if should_notify:
-        _notify_meet_link_ready(
+    # Notify on PAYMENT being confirmed, full stop - not conditional on
+    # the Meet link also existing. A failed/slow Meet creation used to
+    # mean neither side ever heard that the payment went through at
+    # all; now they're told right away either way, with the Meet link
+    # itself if it's ready or a note that it's still being set up.
+    if tutor_id is not None:
+        _notify_payment_confirmed(
             learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
             tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
             subject=subject, topic=topic, scheduled_at=scheduled_at, meet_link=meet_link,
@@ -3574,33 +3597,38 @@ def mark_session_paid(m_payment_id: str) -> dict:
     return result
 
 
-def _notify_meet_link_ready(
+def _notify_payment_confirmed(
     *, learner_id: int, learner_name: str, learner_email: str,
     tutor_id: int, tutor_name: str, tutor_email: str,
-    subject: str, topic: str | None, scheduled_at: dt.datetime | None, meet_link: str,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None, meet_link: str | None,
 ) -> None:
-    """Best-effort - tells both sides their Google Meet link is ready
-    now that payment has cleared (see mark_session_paid)."""
+    """Best-effort - tells both sides payment has cleared (see
+    mark_session_paid), with the Google Meet link if it's ready yet or
+    a note that it's still being set up if not - this fires on payment
+    confirmation itself, not conditionally on the Meet link also being
+    ready, so a slow/failed Meet creation never means either side hears
+    nothing at all about a payment that actually went through."""
     try:
         topic_str = f" ({topic})" if topic else ""
         when_str = _format_sast(scheduled_at)
+        meet_line = (
+            f"Google Meet: {meet_link}" if meet_link
+            else "Your Google Meet link is still being set up - we'll send it separately shortly."
+        )
         body = (
             f"{subject}{topic_str} session scheduled for {when_str}.\n\n"
-            f"Google Meet: {meet_link}\n\n"
+            f"{meet_line}\n\n"
             "— The Malita team"
         )
-        send_email(learner_email, "Payment confirmed - your Google Meet link is ready", f"Hi {learner_name},\n\n{body}")
-        send_email(tutor_email, "Payment confirmed - your Google Meet link is ready", f"Hi {tutor_name},\n\n{body}")
-        create_notification(
-            recipient_kind="user", recipient_id=learner_id, title="Your Google Meet link is ready",
-            body=f"{subject}{topic_str} - payment confirmed, join via the link in the app.",
+        send_email(learner_email, "Payment confirmed for your tutoring session", f"Hi {learner_name},\n\n{body}")
+        send_email(tutor_email, "Payment confirmed for your tutoring session", f"Hi {tutor_name},\n\n{body}")
+        notif_body = f"{subject}{topic_str} - payment confirmed" + (
+            ", join via the link in the app." if meet_link else " - Meet link coming shortly."
         )
-        create_notification(
-            recipient_kind="tutor", recipient_id=tutor_id, title="Your Google Meet link is ready",
-            body=f"{subject}{topic_str} - payment confirmed, join via the link in the app.",
-        )
+        create_notification(recipient_kind="user", recipient_id=learner_id, title="Payment confirmed", body=notif_body)
+        create_notification(recipient_kind="tutor", recipient_id=tutor_id, title="Payment confirmed", body=notif_body)
     except Exception:
-        logger.exception("Failed to notify learner/tutor that their Meet link is ready")
+        logger.exception("Failed to notify learner/tutor that payment was confirmed")
 
 
 def _create_payout_row(db, req: TutoringSessionRequest) -> None:

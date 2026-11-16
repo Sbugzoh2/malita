@@ -162,16 +162,27 @@ def _get_access_token() -> str:
             )
         refresh_token = creds.refresh_token
 
-    resp = requests.post(
-        _TOKEN_URL,
-        data={
-            "refresh_token": refresh_token,
-            "client_id": GOOGLE_CALENDAR_CLIENT_ID,
-            "client_secret": GOOGLE_CALENDAR_CLIENT_SECRET,
-            "grant_type": "refresh_token",
-        },
-        timeout=15,
-    )
+    try:
+        resp = requests.post(
+            _TOKEN_URL,
+            data={
+                "refresh_token": refresh_token,
+                "client_id": GOOGLE_CALENDAR_CLIENT_ID,
+                "client_secret": GOOGLE_CALENDAR_CLIENT_SECRET,
+                "grant_type": "refresh_token",
+            },
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        # A plain network failure (timeout, DNS, connection reset) talking
+        # to Google is NOT a GoogleCalendarError by default - and a caller
+        # mid-transaction (see mark_session_paid) only catches that one
+        # type, trusting this function to never raise anything else. Left
+        # unwrapped, this escaped once and rolled back a learner's payment
+        # confirmation along with it, purely because Google was briefly
+        # unreachable - wrapping it here is what actually makes "best-
+        # effort, never blocks the session" true in practice.
+        raise GoogleCalendarError(f"Could not reach Google to refresh the Calendar connection: {e}")
     if resp.status_code != 200:
         # Most common cause: the stored refresh token expired (see this
         # module's docstring - weekly, while in Google's "Testing" mode).
@@ -179,7 +190,10 @@ def _get_access_token() -> str:
             f"Could not refresh the Google Calendar connection (HTTP {resp.status_code}) - "
             "it may have expired and need reconnecting via /admin/google-calendar/connect."
         )
-    return resp.json()["access_token"]
+    try:
+        return resp.json()["access_token"]
+    except (ValueError, KeyError) as e:
+        raise GoogleCalendarError(f"Google's token response was missing an access_token: {e}")
 
 
 def create_meet_session(
@@ -218,15 +232,24 @@ def create_meet_session(
             }
         },
     }
-    resp = requests.post(
-        f"{_EVENTS_URL}?conferenceDataVersion=1&sendUpdates=all",
-        json=body,
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=15,
-    )
+    try:
+        resp = requests.post(
+            f"{_EVENTS_URL}?conferenceDataVersion=1&sendUpdates=all",
+            json=body,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        # Same reasoning as _get_access_token's own try/except above -
+        # a bare network failure here must become a GoogleCalendarError,
+        # not escape and roll back the caller's whole transaction.
+        raise GoogleCalendarError(f"Could not reach Google to create the Calendar event: {e}")
     if resp.status_code not in (200, 201):
         raise GoogleCalendarError(f"Could not create the Calendar event (HTTP {resp.status_code}): {resp.text[:300]}")
-    data = resp.json()
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise GoogleCalendarError(f"Google's calendar-event response wasn't valid JSON: {e}")
     meet_link = ""
     for entry_point in data.get("conferenceData", {}).get("entryPoints", []):
         if entry_point.get("entryPointType") == "video":

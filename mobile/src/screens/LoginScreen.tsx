@@ -104,7 +104,7 @@ export default function LoginScreen({ navigation }: any) {
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>🎓 Malita</Text>
-        <Text style={styles.subtitle}>Matric Study Master</Text>
+        <Text style={styles.subtitle}>Learner Study Master</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Email</Text>
@@ -195,7 +195,7 @@ export default function LoginScreen({ navigation }: any) {
         </View>
 
         <Pressable onPress={() => navigation.navigate("Register")} style={styles.linkButton}>
-          <Text style={styles.link}>New here? Create a free account</Text>
+          <Text style={styles.link}>New Learner here? Create a free account</Text>
         </Pressable>
 
         <Pressable onPress={() => navigation.navigate("TutorLogin")} style={styles.linkButton}>

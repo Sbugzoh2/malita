@@ -103,8 +103,8 @@ export default function TutorLoginScreen({ navigation }: any) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>🙋 Tutor Login</Text>
-        <Text style={styles.subtitle}>Log in with the email and password you applied with.</Text>
+        <Text style={styles.title}>🎓 Malita</Text>
+        <Text style={styles.subtitle}>Tutor Portal</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Email</Text>
@@ -195,11 +195,11 @@ export default function TutorLoginScreen({ navigation }: any) {
         </View>
 
         <Pressable onPress={() => navigation.navigate("TutorApply")} style={styles.linkButton}>
-          <Text style={styles.link}>Not a tutor yet? Apply here</Text>
+          <Text style={styles.link}>New Tutor here? Apply to tutor</Text>
         </Pressable>
 
-        <Pressable onPress={() => navigation.goBack()} style={styles.linkButton}>
-          <Text style={styles.link}>‹ Back to learner login</Text>
+        <Pressable onPress={() => navigation.navigate("Login")} style={styles.linkButton}>
+          <Text style={styles.link}>Are you a learner? Log in here</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -216,11 +216,10 @@ const styles = StyleSheet.create({
   },
   // Generous bottom padding so the last link sits well clear of the
   // device's own bottom nav bar/gesture area - too close risks an
-  // accidental system back/home gesture instead of the intended tap
-  // (reported: "Back to learner login" was too easy to mis-tap).
+  // accidental system back/home gesture instead of the intended tap.
   container: { flexGrow: 1, padding: 24, paddingBottom: 64, justifyContent: "center" },
-  title: { fontSize: 28, fontWeight: "700", textAlign: "center", color: colors.text },
-  subtitle: { fontSize: 14, textAlign: "center", color: colors.textSecondary, marginTop: 6, marginBottom: 24 },
+  title: { fontSize: 32, fontWeight: "700", textAlign: "center", color: colors.text },
+  subtitle: { fontSize: 16, textAlign: "center", color: colors.textSecondary, marginBottom: 24 },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 20,

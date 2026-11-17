@@ -79,6 +79,7 @@ function ReportControl({
             value={reason}
             onChangeText={setReason}
             placeholder="Why are you reporting this? (optional)"
+            placeholderTextColor={colors.inputPlaceholder}
           />
           <Pressable
             style={[styles.reportSubmitButton, submitting && styles.buttonDisabled]}
@@ -325,6 +326,7 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
           value={answerBody}
           onChangeText={setAnswerBody}
           placeholder="Write your answer..."
+          placeholderTextColor={colors.inputPlaceholder}
           multiline
         />
         <Text style={styles.mathTip}>Tip: put math between two dollar signs to render it as a real equation, e.g. $x^2-5x+6=0$.</Text>

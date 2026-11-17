@@ -114,6 +114,7 @@ export default function AITeacherScreen({ navigation }: any) {
                 value={topic}
                 onChangeText={setTopic}
                 placeholder="e.g. factorising trinomials, projectile motion, chemical equilibrium..."
+                placeholderTextColor={colors.inputPlaceholder}
               />
 
               {error ? <Text style={styles.error}>{error}</Text> : null}

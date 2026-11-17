@@ -318,6 +318,7 @@ function ApplicationsSection({ token }: { token: string }) {
                           <TextInput
                             style={styles.input}
                             placeholder="Reason (optional)"
+                            placeholderTextColor={colors.inputPlaceholder}
                             value={rejectReason}
                             onChangeText={setRejectReason}
                           />
@@ -522,6 +523,7 @@ function HigherEdApplicationsSection({ token }: { token: string }) {
                           <TextInput
                             style={styles.input}
                             placeholder="Reason (optional)"
+                            placeholderTextColor={colors.inputPlaceholder}
                             value={rejectReason}
                             onChangeText={setRejectReason}
                           />
@@ -798,6 +800,7 @@ function CatalogSection({ token }: { token: string }) {
       <TextInput
         style={styles.input}
         placeholder="New institution name"
+        placeholderTextColor={colors.inputPlaceholder}
         value={newInstitutionName}
         onChangeText={setNewInstitutionName}
       />
@@ -825,6 +828,7 @@ function CatalogSection({ token }: { token: string }) {
           <TextInput
             style={styles.input}
             placeholder="New qualification name"
+            placeholderTextColor={colors.inputPlaceholder}
             value={newQualificationName}
             onChangeText={setNewQualificationName}
           />
@@ -862,6 +866,7 @@ function CatalogSection({ token }: { token: string }) {
           <TextInput
             style={styles.input}
             placeholder="New module name"
+            placeholderTextColor={colors.inputPlaceholder}
             value={newModuleName}
             onChangeText={setNewModuleName}
           />
@@ -987,6 +992,7 @@ function MatchSection({ token }: { token: string }) {
                         value={adminNote[r.id] || ""}
                         onChangeText={(v) => setAdminNote((prev) => ({ ...prev, [r.id]: v }))}
                         placeholder="e.g. why you picked them, anything the learner mentioned"
+                        placeholderTextColor={colors.inputPlaceholder}
                         multiline
                       />
                       <Pressable
@@ -1154,6 +1160,7 @@ function TutorsSection({ token }: { token: string }) {
                             <TextInput
                               style={styles.input}
                               placeholder="Reason (e.g. pending investigation)"
+                              placeholderTextColor={colors.inputPlaceholder}
                               value={standingReason[t.id] || ""}
                               onChangeText={(v) => setStandingReason((prev) => ({ ...prev, [t.id]: v }))}
                             />
@@ -1306,6 +1313,7 @@ function AccountsSection({ token }: { token: string }) {
       <TextInput
         style={styles.searchInput}
         placeholder="Search by name or email..."
+        placeholderTextColor={colors.inputPlaceholder}
         value={search}
         onChangeText={setSearch}
       />
@@ -1332,6 +1340,7 @@ function AccountsSection({ token }: { token: string }) {
                 <TextInput
                   style={styles.input}
                   placeholder="Reason (e.g. pending investigation)"
+                  placeholderTextColor={colors.inputPlaceholder}
                   value={reasonDraft[a.id] || ""}
                   onChangeText={(v) => setReasonDraft((prev) => ({ ...prev, [a.id]: v }))}
                 />
@@ -1467,6 +1476,7 @@ function SupportSection({ token }: { token: string }) {
         <TextInput
           style={[styles.input, { minHeight: 90, textAlignVertical: "top", marginTop: 12 }]}
           placeholder="Write a reply..."
+          placeholderTextColor={colors.inputPlaceholder}
           value={reply}
           onChangeText={setReply}
           multiline
@@ -1648,6 +1658,7 @@ function PayoutsSection({ token }: { token: string }) {
               <TextInput
                 style={styles.input}
                 placeholder="Batch payment reference (optional)"
+                placeholderTextColor={colors.inputPlaceholder}
                 value={settleReference}
                 onChangeText={setSettleReference}
               />
@@ -1683,6 +1694,7 @@ function PayoutsSection({ token }: { token: string }) {
             <TextInput
               style={styles.input}
               placeholder="Payment reference (e.g. EFT ref)"
+              placeholderTextColor={colors.inputPlaceholder}
               value={refByPayout[p.id] || ""}
               onChangeText={(v) => setRefByPayout((prev) => ({ ...prev, [p.id]: v }))}
             />

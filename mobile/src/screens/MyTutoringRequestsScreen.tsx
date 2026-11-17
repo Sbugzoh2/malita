@@ -579,6 +579,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
                     <TextInput
                       style={styles.commentInput}
                       placeholder="Reason (optional)"
+                      placeholderTextColor={colors.inputPlaceholder}
                       value={cancelReason}
                       onChangeText={setCancelReason}
                     />
@@ -643,6 +644,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
                 <TextInput
                   style={styles.commentInput}
                   placeholder="Comment (optional)"
+                  placeholderTextColor={colors.inputPlaceholder}
                   value={commentDraft[r.id] || ""}
                   onChangeText={(v) => setCommentDraft((prev) => ({ ...prev, [r.id]: v }))}
                 />

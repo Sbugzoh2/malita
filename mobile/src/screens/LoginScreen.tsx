@@ -117,6 +117,7 @@ export default function LoginScreen({ navigation }: any) {
             autoCapitalize="none"
             keyboardType="email-address"
             placeholder="you@example.com"
+            placeholderTextColor={colors.inputPlaceholder}
           />
 
           <Text style={styles.label}>Password</Text>
@@ -127,6 +128,7 @@ export default function LoginScreen({ navigation }: any) {
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
               placeholder="••••••••"
+              placeholderTextColor={colors.inputPlaceholder}
             />
             <Pressable onPress={() => setShowPassword((s) => !s)} style={styles.showPasswordButton}>
               <Text style={styles.showPasswordText}>{showPassword ? "Hide" : "Show"}</Text>
@@ -161,6 +163,7 @@ export default function LoginScreen({ navigation }: any) {
                 onChangeText={setResetCode}
                 autoCapitalize="none"
                 placeholder="Reset code"
+                placeholderTextColor={colors.inputPlaceholder}
               />
 
               <Text style={styles.label}>New password</Text>
@@ -170,6 +173,7 @@ export default function LoginScreen({ navigation }: any) {
                 onChangeText={setNewPassword}
                 secureTextEntry
                 placeholder="••••••••"
+                placeholderTextColor={colors.inputPlaceholder}
               />
 
               <Text style={styles.label}>Confirm new password</Text>
@@ -179,6 +183,7 @@ export default function LoginScreen({ navigation }: any) {
                 onChangeText={setNewPasswordConfirm}
                 secureTextEntry
                 placeholder="••••••••"
+                placeholderTextColor={colors.inputPlaceholder}
               />
 
               <Pressable

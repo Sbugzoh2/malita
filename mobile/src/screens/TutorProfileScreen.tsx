@@ -283,6 +283,7 @@ export default function TutorProfileScreen({ navigation }: any) {
               value={draftBio}
               onChangeText={setDraftBio}
               placeholder="Tell learners a bit about yourself"
+              placeholderTextColor={colors.inputPlaceholder}
               multiline
             />
             <Text style={styles.fieldLabel}>Availability</Text>
@@ -291,6 +292,7 @@ export default function TutorProfileScreen({ navigation }: any) {
               value={draftAvailability}
               onChangeText={setDraftAvailability}
               placeholder="e.g. Weekdays after 16:00, Saturday mornings"
+              placeholderTextColor={colors.inputPlaceholder}
             />
             {personalError ? <Text style={styles.error}>{personalError}</Text> : null}
             <View style={styles.editButtonRow}>
@@ -368,6 +370,7 @@ export default function TutorProfileScreen({ navigation }: any) {
                     value={draftCustomQualificationName}
                     onChangeText={setDraftCustomQualificationName}
                     placeholder="e.g. BCom Investment Management"
+                    placeholderTextColor={colors.inputPlaceholder}
                   />
                 </>
               )}

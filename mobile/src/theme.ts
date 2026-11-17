@@ -23,6 +23,11 @@ export const colors = {
   // dark would be.
   inputBackground: "rgba(255,255,255,0.92)",
   inputText: "#1b1430",
+  // Placeholder hint text inside those light input fields - needs its own
+  // dark-on-light tone since textSecondary/textMuted above are white-based
+  // (built for the dark gradient background) and are invisible on
+  // inputBackground's near-white fill.
+  inputPlaceholder: "#716a82",
 };
 
 // GradientBackground's own backdrop - top-to-bottom, deep indigo into a

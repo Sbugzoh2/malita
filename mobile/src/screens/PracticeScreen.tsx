@@ -206,6 +206,7 @@ export default function PracticeScreen({ navigation }: any) {
                       setVerdict("unchecked");
                     }}
                     placeholder="e.g. x=3 or x=2"
+                    placeholderTextColor={colors.inputPlaceholder}
                     autoCapitalize="none"
                   />
 

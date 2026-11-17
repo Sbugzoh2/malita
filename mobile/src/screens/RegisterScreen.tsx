@@ -195,6 +195,7 @@ export default function RegisterScreen({ navigation }: any) {
             keyboardType="number-pad"
             maxLength={13}
             placeholder="13-digit South African ID number"
+            placeholderTextColor={colors.inputPlaceholder}
           />
           <Text style={styles.helperText}>
             We use this to work out your date of birth automatically - no need to type it separately.
@@ -241,6 +242,7 @@ export default function RegisterScreen({ navigation }: any) {
                     value={customQualificationName}
                     onChangeText={setCustomQualificationName}
                     placeholder="e.g. BCom Investment Management"
+                    placeholderTextColor={colors.inputPlaceholder}
                   />
                 </>
               )}

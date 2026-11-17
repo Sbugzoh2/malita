@@ -107,6 +107,7 @@ function ModerationQueue({ token }: { token: string }) {
                     value={notes[rep.id] || ""}
                     onChangeText={(t) => setNotes({ ...notes, [rep.id]: t })}
                     placeholder="Optional note to include"
+                    placeholderTextColor={colors.inputPlaceholder}
                   />
                 )}
 
@@ -214,13 +215,14 @@ export default function CollabScreen({ navigation }: any) {
       {showAsk && (
         <View style={styles.askBox}>
           <Text style={styles.label}>Title</Text>
-          <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="e.g. How do I factorise a quadratic?" />
+          <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="e.g. How do I factorise a quadratic?" placeholderTextColor={colors.inputPlaceholder} />
           <Text style={styles.label}>Your question</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             value={body}
             onChangeText={setBody}
             placeholder="Write out your question..."
+            placeholderTextColor={colors.inputPlaceholder}
             multiline
           />
           <Text style={styles.mathTip}>Tip: put math between two dollar signs to render it as a real equation, e.g. $x^2-5x+6=0$.</Text>

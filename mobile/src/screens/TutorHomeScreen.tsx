@@ -896,6 +896,7 @@ export default function TutorHomeScreen({ navigation }: any) {
                         <TextInput
                           style={styles.input}
                           placeholder="Paste the recording link (e.g. Google Drive)"
+                          placeholderTextColor={colors.inputPlaceholder}
                           value={recordingDraft[sess.id] || ""}
                           onChangeText={(v) => setRecordingDraft((prev) => ({ ...prev, [sess.id]: v }))}
                         />
@@ -951,6 +952,7 @@ export default function TutorHomeScreen({ navigation }: any) {
                       <TextInput
                         style={styles.input}
                         placeholder="Comment (optional)"
+                        placeholderTextColor={colors.inputPlaceholder}
                         value={commentDraft[sess.id] || ""}
                         onChangeText={(v) => setCommentDraft((prev) => ({ ...prev, [sess.id]: v }))}
                       />
@@ -981,6 +983,7 @@ export default function TutorHomeScreen({ navigation }: any) {
                         <TextInput
                           style={styles.input}
                           placeholder="e.g. I'm no longer available at this time"
+                          placeholderTextColor={colors.inputPlaceholder}
                           value={cancelReason}
                           onChangeText={setCancelReason}
                         />

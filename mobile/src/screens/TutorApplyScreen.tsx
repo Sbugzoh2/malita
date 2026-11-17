@@ -497,6 +497,7 @@ export default function TutorApplyScreen({ navigation }: any) {
             onChangeText={setBio}
             multiline
             placeholder="A couple of sentences about your teaching experience"
+            placeholderTextColor={colors.inputPlaceholder}
           />
 
           <Text style={styles.label}>ID number</Text>
@@ -566,6 +567,7 @@ export default function TutorApplyScreen({ navigation }: any) {
             value={bankAccountHolder}
             onChangeText={setBankAccountHolder}
             placeholder="As it appears on your bank statement"
+            placeholderTextColor={colors.inputPlaceholder}
           />
           <Dropdown
             label="Bank"
@@ -618,6 +620,7 @@ export default function TutorApplyScreen({ navigation }: any) {
             onChangeText={setBankAccountNote}
             multiline
             placeholder="e.g. a SWIFT code for an international account"
+            placeholderTextColor={colors.inputPlaceholder}
           />
           <DocumentField
             label="Proof of bank account (statement or confirmation letter)"
@@ -711,6 +714,7 @@ export default function TutorApplyScreen({ navigation }: any) {
                   value={customQualificationName}
                   onChangeText={setCustomQualificationName}
                   placeholder="e.g. BCom Investment Management"
+                  placeholderTextColor={colors.inputPlaceholder}
                 />
               </>
             ) : institutionId && qualifications.length === 0 ? (
@@ -741,6 +745,7 @@ export default function TutorApplyScreen({ navigation }: any) {
               onChangeText={setTranscriptNote}
               multiline
               placeholder="e.g. anything we should know when reviewing your transcript"
+              placeholderTextColor={colors.inputPlaceholder}
             />
 
             <DocumentField label="Academic transcript" value={transcriptDocument} onPick={setTranscriptDocument} />
@@ -810,6 +815,7 @@ export default function TutorApplyScreen({ navigation }: any) {
                       value={newCustomModuleName}
                       onChangeText={setNewCustomModuleName}
                       placeholder="Module name"
+                      placeholderTextColor={colors.inputPlaceholder}
                     />
                   </View>
                   <View style={styles.timeCol}>
@@ -872,7 +878,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: colors.text,
+    color: colors.inputText,
     backgroundColor: "#fff",
   },
   textArea: { minHeight: 70, textAlignVertical: "top" },
@@ -888,7 +894,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
-  chipText: { color: colors.text, fontSize: 12, fontWeight: "600", textAlign: "center" },
+  chipText: { color: colors.inputText, fontSize: 12, fontWeight: "600", textAlign: "center" },
   chipTextActive: { color: "#fff" },
   docButton: {
     marginTop: 6,
@@ -899,7 +905,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     backgroundColor: "#fff",
   },
-  docButtonText: { color: colors.text, fontSize: 14 },
+  docButtonText: { color: colors.inputText, fontSize: 14 },
   subjectBlock: { marginTop: 14, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 14 },
   subjectDetail: { marginTop: 4 },
   checkboxRow: { flexDirection: "row", alignItems: "center", marginTop: 12 },

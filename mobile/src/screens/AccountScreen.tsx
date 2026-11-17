@@ -359,6 +359,7 @@ export default function AccountScreen({ navigation }: any) {
                     value={draftCustomQualificationName}
                     onChangeText={setDraftCustomQualificationName}
                     placeholder="e.g. BCom Investment Management"
+                    placeholderTextColor={colors.inputPlaceholder}
                   />
                 </>
               )}

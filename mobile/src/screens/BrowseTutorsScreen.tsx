@@ -148,7 +148,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
       <TextInput
         style={styles.input}
         placeholder="Subject, tutor name, qualification, university…"
-        placeholderTextColor={colors.textSecondary}
+        placeholderTextColor={colors.inputPlaceholder}
         value={searchQuery}
         onChangeText={setSearchQuery}
       />

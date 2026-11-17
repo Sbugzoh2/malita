@@ -46,6 +46,7 @@ function ModuleNameYearRow({
           value={name}
           onChangeText={onChangeName}
           placeholder="e.g. Advanced Data Structures"
+          placeholderTextColor={colors.inputPlaceholder}
         />
       </View>
       <View style={styles.timeCol}>
@@ -384,6 +385,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
                   value={customQualificationName}
                   onChangeText={setCustomQualificationName}
                   placeholder="e.g. BCom Investment Management"
+                  placeholderTextColor={colors.inputPlaceholder}
                 />
               </>
             )}
@@ -450,6 +452,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
           onChangeText={setPrice}
           keyboardType="numeric"
           placeholder="e.g. 250"
+          placeholderTextColor={colors.inputPlaceholder}
         />
 
         <Text style={styles.label}>Session duration (minutes, 60 min minimum)</Text>
@@ -459,6 +462,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
           onChangeText={setDuration}
           keyboardType="numeric"
           placeholder="60"
+          placeholderTextColor={colors.inputPlaceholder}
         />
 
         <SessionDateTimePicker label="Session date & time" value={dateTime} onChange={setDateTime} />
@@ -469,6 +473,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
           value={topic}
           onChangeText={setTopic}
           placeholder="e.g. Calculus, Electric Circuits..."
+          placeholderTextColor={colors.inputPlaceholder}
         />
 
         <Text style={styles.label}>Additional notes (optional)</Text>
@@ -477,6 +482,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
           value={notes}
           onChangeText={setNotes}
           placeholder="e.g. I'd like help with proofs specifically"
+          placeholderTextColor={colors.inputPlaceholder}
           multiline
         />
 

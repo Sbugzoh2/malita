@@ -198,6 +198,7 @@ function TextSolver() {
             value={question}
             onChangeText={setQuestion}
             placeholder="e.g. x^2-5x+6=0"
+            placeholderTextColor={colors.inputPlaceholder}
             autoCapitalize="none"
           />
 

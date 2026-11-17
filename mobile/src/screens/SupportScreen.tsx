@@ -145,13 +145,14 @@ export default function SupportScreen({ navigation }: any) {
         ) : view === "compose" ? (
           <View style={styles.card}>
             <Text style={styles.label}>Subject</Text>
-            <TextInput style={styles.input} value={subject} onChangeText={setSubject} placeholder="e.g. Payment issue" />
+            <TextInput style={styles.input} value={subject} onChangeText={setSubject} placeholder="e.g. Payment issue" placeholderTextColor={colors.inputPlaceholder} />
             <Text style={styles.label}>Message</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
               value={message}
               onChangeText={setMessage}
               placeholder="Tell us what's going on..."
+              placeholderTextColor={colors.inputPlaceholder}
               multiline
             />
             <Pressable style={styles.sendButton} onPress={handleCreateTicket} disabled={submitting}>
@@ -185,6 +186,7 @@ export default function SupportScreen({ navigation }: any) {
               value={reply}
               onChangeText={setReply}
               placeholder="Write a reply..."
+              placeholderTextColor={colors.inputPlaceholder}
               multiline
             />
             <Pressable style={styles.sendButton} onPress={handleReply} disabled={submitting}>

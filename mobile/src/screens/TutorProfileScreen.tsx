@@ -4,6 +4,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 import {
   ApiError,
   TutorProfile,
@@ -21,7 +22,9 @@ import {
 } from "../api/client";
 
 const STATUS_COLOR: Record<string, string> = {
-  pending_review: colors.textSecondary,
+  // A solid tone (not colors.textSecondary's translucent white) - this
+  // fills a pill behind white text, where translucency would wash out.
+  pending_review: "#5b5570",
   approved: colors.success,
   rejected: colors.error,
   suspended: colors.error,
@@ -202,9 +205,9 @@ export default function TutorProfileScreen({ navigation }: any) {
 
   if (!profile) {
     return (
-      <View style={styles.loadingContainer}>
+      <GradientBackground style={styles.loadingContainer}>
         {error ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
-      </View>
+      </GradientBackground>
     );
   }
 
@@ -215,6 +218,7 @@ export default function TutorProfileScreen({ navigation }: any) {
     qualifications?.find((q) => q.id === profile.higher_ed_qualification_id)?.name;
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <View style={styles.profileRow}>
         <View style={styles.avatarBadge}>
@@ -447,19 +451,20 @@ export default function TutorProfileScreen({ navigation }: any) {
         </Pressable>
       </View>
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-  container: { backgroundColor: colors.background, flexGrow: 1, padding: 20, paddingBottom: 40 },
+  loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center" },
+  container: { flexGrow: 1, padding: 20, paddingBottom: 40 },
   error: { color: colors.error, marginTop: 8 },
   profileRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   avatarBadge: {
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: "#0b0b0b",
+    backgroundColor: colors.primaryDark,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -499,8 +504,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   textArea: { minHeight: 80, textAlignVertical: "top" },
   editButtonRow: { flexDirection: "row", gap: 10, marginTop: 16 },

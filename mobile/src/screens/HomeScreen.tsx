@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 import { fetchNotificationsUnreadCount } from "../api/client";
 import NotificationBell from "../components/NotificationBell";
+import GradientBackground from "../components/GradientBackground";
 
 // `group` only matters for the Explore list (quick-action tiles don't use
 // it) - it's how the list gets sub-headers instead of one long flat stack.
@@ -393,13 +394,13 @@ export default function HomeScreen({ navigation }: any) {
           </View>
           <Text style={styles.listCardDesc}>{tile.desc}</Text>
         </View>
-        <TileIcon name="chevron" size={18} color="#8a8984" />
+        <TileIcon name="chevron" size={18} color={colors.textMuted} />
       </Pressable>
     );
   }
 
   return (
-    <View style={styles.screen}>
+    <GradientBackground style={styles.screen}>
     <ScrollView style={styles.scrollView} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View>
@@ -510,7 +511,7 @@ export default function HomeScreen({ navigation }: any) {
     <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       {HOME_BOTTOM_TABS.map((tab) => {
         const active = tab.key === "home";
-        const tint = active ? colors.primary : "#8a8984";
+        const tint = active ? colors.primary : colors.textMuted;
         return (
           <Pressable
             key={tab.key}
@@ -527,14 +528,14 @@ export default function HomeScreen({ navigation }: any) {
         );
       })}
     </View>
-    </View>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
+  screen: { flex: 1 },
   scrollView: { flex: 1 },
-  container: { backgroundColor: colors.background, flexGrow: 1 },
+  container: { flexGrow: 1 },
   header: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -548,19 +549,19 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: "#0b0b0b",
+    backgroundColor: colors.primaryDark,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarBadgeText: { fontSize: 15, fontWeight: "800", color: "#fff" },
   body: { padding: 20 },
-  statCard: { backgroundColor: "#0b0b0b", borderRadius: 20, padding: 18 },
+  statCard: { backgroundColor: colors.primaryDark, borderRadius: 20, padding: 18 },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  statLabel: { fontSize: 11, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  statLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
   statValue: { fontSize: 26, color: "#fff", fontWeight: "800", marginTop: 4 },
-  statValueMax: { fontSize: 15, color: "#8a8984", fontWeight: "600" },
+  statValueMax: { fontSize: 15, color: "rgba(255,255,255,0.5)", fontWeight: "600" },
   statUnlimited: { fontSize: 16, color: "#fff", fontWeight: "700", marginTop: 4, maxWidth: 200 },
-  higherEdNote: { fontSize: 12, color: "#8a8984", marginTop: 6, lineHeight: 17 },
+  higherEdNote: { fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 6, lineHeight: 17 },
   planPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -571,7 +572,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   planPillText: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  usageTrack: { marginTop: 14, height: 6, borderRadius: 999, backgroundColor: "#2b2b29", overflow: "hidden" },
+  usageTrack: { marginTop: 14, height: 6, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.18)", overflow: "hidden" },
   usageFill: { height: "100%", backgroundColor: "#4ade9a", borderRadius: 999 },
   sectionLabel: { fontSize: 13, fontWeight: "700", color: colors.text, marginTop: 20, marginBottom: 10 },
   exploreGroup: { marginTop: 4 },
@@ -608,7 +609,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  listCardAdmin: { borderWidth: 1, borderColor: "#d8d7d1", borderStyle: "dashed", shadowOpacity: 0 },
+  listCardAdmin: { borderWidth: 1, borderColor: "rgba(255,255,255,0.25)", borderStyle: "dashed", shadowOpacity: 0 },
   listCardIcon: {
     width: 44,
     height: 44,
@@ -622,8 +623,8 @@ const styles = StyleSheet.create({
   listCardTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   listCardTitleBig: { fontSize: 16 },
   listCardDesc: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  tierPill: { backgroundColor: "#e8f0fb", borderRadius: 999, paddingVertical: 2, paddingHorizontal: 7 },
-  tierPillText: { fontSize: 10, fontWeight: "700", color: colors.primaryDark },
+  tierPill: { backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 2, paddingHorizontal: 7 },
+  tierPillText: { fontSize: 10, fontWeight: "700", color: "#fff" },
   logoutButton: {
     marginTop: 24,
     marginBottom: 24,
@@ -636,7 +637,7 @@ const styles = StyleSheet.create({
   logoutText: { color: "#fff", fontWeight: "700" },
   bottomBar: {
     flexDirection: "row",
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: 10,

@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
+import GradientBackground from "../components/GradientBackground";
 import {
   ApiError, fetchProvinces, API_BASE_URL, YEAR_LEVEL_LABELS,
   Institution, Qualification, fetchInstitutions, fetchQualifications,
@@ -138,6 +139,7 @@ export default function RegisterScreen({ navigation }: any) {
   }
 
   return (
+    <GradientBackground>
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Create your free account</Text>
@@ -296,11 +298,12 @@ export default function RegisterScreen({ navigation }: any) {
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.background },
+  flex: { flex: 1 },
   // Generous bottom padding so the last field/button sits well clear of
   // the device's own bottom nav bar/gesture area - too close risks an
   // accidental system back/home gesture instead of the intended tap.
@@ -326,10 +329,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
     alignItems: "center",
-    backgroundColor: "#fff",
+    backgroundColor: colors.inputBackground,
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
-  chipText: { color: colors.text, fontSize: 12, fontWeight: "600", textAlign: "center" },
+  chipText: { color: colors.inputText, fontSize: 12, fontWeight: "600", textAlign: "center" },
   chipTextActive: { color: "#fff" },
   helperText: { fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 16 },
   input: {
@@ -339,8 +342,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 16,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   button: {
     backgroundColor: colors.primary,

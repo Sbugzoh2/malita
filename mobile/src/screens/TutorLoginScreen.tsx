@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
+import GradientBackground from "../components/GradientBackground";
 import { ApiError, tutorForgotPassword, tutorResetPassword } from "../api/client";
 
 export default function TutorLoginScreen({ navigation }: any) {
@@ -98,6 +99,7 @@ export default function TutorLoginScreen({ navigation }: any) {
   }
 
   return (
+    <GradientBackground>
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -203,11 +205,12 @@ export default function TutorLoginScreen({ navigation }: any) {
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.background },
+  flex: { flex: 1 },
   resetBox: {
     marginTop: 16,
     paddingTop: 16,
@@ -238,8 +241,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 16,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   passwordRow: { flexDirection: "row", alignItems: "center" },
   passwordInput: { flex: 1 },

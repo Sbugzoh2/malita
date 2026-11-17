@@ -1,16 +1,35 @@
-// Mirrors the palette used in app.py's CSS / TOPIC_COLORS so the native
-// app feels like the same product, not a different one.
+// Dark purple theme, approximating a gradient mockup the user supplied
+// (deep indigo at top fading into a warmer violet glow at the bottom).
+// `surface` is translucent on purpose - every card sits on top of
+// GradientBackground's LinearGradient, so a solid hex would look like a
+// flat patch instead of a frosted panel over the gradient.
 export const colors = {
-  background: "#f9f9f7",
-  surface: "#ffffff",
-  border: "#e1e0d9",
-  text: "#0b0b0b",
-  textSecondary: "#52514e",
-  primary: "#2a78d6",
-  primaryDark: "#184f95",
-  error: "#e34948",
-  success: "#1baf7a",
+  background: "#140b2e",
+  surface: "rgba(255,255,255,0.08)",
+  border: "rgba(255,255,255,0.16)",
+  text: "#ffffff",
+  textSecondary: "rgba(255,255,255,0.68)",
+  // Replaces the old light-theme's muted grays (e.g. "#8a8984") that were
+  // calibrated for a near-white background and read as too dim/invisible
+  // on a dark one.
+  textMuted: "rgba(255,255,255,0.5)",
+  primary: "#8b5cf6",
+  primaryDark: "#6d28d9",
+  error: "#ff6b81",
+  success: "#34d399",
+  // Text inputs deliberately stay light (not the dark theme's own
+  // text/background) - a light field with dark text reads as an obvious
+  // "type here" box and is easier to read while typing than white-on-
+  // dark would be.
+  inputBackground: "rgba(255,255,255,0.92)",
+  inputText: "#1b1430",
 };
+
+// GradientBackground's own backdrop - top-to-bottom, deep indigo into a
+// warmer violet glow. colors.background above matches its first stop so
+// anything still rendered as a flat fill (a loading screen, a status
+// bar) blends with it rather than flashing a different dark shade.
+export const gradientColors = ["#140b2e", "#2c1a5c", "#55288f"] as const;
 
 export const topicColors: Record<string, string> = {
   Algebra: "#2a78d6",

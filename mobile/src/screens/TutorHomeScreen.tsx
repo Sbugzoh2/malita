@@ -24,6 +24,7 @@ import SessionDateTimePicker, {
   SessionDateTimeValue,
   sessionDateTimeToIso,
 } from "../components/SessionDateTimePicker";
+import GradientBackground from "../components/GradientBackground";
 
 type Section = "open" | "sessions" | "payouts";
 
@@ -145,7 +146,9 @@ function buildJobGroups(requests: TutoringRequest[]): JobGroup[] {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  pending_review: colors.textSecondary,
+  // A solid tone (not colors.textSecondary's translucent white) - this
+  // fills a pill behind white text, where translucency would wash out.
+  pending_review: "#5b5570",
   approved: colors.success,
   rejected: colors.error,
   suspended: colors.error,
@@ -517,14 +520,14 @@ export default function TutorHomeScreen({ navigation }: any) {
 
   if (!me) {
     return (
-      <View style={styles.loadingContainer}>
+      <GradientBackground style={styles.loadingContainer}>
         <ActivityIndicator color={colors.primary} />
-      </View>
+      </GradientBackground>
     );
   }
 
   return (
-    <View style={styles.screen}>
+    <GradientBackground style={styles.screen}>
     <ScrollView style={styles.scrollView} contentContainerStyle={styles.container}>
       <View style={styles.hero}>
         <Image
@@ -1074,7 +1077,7 @@ export default function TutorHomeScreen({ navigation }: any) {
           { key: "profile", label: "Profile", route: "TutorProfile" },
         ] as { key: Section | "profile"; label: string; route?: string }[]).map((s) => {
           const active = !s.route && section === s.key;
-          const tint = active ? colors.primary : "#8a8984";
+          const tint = active ? colors.primary : colors.textMuted;
           return (
             <Pressable
               key={s.key}
@@ -1092,18 +1095,18 @@ export default function TutorHomeScreen({ navigation }: any) {
         })}
       </View>
     )}
-    </View>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-  screen: { flex: 1, backgroundColor: colors.background },
+  loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center" },
+  screen: { flex: 1 },
   scrollView: { flex: 1 },
-  container: { backgroundColor: colors.background, flexGrow: 1 },
+  container: { flexGrow: 1 },
   bottomBar: {
     flexDirection: "row",
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: 10,
@@ -1145,19 +1148,19 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 16,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
   sectionChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   sectionChipText: { color: colors.text, fontSize: 13, fontWeight: "600" },
   sectionChipTextActive: { color: "#fff" },
   statCard: {
-    backgroundColor: "#0b0b0b",
+    backgroundColor: colors.primaryDark,
     borderRadius: 20,
     padding: 18,
     marginBottom: 16,
   },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  statLabel: { fontSize: 12, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  statLabel: { fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
   statValue: { fontSize: 28, color: "#fff", fontWeight: "800", marginTop: 4 },
   statValuePayout: { fontSize: 22, color: colors.success, fontWeight: "800", marginTop: 4 },
   statValueLost: { fontSize: 22, color: colors.error, fontWeight: "800", marginTop: 4 },
@@ -1172,13 +1175,13 @@ const styles = StyleSheet.create({
     marginTop: 14,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: "#2b2b29",
+    borderTopColor: "rgba(255,255,255,0.18)",
   },
   // flexShrink lets a long footer string wrap within its own line instead
   // of the row squeezing both Texts together with no gap between them -
   // reported as "R600 total before Malita's feereschedule early to avoid
   // cancellations" running together with no space at all.
-  statFooterText: { fontSize: 11, color: "#8a8984", fontWeight: "500", flexShrink: 1 },
+  statFooterText: { fontSize: 11, color: "rgba(255,255,255,0.6)", fontWeight: "500", flexShrink: 1 },
   filterRow: { flexGrow: 0, marginBottom: 16 },
   filterRowContent: { gap: 8, paddingRight: 8 },
   filterChip: {
@@ -1187,9 +1190,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
-  filterChipActive: { backgroundColor: "#0b0b0b", borderColor: "transparent" },
+  filterChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   filterChipText: { fontSize: 13, fontWeight: "600", color: colors.text },
   filterChipTextActive: { color: "#fff" },
   jobGroupBlock: { marginBottom: 22 },
@@ -1207,7 +1210,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: colors.textSecondary,
-    backgroundColor: "#efeeea",
+    backgroundColor: "rgba(255,255,255,0.12)",
     borderRadius: 999,
     paddingVertical: 3,
     paddingHorizontal: 9,
@@ -1222,15 +1225,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  jobCardOther: { borderWidth: 1, borderColor: "#d8d7d1", borderStyle: "dashed" },
+  jobCardOther: { borderWidth: 1, borderColor: "rgba(255,255,255,0.25)", borderStyle: "dashed" },
   jobCardRow: { flexDirection: "row", alignItems: "center", gap: 14, padding: 14 },
   jobCardInfo: { flex: 1, minWidth: 0 },
   jobTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   jobMetaText: { fontSize: 12, color: colors.textSecondary, marginTop: 5 },
-  jobRequestedAgo: { fontSize: 11, color: "#8a8984", marginTop: 2 },
+  jobRequestedAgo: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
   jobPriceCol: { alignItems: "flex-end" },
   jobPrice: { fontSize: 17, fontWeight: "800", color: colors.success },
-  jobChevron: { fontSize: 16, color: "#8a8984", marginTop: 6 },
+  jobChevron: { fontSize: 16, color: colors.textMuted, marginTop: 6 },
   jobCardExpanded: { paddingHorizontal: 14, paddingBottom: 14, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   card: {
     backgroundColor: colors.surface,
@@ -1263,8 +1266,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   acceptButton: {
     backgroundColor: colors.primary,

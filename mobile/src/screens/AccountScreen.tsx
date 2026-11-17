@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 import NotificationBell from "../components/NotificationBell";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 import {
   ApiError,
   fetchNotificationsUnreadCount,
@@ -186,6 +187,7 @@ export default function AccountScreen({ navigation }: any) {
   if (!me) return null;
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={[styles.headerRow, { paddingTop: insets.top + 12 }]}>
         <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
@@ -437,11 +439,12 @@ export default function AccountScreen({ navigation }: any) {
         <Text style={styles.logoutText}>Log Out</Text>
       </Pressable>
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: colors.background, flexGrow: 1, padding: 20, paddingBottom: 40 },
+  container: { flexGrow: 1, padding: 20, paddingBottom: 40 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   backLink: { alignSelf: "flex-start" },
   backLinkText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
@@ -450,7 +453,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: "#0b0b0b",
+    backgroundColor: colors.primaryDark,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -459,8 +462,8 @@ const styles = StyleSheet.create({
   name: { fontSize: 19, fontWeight: "800", color: colors.text },
   email: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
   pillRow: { flexDirection: "row", gap: 8, marginTop: 14 },
-  pill: { backgroundColor: colors.surface, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 14 },
-  pillText: { fontSize: 12, fontWeight: "700", color: colors.primaryDark },
+  pill: { backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 14 },
+  pillText: { fontSize: 12, fontWeight: "700", color: "#fff" },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 16,
@@ -486,8 +489,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   editButtonRow: { flexDirection: "row", gap: 10, marginTop: 16 },
   cancelEditButton: {

@@ -23,6 +23,7 @@ import SessionDateTimePicker, {
   sessionDateTimeToIso,
   isoToSessionDateTime,
 } from "../components/SessionDateTimePicker";
+import GradientBackground from "../components/GradientBackground";
 
 const MIN_DURATION_MINUTES = 60;
 
@@ -295,6 +296,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
   }
 
   return (
+    <GradientBackground>
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Pressable
@@ -499,6 +501,7 @@ export default function RequestTutorScreen({ navigation, route }: any) {
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
+    </GradientBackground>
   );
 }
 
@@ -506,10 +509,10 @@ const styles = StyleSheet.create({
   // Same paired-column layout as SessionDateTimePicker's Hour/Minute row.
   timeRow: { flexDirection: "row", gap: 12 },
   timeCol: { flex: 1 },
-  flex: { flex: 1, backgroundColor: colors.background },
+  flex: { flex: 1 },
   // Generous bottom padding so the submit button and closing note sit
   // well clear of the device's own bottom nav bar/gesture area.
-  container: { padding: 20, paddingBottom: 64, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 64, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
@@ -524,7 +527,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 10,
     alignItems: "center",
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
   modeToggleButtonActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   modeToggleText: { color: colors.text, fontSize: 13, fontWeight: "600" },
@@ -538,8 +541,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   textArea: { minHeight: 80, textAlignVertical: "top" },
   error: { color: colors.error, marginTop: 14 },

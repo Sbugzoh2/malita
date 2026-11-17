@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import { WebView } from "react-native-webview";
 import { colors } from "../theme";
+import GradientBackground from "../components/GradientBackground";
 
 // Renders a past paper PDF right inside the app. Android's WebView has no
 // built-in PDF renderer of its own (unlike desktop Chrome) - loading a
@@ -17,7 +18,7 @@ export default function PastPaperViewerScreen({ route, navigation }: any) {
   const viewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url ?? "")}&embedded=true`;
 
   return (
-    <View style={styles.flex}>
+    <GradientBackground style={styles.flex}>
       <Pressable style={styles.backLink} onPress={() => navigation.goBack()}>
         <Text style={styles.backLinkText}>‹ Back</Text>
       </Pressable>
@@ -45,17 +46,21 @@ export default function PastPaperViewerScreen({ route, navigation }: any) {
           />
         </View>
       )}
-    </View>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.background },
+  flex: { flex: 1 },
   backLink: { marginTop: 12, marginLeft: 16, marginBottom: 4 },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 15, fontWeight: "700", color: colors.text, marginHorizontal: 16, marginBottom: 8 },
   webviewBox: { flex: 1 },
-  webview: { flex: 1, backgroundColor: colors.background },
+  // Deliberately literal white, not colors.background - this screen
+  // hands off to Google's own (light-themed) PDF viewer, which we
+  // can't recolor, so the loading placeholder matches THAT page
+  // rather than flashing our dark app background then white content.
+  webview: { flex: 1, backgroundColor: "#ffffff" },
   loadingOverlay: {
     position: "absolute",
     top: 0,
@@ -64,7 +69,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.background,
+    backgroundColor: "#ffffff",
     zIndex: 1,
   },
   centerBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },

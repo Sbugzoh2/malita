@@ -20,6 +20,7 @@ import {
 } from "../api/client";
 import LatexView from "../latex/LatexView";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 
 export default function PracticeScreen({ navigation }: any) {
   const { token } = useAuth();
@@ -108,6 +109,7 @@ export default function PracticeScreen({ navigation }: any) {
   const q = questions?.[qIndex];
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
@@ -260,11 +262,12 @@ export default function PracticeScreen({ navigation }: any) {
         </>
       )}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
@@ -278,7 +281,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     alignSelf: "flex-start",
     flexShrink: 0,
     flexGrow: 0,
@@ -295,7 +298,7 @@ const styles = StyleSheet.create({
   },
   meta: { fontSize: 12, color: colors.textSecondary, marginBottom: 8 },
   latexBox: {
-    backgroundColor: "#f3f6fb",
+    backgroundColor: "rgba(139,92,246,0.15)",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -304,7 +307,7 @@ const styles = StyleSheet.create({
   hintToggle: { marginTop: 8 },
   hintToggleText: { fontSize: 13, color: colors.primaryDark, fontWeight: "600" },
   hintBox: {
-    backgroundColor: "#fff4e5",
+    backgroundColor: "rgba(237,161,0,0.18)",
     borderRadius: 10,
     padding: 10,
     marginTop: 6,
@@ -316,7 +319,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
     marginTop: 4,
   },
   buttonRow: { flexDirection: "row", gap: 10, marginTop: 12, flexWrap: "wrap" },
@@ -336,13 +340,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   actionButtonOutlineText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
-  verdictCorrect: { color: "#0ca30c", fontWeight: "700", marginTop: 10 },
+  verdictCorrect: { color: colors.success, fontWeight: "700", marginTop: 10 },
   verdictWrong: { color: colors.error, fontWeight: "600", marginTop: 10 },
   solutionBox: { marginTop: 16, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 14 },
   solutionTitle: { fontSize: 15, fontWeight: "700", color: colors.text, marginBottom: 8 },
   stepBlock: { marginBottom: 8 },
   stepExplain: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 4 },
-  finalAnswerLabel: { fontSize: 13, fontWeight: "700", color: "#0ca30c", marginTop: 8 },
+  finalAnswerLabel: { fontSize: 13, fontWeight: "700", color: colors.success, marginTop: 8 },
   marksNote: { fontSize: 12, color: colors.textSecondary, marginTop: 6, fontStyle: "italic" },
   marksHint: { fontSize: 11, color: colors.textSecondary, marginTop: 4 },
 });

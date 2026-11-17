@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 import { ApiError, DirectoryTutor, fetchNotificationsUnreadCount, fetchTutorsDirectory } from "../api/client";
 import NotificationBell from "../components/NotificationBell";
+import GradientBackground from "../components/GradientBackground";
 
 // Plain case-insensitive substring match - a free-text search box over
 // several fields of different shapes (subject names, module names,
@@ -124,6 +125,7 @@ export default function BrowseTutorsScreen({ navigation }: any) {
   );
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}>
       <View style={styles.headerRow}>
         <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
@@ -221,13 +223,14 @@ export default function BrowseTutorsScreen({ navigation }: any) {
         ))
       )}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
   // Generous bottom padding so the last card sits well clear of the
   // device's own bottom nav bar/gesture area.
-  container: { padding: 20, paddingBottom: 56, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 56, flexGrow: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   backLink: { alignSelf: "flex-start" },
   backLinkText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
@@ -241,8 +244,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
     marginBottom: 16,
   },
   error: { color: colors.error, marginBottom: 12 },

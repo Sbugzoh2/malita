@@ -14,6 +14,7 @@ import { colors, SUBJECTS, Subject } from "../theme";
 import { ApiError, fetchAITeacherLesson, LessonStep } from "../api/client";
 import { StepView } from "./AITutorScreen";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 
 export default function AITeacherScreen({ navigation }: any) {
   const { token, me } = useAuth();
@@ -79,6 +80,7 @@ export default function AITeacherScreen({ navigation }: any) {
   }
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
@@ -153,11 +155,12 @@ export default function AITeacherScreen({ navigation }: any) {
         </>
       )}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
@@ -170,7 +173,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   chipText: { color: colors.text, fontSize: 13 },
@@ -182,7 +185,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   error: { color: colors.error, marginTop: 12 },
   startButton: {
@@ -195,12 +199,12 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   startButtonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   lockedBanner: {
-    backgroundColor: "#fff4e5",
+    backgroundColor: "rgba(237,161,0,0.18)",
     borderRadius: 12,
     padding: 16,
     marginTop: 8,
   },
-  lockedText: { color: "#a15c00", marginBottom: 12 },
+  lockedText: { color: "#f5b84e", marginBottom: 12 },
   upgradeButton: {
     backgroundColor: colors.primary,
     borderRadius: 999,
@@ -219,7 +223,7 @@ const styles = StyleSheet.create({
   },
   narrationButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   stopButton: {
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 999,

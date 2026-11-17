@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
+import GradientBackground from "../components/GradientBackground";
 
 // Shown instead of every other screen while an account is suspended or
 // blocked (see RootNavigator.tsx - in that state, this and the matching
@@ -24,7 +25,7 @@ export default function AccountStatusScreen({ navigation }: any) {
   const isBlocked = status === "blocked";
 
   return (
-    <View style={styles.container}>
+    <GradientBackground style={styles.container}>
       <Text style={styles.emoji}>{isBlocked ? "⛔" : "⏸️"}</Text>
       <Text style={styles.title}>{isBlocked ? "Account blocked" : "Account suspended"}</Text>
       <Text style={styles.body}>
@@ -47,12 +48,12 @@ export default function AccountStatusScreen({ navigation }: any) {
       <Pressable style={styles.logoutButton} onPress={logout}>
         <Text style={styles.logoutText}>Log Out</Text>
       </Pressable>
-    </View>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, padding: 24, justifyContent: "center", alignItems: "center" },
+  container: { flex: 1, padding: 24, justifyContent: "center", alignItems: "center" },
   emoji: { fontSize: 48, marginBottom: 16 },
   title: { fontSize: 22, fontWeight: "800", color: colors.text, textAlign: "center" },
   body: { fontSize: 14, color: colors.textSecondary, textAlign: "center", marginTop: 12, lineHeight: 20 },

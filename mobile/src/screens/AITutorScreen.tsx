@@ -26,6 +26,7 @@ import {
 } from "../api/client";
 import LatexView from "../latex/LatexView";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 
 type Method = "text" | "photo" | "pdf";
 
@@ -40,6 +41,7 @@ export default function AITutorScreen() {
   const [method, setMethod] = useState<Method>("text");
 
   return (
+    <GradientBackground>
     <ScrollView
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
@@ -69,6 +71,7 @@ export default function AITutorScreen() {
       {method === "photo" && <PhotoSolver locked={me?.effective_tier === "free"} />}
       {method === "pdf" && <PdfSolver locked={me?.effective_tier === "free"} />}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
@@ -605,7 +608,7 @@ function MixedText({ text, style }: { text: string; style: any }) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 16 },
   methodRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
@@ -615,7 +618,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
   methodChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   methodChipText: { color: colors.text, fontSize: 13, fontWeight: "600" },
@@ -628,7 +631,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     alignSelf: "flex-start",
     flexShrink: 0,
     flexGrow: 0,
@@ -648,7 +651,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
     marginTop: 4,
   },
   notice: { color: colors.textSecondary, fontSize: 12, marginTop: 8, fontStyle: "italic" },
@@ -687,10 +691,10 @@ const styles = StyleSheet.create({
   stepText: { fontSize: 15, color: colors.text, marginBottom: 6, lineHeight: 21 },
   stepEmphasis: { fontWeight: "700", marginTop: 8 },
   mixedRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", marginBottom: 6 },
-  stepInfo: { color: colors.primaryDark },
-  stepWarning: { color: "#a15c00" },
+  stepInfo: { color: colors.primary },
+  stepWarning: { color: "#f5b84e" },
   stepError: { color: colors.error, fontWeight: "600" },
-  stepSuccess: { color: "#0ca30c", fontWeight: "600" },
+  stepSuccess: { color: colors.success, fontWeight: "600" },
   stepCaption: { fontSize: 12, color: colors.textSecondary, fontStyle: "italic" },
   stepImage: {
     width: Dimensions.get("window").width - 72,
@@ -699,7 +703,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   latexBox: {
-    backgroundColor: "#f3f6fb",
+    backgroundColor: "rgba(139,92,246,0.15)",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -712,7 +716,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   actionButtonText: { color: "#fff", fontWeight: "700" },
-  preview: { width: "100%", height: 220, marginTop: 16, borderRadius: 12, backgroundColor: "#eee" },
+  preview: { width: "100%", height: 220, marginTop: 16, borderRadius: 12, backgroundColor: colors.surface },
   fileName: { marginTop: 10, color: colors.textSecondary, fontStyle: "italic" },
   cancelButton: { marginTop: 10, alignSelf: "flex-start" },
   cancelButtonText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
@@ -744,10 +748,10 @@ const styles = StyleSheet.create({
   },
   retryButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
   lockedBanner: {
-    backgroundColor: "#fff4e5",
+    backgroundColor: "rgba(237,161,0,0.18)",
     borderRadius: 12,
     padding: 16,
     marginTop: 8,
   },
-  lockedText: { color: "#a15c00" },
+  lockedText: { color: "#f5b84e" },
 });

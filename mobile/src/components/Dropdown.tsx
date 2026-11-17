@@ -85,10 +85,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.inputBackground,
   },
-  triggerText: { flex: 1, fontSize: 15, color: colors.text },
-  chevron: { fontSize: 14, color: colors.textSecondary, marginLeft: 8 },
+  triggerText: { flex: 1, fontSize: 15, color: colors.inputText },
+  chevron: { fontSize: 14, color: colors.inputText, marginLeft: 8 },
   swatch: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
   backdrop: {
     flex: 1,
@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   sheet: {
-    backgroundColor: "#fff",
+    backgroundColor: colors.background,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 16,

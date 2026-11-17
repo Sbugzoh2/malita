@@ -13,6 +13,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
+import GradientBackground from "../components/GradientBackground";
 import {
   ApiError,
   fetchTiers,
@@ -310,6 +311,7 @@ export default function SubscriptionScreen() {
   const currentTierRank = tiers ? tiers.findIndex((t) => t.key === currentTier) : -1;
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>💳 Subscription</Text>
       <Text style={styles.subtitle}>Manage your Malita plan.</Text>
@@ -473,11 +475,12 @@ export default function SubscriptionScreen() {
         </Pressable>
       </View>
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 16 },
   currentCard: {

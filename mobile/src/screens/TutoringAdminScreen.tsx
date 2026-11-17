@@ -72,6 +72,7 @@ import {
   reopenSupportTicketAdmin,
 } from "../api/client";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 
 type Section =
   | "applications" | "higherEdApplications" | "catalog" | "match" | "sessions" | "tutors" | "payouts"
@@ -107,6 +108,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
   const [section, setSection] = useState<Section>("applications");
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container}>
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
@@ -154,6 +156,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
       {token && section === "accounts" && <AccountsSection token={token} />}
       {token && section === "support" && <SupportSection token={token} />}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
@@ -1778,7 +1781,7 @@ function SessionsSection({ token }: { token: string }) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
@@ -1812,7 +1815,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
   sectionChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
   sectionChipText: { color: colors.text, fontSize: 13, fontWeight: "600" },
@@ -1851,8 +1854,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
     marginBottom: 8,
   },
   textArea: { minHeight: 70, textAlignVertical: "top" },
@@ -1877,18 +1880,18 @@ const styles = StyleSheet.create({
   },
   rejectButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
   rejectBox: { marginTop: 10 },
-  payoutsSummaryCard: { backgroundColor: "#0b0b0b", borderRadius: 20, padding: 18, marginBottom: 16 },
+  payoutsSummaryCard: { backgroundColor: colors.primaryDark, borderRadius: 20, padding: 18, marginBottom: 16 },
   payoutsSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  payoutsSummaryLabel: { fontSize: 11, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  payoutsSummaryLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
   payoutsSummaryValue: { fontSize: 18, color: "#fff", fontWeight: "800", marginTop: 4 },
   payoutsSummaryValuePayout: { fontSize: 24, color: colors.success, fontWeight: "800", marginTop: 4 },
-  payoutsSummaryFooter: { fontSize: 11, color: "#8a8984", fontWeight: "500", marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#2b2b29" },
-  payoutsByTutorCol: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#2b2b29", gap: 8 },
-  payoutsByTutorHeading: { fontSize: 11, color: "#b9b8b3", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 },
+  payoutsSummaryFooter: { fontSize: 11, color: "rgba(255,255,255,0.6)", fontWeight: "500", marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.18)" },
+  payoutsByTutorCol: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.18)", gap: 8 },
+  payoutsByTutorHeading: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 },
   payoutsByTutorRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   payoutsByTutorName: { fontSize: 13, color: "#fff", fontWeight: "600", flex: 1, marginRight: 8 },
   payoutsByTutorAmount: { fontSize: 13, color: "#fff", fontWeight: "700" },
-  payoutsByTutorGross: { fontSize: 11, color: "#8a8984", fontWeight: "500" },
+  payoutsByTutorGross: { fontSize: 11, color: "rgba(255,255,255,0.5)", fontWeight: "500" },
   standingBox: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
   standingButtonRow: { flexDirection: "row", gap: 10, marginTop: 10 },
   smallButton: { flex: 1, borderRadius: 999, paddingVertical: 10, alignItems: "center" },
@@ -1903,8 +1906,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
     marginBottom: 16,
   },
   accountStatusPill: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10, alignSelf: "flex-start", marginTop: 6 },
@@ -1914,12 +1917,15 @@ const styles = StyleSheet.create({
   ticketStatusResolved: { backgroundColor: colors.success },
   ticketStatusPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   bubble: { borderRadius: 16, padding: 14, marginBottom: 10, maxWidth: "90%" },
-  bubbleMine: { backgroundColor: "#0b0b0b", alignSelf: "flex-end" },
+  // A richer purple (not colors.surface's translucent white) so the
+  // admin's own bubble still stands apart from the ticket opener's -
+  // the old near-black bg would have blended into the dark background.
+  bubbleMine: { backgroundColor: colors.primaryDark, alignSelf: "flex-end" },
   bubbleTheirs: { backgroundColor: colors.surface, alignSelf: "flex-start" },
   bubbleSender: { fontSize: 11, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 },
-  bubbleSenderDark: { fontSize: 11, fontWeight: "700", color: "#b9b8b3", marginBottom: 4 },
+  bubbleSenderDark: { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.7)", marginBottom: 4 },
   bubbleBody: { fontSize: 14, color: colors.text, lineHeight: 20 },
   bubbleBodyDark: { fontSize: 14, color: "#fff", lineHeight: 20 },
   bubbleDate: { fontSize: 11, color: colors.textSecondary, marginTop: 6 },
-  bubbleDateDark: { fontSize: 11, color: "#8a8984", marginTop: 6 },
+  bubbleDateDark: { fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 6 },
 });

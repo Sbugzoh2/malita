@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors, SUBJECTS, Subject } from "../theme";
 import { ApiError, fetchPastPapers, pastPaperDownloadUrl, PastPaper } from "../api/client";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 
 // Same chronological order as app.py's EXAM_SERIES_OPTIONS, so a year's
 // documents always group the same way on both platforms.
@@ -56,6 +57,7 @@ export default function PastPapersScreen({ navigation }: any) {
   }
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container}>
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
@@ -160,11 +162,12 @@ export default function PastPapersScreen({ navigation }: any) {
         </View>
       )}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
@@ -176,7 +179,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     alignSelf: "flex-start",
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
@@ -184,12 +187,12 @@ const styles = StyleSheet.create({
   chipTextActive: { color: "#fff", fontWeight: "700" },
   error: { color: colors.error, marginTop: 12 },
   lockedBanner: {
-    backgroundColor: "#fff4e5",
+    backgroundColor: "rgba(237,161,0,0.18)",
     borderRadius: 12,
     padding: 16,
     marginTop: 8,
   },
-  lockedText: { color: "#a15c00", marginBottom: 12 },
+  lockedText: { color: "#f5b84e", marginBottom: 12 },
   upgradeButton: {
     backgroundColor: colors.primary,
     borderRadius: 999,

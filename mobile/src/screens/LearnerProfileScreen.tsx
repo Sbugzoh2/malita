@@ -5,6 +5,7 @@ import { colors, topicColors, SUBJECTS, Subject } from "../theme";
 import { fetchLearnerProfile, LearnerProfile } from "../api/client";
 import LatexView from "../latex/LatexView";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 
 const DEFAULT_TOPIC_COLOR = colors.primary;
 
@@ -48,6 +49,7 @@ export default function LearnerProfileScreen({ navigation }: any) {
     : 1;
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
@@ -154,11 +156,12 @@ export default function LearnerProfileScreen({ navigation }: any) {
         </>
       )}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
@@ -172,10 +175,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.inputBackground,
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
-  chipText: { color: colors.text, fontSize: 13 },
+  chipText: { color: colors.inputText, fontSize: 13 },
   chipTextActive: { color: "#fff", fontWeight: "700" },
   statsRow: { flexDirection: "row", gap: 12, marginTop: 18 },
   statCard: {
@@ -205,6 +208,6 @@ const styles = StyleSheet.create({
   activityType: { fontSize: 13, fontWeight: "700", color: colors.primaryDark },
   activityDate: { fontSize: 12, color: colors.textSecondary },
   activityMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
-  activityLatexBox: { backgroundColor: "#f3f6fb", borderRadius: 10, padding: 10 },
+  activityLatexBox: { backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 10, padding: 10 },
   activityQuestion: { fontSize: 13, color: colors.text },
 });

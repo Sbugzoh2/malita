@@ -13,6 +13,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
+import GradientBackground from "../components/GradientBackground";
 import {
   ApiError,
   SupportTicket,
@@ -103,6 +104,7 @@ export default function TutorSupportScreen({ navigation }: any) {
   }
 
   return (
+    <GradientBackground>
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Pressable
@@ -192,11 +194,12 @@ export default function TutorSupportScreen({ navigation }: any) {
         )}
       </ScrollView>
     </KeyboardAvoidingView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.background },
+  flex: { flex: 1 },
   container: { padding: 20, paddingBottom: 48, flexGrow: 1 },
   backLink: { alignSelf: "flex-start", marginBottom: 12 },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
@@ -232,8 +235,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   textArea: { minHeight: 100, textAlignVertical: "top" },
   sendButton: {
@@ -247,12 +250,16 @@ const styles = StyleSheet.create({
   threadSubject: { fontSize: 17, fontWeight: "800", color: colors.text, marginBottom: 14 },
   bubble: { borderRadius: 16, padding: 14, marginBottom: 10, maxWidth: "90%" },
   bubbleMine: { backgroundColor: colors.surface, alignSelf: "flex-end" },
-  bubbleAdmin: { backgroundColor: "#0b0b0b", alignSelf: "flex-start" },
+  // A richer purple (not colors.surface's translucent white) so an
+  // admin reply still stands apart from the tutor's own bubble now
+  // that the whole page is dark - the old near-black bg would have
+  // blended into the background instead of contrasting with it.
+  bubbleAdmin: { backgroundColor: colors.primaryDark, alignSelf: "flex-start" },
   bubbleSender: { fontSize: 11, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 },
   bubbleBody: { fontSize: 14, color: colors.text, lineHeight: 20 },
   bubbleDate: { fontSize: 11, color: colors.textSecondary, marginTop: 6 },
-  bubbleSenderDark: { fontSize: 11, fontWeight: "700", color: "#b9b8b3", marginBottom: 4 },
+  bubbleSenderDark: { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.7)", marginBottom: 4 },
   bubbleBodyDark: { fontSize: 14, color: "#fff", lineHeight: 20 },
-  bubbleDateDark: { fontSize: 11, color: "#8a8984", marginTop: 6 },
+  bubbleDateDark: { fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 6 },
   resolvedNote: { fontSize: 12, color: colors.textSecondary, marginTop: 8, fontStyle: "italic" },
 });

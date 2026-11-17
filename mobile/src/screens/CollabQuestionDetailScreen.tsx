@@ -22,6 +22,7 @@ import {
   CollabAnswer,
 } from "../api/client";
 import MixedMathText from "../latex/MixedMathText";
+import GradientBackground from "../components/GradientBackground";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Unknown date";
@@ -243,9 +244,9 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
 
   if (!question) {
     return (
-      <View style={styles.center}>
+      <GradientBackground style={styles.center}>
         {error ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
-      </View>
+      </GradientBackground>
     );
   }
 
@@ -260,6 +261,7 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
   }
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Pressable style={styles.backLink} onPress={() => navigation.goBack()}>
         <Text style={styles.backLinkText}>‹ Back to questions</Text>
@@ -335,12 +337,13 @@ export default function CollabQuestionDetailScreen({ navigation, route }: any) {
         </Pressable>
       </View>
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, padding: 20 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   error: { color: colors.error, marginBottom: 12 },
@@ -369,7 +372,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 13,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
     marginBottom: 8,
   },
   reportSubmitButton: {
@@ -384,7 +388,7 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 18 },
   sectionTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 10 },
   answerCard: { backgroundColor: colors.surface, borderRadius: 14, padding: 14, marginBottom: 10 },
-  replyCard: { marginLeft: 24, backgroundColor: "#f3f6fb" },
+  replyCard: { marginLeft: 24, backgroundColor: "rgba(139,92,246,0.15)" },
   answerMeta: { fontSize: 12, fontWeight: "700", color: colors.primaryDark, marginBottom: 6 },
   answerActions: { marginTop: 8, marginBottom: 4 },
   replyLink: { fontSize: 12, color: colors.primary, fontWeight: "700" },
@@ -393,13 +397,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#eaf2fc",
+    backgroundColor: "rgba(139,92,246,0.18)",
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 12,
     marginBottom: 10,
   },
-  replyBannerText: { fontSize: 13, color: colors.primaryDark, fontWeight: "600" },
+  replyBannerText: { fontSize: 13, color: colors.text, fontWeight: "600" },
   replyBannerCancel: { fontSize: 13, color: colors.error, fontWeight: "700" },
   label: { fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginBottom: 6 },
   input: {
@@ -409,7 +413,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   textArea: { minHeight: 90, textAlignVertical: "top" },
   mathTip: { fontSize: 11, color: colors.textSecondary, fontStyle: "italic", marginTop: 6 },

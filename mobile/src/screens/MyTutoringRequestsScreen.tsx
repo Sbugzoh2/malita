@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
 import { colors, isBeforeCurrentCycle } from "../theme";
 import NotificationBell from "../components/NotificationBell";
+import GradientBackground from "../components/GradientBackground";
 import {
   ApiError,
   fetchMyTutoringRequests,
@@ -356,7 +357,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const paymentDueCount = visibleRequests.filter((r) => r.status === "awaiting_payment").length;
 
   return (
-    <View style={styles.screen}>
+    <GradientBackground style={styles.screen}>
     <ScrollView style={styles.scrollView} contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}>
       <View style={styles.headerRow}>
         <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
@@ -662,7 +663,7 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
         {GROUP_TABS.map((tab) => {
           const count = visibleRequests.filter((r) => groupForStatus(r.status) === tab.key).length;
           const active = group === tab.key;
-          const tint = active ? colors.primary : "#8a8984";
+          const tint = active ? colors.primary : colors.textMuted;
           return (
             <Pressable
               key={tab.key}
@@ -680,18 +681,18 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
         })}
       </View>
     )}
-    </View>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
   scrollView: { flex: 1 },
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   backLink: { alignSelf: "flex-start" },
   backLinkText: { color: colors.textSecondary, fontWeight: "600", fontSize: 13 },
   title: { fontSize: 22, fontWeight: "800", color: colors.text, marginTop: 4, marginBottom: 16 },
-  statCard: { backgroundColor: "#0b0b0b", borderRadius: 20, padding: 18, marginBottom: 16 },
+  statCard: { backgroundColor: colors.primaryDark, borderRadius: 20, padding: 18, marginBottom: 16 },
   standingCard: {
     backgroundColor: colors.surface, borderRadius: 16, padding: 16, marginBottom: 16,
     borderWidth: 1, borderColor: colors.border,
@@ -702,7 +703,7 @@ const styles = StyleSheet.create({
   badgePill: { borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12, marginLeft: 10 },
   badgePillText: { fontSize: 11, fontWeight: "800", color: "#fff", letterSpacing: 0.4 },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  statLabel: { fontSize: 11, color: "#b9b8b3", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
+  statLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
   statValue: { fontSize: 26, color: "#fff", fontWeight: "800", marginTop: 4 },
   paymentDuePill: {
     flexDirection: "row",
@@ -717,10 +718,10 @@ const styles = StyleSheet.create({
   paymentDueText: { fontSize: 12, fontWeight: "700", color: "#eda100" },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 24 },
-  screen: { flex: 1, backgroundColor: colors.background },
+  screen: { flex: 1 },
   bottomBar: {
     flexDirection: "row",
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: 10,
@@ -768,8 +769,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 13,
-    color: colors.text,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
     marginTop: 10,
   },
   confirmButton: {
@@ -799,7 +800,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
   secondaryButtonText: { color: colors.text, fontWeight: "700", fontSize: 14 },
   dangerButton: {
@@ -808,7 +809,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: colors.error,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
   dangerButtonText: { color: colors.error, fontWeight: "700", fontSize: 14 },
   dangerLinkButton: { marginTop: 12, alignItems: "center" },

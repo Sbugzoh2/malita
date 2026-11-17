@@ -21,6 +21,7 @@ import {
 } from "../api/client";
 import MixedMathText from "../latex/MixedMathText";
 import Dropdown from "../components/Dropdown";
+import GradientBackground from "../components/GradientBackground";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Unknown date";
@@ -187,6 +188,7 @@ export default function CollabScreen({ navigation }: any) {
   }
 
   return (
+    <GradientBackground>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Pressable style={styles.backLink} onPress={() => navigation.navigate("Home")}>
         <Text style={styles.backLinkText}>‹ Back to Home</Text>
@@ -255,11 +257,12 @@ export default function CollabScreen({ navigation }: any) {
         ))
       )}
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 40, backgroundColor: colors.background, flexGrow: 1 },
+  container: { padding: 20, paddingBottom: 40, flexGrow: 1 },
   backLink: { marginBottom: 12, alignSelf: "flex-start" },
   backLinkText: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   title: { fontSize: 24, fontWeight: "700", color: colors.text },
@@ -273,10 +276,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: "#fff",
+    backgroundColor: colors.inputBackground,
   },
   chipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
-  chipText: { color: colors.text, fontSize: 13 },
+  chipText: { color: colors.inputText, fontSize: 13 },
   chipTextActive: { color: "#fff", fontWeight: "700" },
   askToggle: { marginTop: 18 },
   askToggleText: { fontSize: 15, fontWeight: "700", color: colors.primaryDark },
@@ -288,7 +291,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    backgroundColor: "#fff",
+    color: colors.inputText,
+    backgroundColor: colors.inputBackground,
   },
   textArea: { minHeight: 90, textAlignVertical: "top" },
   actionButton: {
@@ -331,7 +335,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modActionButtonDanger: { backgroundColor: colors.error },
-  modActionButtonSecondary: { backgroundColor: "#fff", borderWidth: 1, borderColor: colors.border },
+  modActionButtonSecondary: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   modActionButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   modActionButtonTextSecondary: { color: colors.text, fontWeight: "700", fontSize: 13 },
 });

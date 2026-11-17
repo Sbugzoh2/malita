@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useEffect, useRef } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, TextInput, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -194,7 +194,7 @@ function StarPicker({ value, onChange }: { value: number; onChange: (v: number) 
   );
 }
 
-export default function MyTutoringRequestsScreen({ navigation }: any) {
+export default function MyTutoringRequestsScreen({ navigation, route }: any) {
   const { token } = useAuth();
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState(0);
@@ -204,7 +204,24 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const [lifetimeStats, setLifetimeStats] = useState<{
     completed_count: number; average_rating: number | null; badge: Badge;
   } | null>(null);
+  // Screen-wide (load failures only, nothing session-specific to attach
+  // it to) - shown at the top. Per-session action errors (confirm,
+  // withdraw, cancel, reallocate, refund) use actionErrors below instead:
+  // those used to all funnel into this SAME error, rendered only once at
+  // the top of the whole scroll - so a "can't cancel within 24 hours"
+  // triggered by a session near the bottom of a long list was invisible
+  // unless the learner scrolled all the way back up, and looked like the
+  // button just wasn't responding.
   const [error, setError] = useState<string | null>(null);
+  const [actionErrors, setActionErrors] = useState<Record<number, string>>({});
+  function setActionError(requestId: number, message: string | null) {
+    setActionErrors((prev) => {
+      const next = { ...prev };
+      if (message) next[requestId] = message;
+      else delete next[requestId];
+      return next;
+    });
+  }
   const [ratingDraft, setRatingDraft] = useState<Record<number, number>>({});
   const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
@@ -216,6 +233,16 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   const [reallocatingId, setReallocatingId] = useState<number | null>(null);
   const [refundingId, setRefundingId] = useState<number | null>(null);
   const [group, setGroup] = useState<SessionGroup>("active");
+  // Set when PayFast's checkout redirects back via the malita://tutoring
+  // deep link (see api_server.py's /billing/return?target=tutoring) -
+  // the learner is shown a "confirming your payment" state for just this
+  // one request instead of the normal "Pay Now" button, since PayFast's
+  // own server-to-server webhook (the thing that actually flips the
+  // request to "confirmed") can easily arrive a few seconds AFTER this
+  // redirect, so a plain refresh-on-focus often still read
+  // "awaiting_payment" and looked like the payment hadn't gone through.
+  const [processingPaymentId, setProcessingPaymentId] = useState<number | null>(null);
+  const pollAttemptsRef = useRef(0);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -247,6 +274,54 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     }, [token])
   );
 
+  // Captures the deep link's own params (upgraded=1&request_id=...) the
+  // moment they arrive, and clears them off the route immediately -
+  // otherwise re-focusing this screen later (e.g. navigating away and
+  // back) would see the same params still sitting there and incorrectly
+  // re-enter "confirming your payment" for a request that's long since
+  // settled one way or the other.
+  useEffect(() => {
+    const incomingRequestId = route?.params?.request_id;
+    if (route?.params?.upgraded === "1" && incomingRequestId != null) {
+      const id = Number(incomingRequestId);
+      if (!Number.isNaN(id)) {
+        setProcessingPaymentId(id);
+        pollAttemptsRef.current = 0;
+      }
+    }
+    if (route?.params?.upgraded != null || route?.params?.cancelled != null || incomingRequestId != null) {
+      navigation.setParams({ upgraded: undefined, cancelled: undefined, request_id: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.upgraded, route?.params?.request_id]);
+
+  // Polls every 2s (up to 30s) while waiting for PayFast's webhook to
+  // actually land and flip the request to "confirmed" - the effect
+  // below watching `requests` is what normally ends this early, the
+  // moment the status changes; this cap is just so a learner is never
+  // stuck on "confirming" forever if the webhook is unusually slow or
+  // never arrives (they can still see/retry normally once it clears).
+  useEffect(() => {
+    if (processingPaymentId == null) return;
+    const interval = setInterval(() => {
+      pollAttemptsRef.current += 1;
+      load();
+      if (pollAttemptsRef.current >= 15) {
+        setProcessingPaymentId(null);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processingPaymentId]);
+
+  useEffect(() => {
+    if (processingPaymentId == null || !requests) return;
+    const match = requests.find((r) => r.id === processingPaymentId);
+    if (match && match.status !== "awaiting_payment") {
+      setProcessingPaymentId(null);
+    }
+  }, [requests, processingPaymentId]);
+
   function handlePay(requestId: number) {
     if (!token) return;
     Linking.openURL(tutoringCheckoutUrl(token, requestId));
@@ -256,16 +331,16 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
     if (!token) return;
     const rating = ratingDraft[requestId];
     if (!rating) {
-      setError("Please pick a rating (tap a star) before confirming.");
+      setActionError(requestId, "Please pick a rating (tap a star) before confirming.");
       return;
     }
     setConfirmingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await confirmTutoringSessionAsLearner(token, requestId, rating, commentDraft[requestId] || "");
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not confirm this session.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not confirm this session.");
     } finally {
       setConfirmingId(null);
     }
@@ -274,12 +349,12 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   async function handleRespond(requestId: number, accept: boolean) {
     if (!token) return;
     setRespondingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await respondToTimeProposal(token, requestId, accept);
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not record your response.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not record your response.");
     } finally {
       setRespondingId(null);
     }
@@ -299,12 +374,12 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   async function handleWithdraw(requestId: number) {
     if (!token) return;
     setWithdrawingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await withdrawTutoringRequest(token, requestId);
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not withdraw this request.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not withdraw this request.");
     } finally {
       setWithdrawingId(null);
     }
@@ -313,14 +388,14 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   async function handleCancel(requestId: number) {
     if (!token) return;
     setCancelingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await cancelTutoringSessionAsLearner(token, requestId, cancelReason.trim());
       setCancelReasonId(null);
       setCancelReason("");
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not cancel this session.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not cancel this session.");
     } finally {
       setCancelingId(null);
     }
@@ -329,12 +404,12 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   async function handleReallocate(requestId: number) {
     if (!token) return;
     setReallocatingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await reallocateAfterTutorCancellation(token, requestId);
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not reopen this request.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not reopen this request.");
     } finally {
       setReallocatingId(null);
     }
@@ -354,12 +429,12 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
   async function handleRequestRefund(requestId: number) {
     if (!token) return;
     setRefundingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await requestRefundForCancelledSession(token, requestId);
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not request a refund for this session.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not request a refund for this session.");
     } finally {
       setRefundingId(null);
     }
@@ -561,7 +636,14 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
               </View>
             )}
 
-            {r.status === "awaiting_payment" && (
+            {r.status === "awaiting_payment" && processingPaymentId === r.id ? (
+              <View style={styles.processingBox}>
+                <ActivityIndicator color={colors.primary} style={styles.processingSpinner} />
+                <Text style={styles.processingText}>
+                  We're confirming your payment - this can take a few seconds. Please don't pay again or close the app.
+                </Text>
+              </View>
+            ) : r.status === "awaiting_payment" ? (
               <>
                 <Pressable style={styles.payButton} onPress={() => handlePay(r.id)}>
                   <Text style={styles.payButtonText}>Pay Now</Text>
@@ -570,9 +652,9 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
                   Pay within 24 hours of being matched, or this request lapses and you'll need to submit a new one.
                 </Text>
               </>
-            )}
+            ) : null}
 
-            {(r.status === "awaiting_payment" || r.status === "confirmed") && (
+            {(r.status === "awaiting_payment" || r.status === "confirmed") && processingPaymentId !== r.id && (
               <View style={styles.cancelSection}>
                 {cancelReasonId === r.id ? (
                   <View style={styles.cancelBox}>
@@ -667,6 +749,8 @@ export default function MyTutoringRequestsScreen({ navigation }: any) {
             {r.status === "completed" && r.learner_rating != null && (
               <Text style={styles.cardMeta}>You rated this session {r.learner_rating}/5 ⭐</Text>
             )}
+
+            {actionErrors[r.id] ? <Text style={styles.cardError}>{actionErrors[r.id]}</Text> : null}
           </View>
         ))
       )}
@@ -735,6 +819,7 @@ const styles = StyleSheet.create({
   paymentDueDot: { width: 7, height: 7, borderRadius: 999, backgroundColor: "#eda100" },
   paymentDueText: { fontSize: 12, fontWeight: "700", color: "#eda100" },
   error: { color: colors.error, marginBottom: 12 },
+  cardError: { color: colors.error, fontSize: 13, marginTop: 12, fontWeight: "600" },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 24 },
   screen: { flex: 1 },
   bottomBar: {
@@ -775,6 +860,17 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   payButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  processingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+    gap: 10,
+  },
+  processingSpinner: { marginRight: 2 },
+  processingText: { flex: 1, color: "#fff", fontSize: 13, lineHeight: 18, fontWeight: "600" },
   meetLink: { color: colors.primary, fontWeight: "700", fontSize: 13, marginTop: 10 },
   confirmBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   confirmLabel: { fontSize: 13, color: colors.text, fontWeight: "600", marginBottom: 8 },

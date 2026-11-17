@@ -169,7 +169,16 @@ export default function TutorProfileScreen({ navigation }: any) {
     setError(null);
     try {
       await updateTutorAcceptingSessions(token, next);
-      load();
+      // Update locally instead of calling load() (which fires off its
+      // own fetch without awaiting it) - that fire-and-forget refetch
+      // let setTogglingAccepting(false) below run, and the Switch come
+      // back, BEFORE the refetch had actually resolved and updated
+      // `profile` - so the Switch briefly flashed back to its OLD value,
+      // looking like the tap hadn't registered and prompting a second
+      // tap. We already know the new value for certain (the PATCH above
+      // just succeeded), so there's no need to round-trip a GET to learn
+      // it again.
+      setProfile((p) => (p ? { ...p, accepting_new_sessions: next } : p));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not update this setting.");
     } finally {

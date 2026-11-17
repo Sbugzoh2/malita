@@ -3873,6 +3873,18 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
             req.cancelled_at = dt.datetime.utcnow()
             req.cancelled_by = by
             req.cancellation_reason = reason.strip() or None
+            if was_paid:
+                # A learner cancelling their OWN already-paid session (as
+                # opposed to a tutor backing out, handled above) has no
+                # "reallocate" choice to make - they no longer want it, so
+                # the only next step is a refund. Flag it immediately
+                # rather than making them find and tap a separate "Request
+                # Refund" button; this lands in the exact same admin queue
+                # (list_requests_needing_attention) and is cleared the same
+                # way (mark_refund_processed) as the tutor-cancellation
+                # case.
+                req.refund_requested_at = dt.datetime.utcnow()
+        price_zar = req.price_zar
         result = {"id": req.id, "status": req.status}
 
     if reopen_for_other_tutors:
@@ -3893,6 +3905,8 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
             subject=subject, topic=topic, scheduled_at=scheduled_at,
             cancelled_by=by, reason=reason, was_paid=was_paid,
         )
+        if was_paid:
+            _notify_admins_of_refund_request(request_id=request_id, price_zar=price_zar, subject=subject, topic=topic)
     return result
 
 

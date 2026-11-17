@@ -379,7 +379,23 @@ export default function TutorHomeScreen({ navigation }: any) {
   const [payouts, setPayouts] = useState<TutorPayout[] | null>(null);
   const [openRequests, setOpenRequests] = useState<TutoringRequest[] | null>(null);
   const [openCutPercent, setOpenCutPercent] = useState<number>(30);
+  // Screen-wide (load failures only) - shown at the top. Per-session
+  // action errors (accept, propose, respond, confirm, cancel, submit
+  // recording) use actionErrors below instead: those used to all funnel
+  // into this SAME error, rendered only once at the top of the whole
+  // scroll - so e.g. a "can't cancel within 24 hours" triggered by a
+  // session far down a long list was invisible unless the tutor scrolled
+  // all the way back up, and looked like the button wasn't responding.
   const [error, setError] = useState<string | null>(null);
+  const [actionErrors, setActionErrors] = useState<Record<number, string>>({});
+  function setActionError(requestId: number, message: string | null) {
+    setActionErrors((prev) => {
+      const next = { ...prev };
+      if (message) next[requestId] = message;
+      else delete next[requestId];
+      return next;
+    });
+  }
   const [section, setSection] = useState<Section>("open");
   const [proposingId, setProposingId] = useState<number | null>(null);
   const [proposeDateTime, setProposeDateTime] = useState<Record<number, SessionDateTimeValue>>({});
@@ -417,7 +433,7 @@ export default function TutorHomeScreen({ navigation }: any) {
   async function handleAccept(requestId: number) {
     if (!token) return;
     setAcceptingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       const result = await acceptTutoringRequest(token, requestId);
       // A custom ("Other") module claim doesn't finalize immediately -
@@ -432,7 +448,7 @@ export default function TutorHomeScreen({ navigation }: any) {
       }
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not accept this request.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not accept this request.");
     } finally {
       setAcceptingId(null);
     }
@@ -442,17 +458,17 @@ export default function TutorHomeScreen({ navigation }: any) {
     if (!token) return;
     const dt = proposeDateTime[requestId];
     if (!dt) {
-      setError("Please pick a date and time to propose.");
+      setActionError(requestId, "Please pick a date and time to propose.");
       return;
     }
     setSendingProposalId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await proposeNewTime(token, requestId, sessionDateTimeToIso(dt));
       setProposingId(null);
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not send that proposal.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not send that proposal.");
     } finally {
       setSendingProposalId(null);
     }
@@ -461,12 +477,12 @@ export default function TutorHomeScreen({ navigation }: any) {
   async function handleAdminMatchResponse(requestId: number, accept: boolean) {
     if (!token) return;
     setRespondingAdminMatchId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await respondToAdminMatch(token, requestId, accept);
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not record your response.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not record your response.");
     } finally {
       setRespondingAdminMatchId(null);
     }
@@ -476,16 +492,16 @@ export default function TutorHomeScreen({ navigation }: any) {
     if (!token) return;
     const rating = ratingDraft[requestId];
     if (!rating) {
-      setError("Please pick a rating (tap a star) before confirming.");
+      setActionError(requestId, "Please pick a rating (tap a star) before confirming.");
       return;
     }
     setConfirmingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await confirmTutoringSessionAsTutor(token, requestId, rating, commentDraft[requestId] || "");
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not confirm this session.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not confirm this session.");
     } finally {
       setConfirmingId(null);
     }
@@ -494,14 +510,14 @@ export default function TutorHomeScreen({ navigation }: any) {
   async function handleCancel(requestId: number) {
     if (!token) return;
     setCancelingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await cancelTutoringSessionAsTutor(token, requestId, cancelReason.trim());
       setCancelReasonId(null);
       setCancelReason("");
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not cancel this session.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not cancel this session.");
     } finally {
       setCancelingId(null);
     }
@@ -511,16 +527,16 @@ export default function TutorHomeScreen({ navigation }: any) {
     if (!token) return;
     const link = (recordingDraft[requestId] || "").trim();
     if (!link) {
-      setError("Please paste in the recording link.");
+      setActionError(requestId, "Please paste in the recording link.");
       return;
     }
     setSubmittingRecordingId(requestId);
-    setError(null);
+    setActionError(requestId, null);
     try {
       await submitSessionRecording(token, requestId, link);
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not submit the recording link.");
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not submit the recording link.");
     } finally {
       setSubmittingRecordingId(null);
     }
@@ -746,6 +762,7 @@ export default function TutorHomeScreen({ navigation }: any) {
                                   </Pressable>
                                 </View>
                               )}
+                              {actionErrors[r.id] ? <Text style={styles.cardError}>{actionErrors[r.id]}</Text> : null}
                             </View>
                           )}
                         </View>
@@ -1027,6 +1044,8 @@ export default function TutorHomeScreen({ navigation }: any) {
                       Lapsed - the learner didn't pay within 24 hours of being matched. They'll need to submit a new request.
                     </Text>
                   )}
+
+                  {actionErrors[sess.id] ? <Text style={styles.cardError}>{actionErrors[sess.id]}</Text> : null}
                 </View>
                     ))
                 )}
@@ -1160,6 +1179,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   error: { color: colors.error, marginBottom: 12 },
+  cardError: { color: colors.error, fontSize: 13, marginTop: 12, fontWeight: "600" },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 16 },
   sessionTypeWrap: { marginBottom: 16 },
   statCard: {

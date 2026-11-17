@@ -782,7 +782,7 @@ def billing_checkout_page(tier: str, authorization: str = Header(None), token: s
 
 
 @app.get("/billing/return", response_class=HTMLResponse)
-def billing_return(status: str = "upgraded", target: str = "billing", scheme: str = "malita"):
+def billing_return(status: str = "upgraded", target: str = "billing", scheme: str = "malita", request_id: int | None = None):
     """Bridge page for PayFast's mobile return_url/cancel_url. PayFast
     requires a real http(s) URL and rejects a bare custom-scheme deep
     link outright ("invalid url format") - this page is what PayFast
@@ -803,10 +803,21 @@ def billing_return(status: str = "upgraded", target: str = "billing", scheme: st
     `target` picks which deep-linked screen to return to (see
     RootNavigator's linking config) - "billing" (default, the
     Subscription screen) for a subscription checkout, "tutoring" (the My
-    Tutoring Requests screen) for a tutoring-session checkout."""
+    Tutoring Requests screen) for a tutoring-session checkout.
+
+    `request_id` (tutoring checkouts only) rides along so
+    MyTutoringRequestsScreen knows WHICH of the learner's requests this
+    payment was for, and can show a "confirming your payment" state for
+    just that one instead of a generic refresh - PayFast's own
+    server-to-server webhook (which is what actually flips the request
+    to "confirmed") can easily arrive after this redirect, so the
+    request might still read "awaiting_payment" the instant the learner
+    lands back in the app."""
     if status not in ("upgraded", "cancelled"):
         status = "upgraded"
     app_url = f"{scheme}://{target}?{status}=1"
+    if request_id is not None:
+        app_url += f"&request_id={request_id}"
     return _app_bridge_html(app_url)
 
 
@@ -2047,8 +2058,8 @@ def tutoring_checkout_page(request_id: int, authorization: str = Header(None), t
         item_name=f"Malita Tutoring Session: {req['subject']}",
         name_first=user["name"].split(" ")[0],
         email_address=user["email"],
-        return_url=f"{API_BASE_URL}/billing/return?status=upgraded&target=tutoring&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}",
-        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled&target=tutoring&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}",
+        return_url=f"{API_BASE_URL}/billing/return?status=upgraded&target=tutoring&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}&request_id={req['id']}",
+        cancel_url=f"{API_BASE_URL}/billing/return?status=cancelled&target=tutoring&scheme={SCHEME_BY_ACCOUNT_TYPE.get(user['account_type'], 'malita')}&request_id={req['id']}",
         notify_url=APP_WEBHOOK_URL,
         recurring=False,
         custom_fields={"custom_str1": "tutoring_session", "custom_str2": str(req["id"])},

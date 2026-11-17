@@ -43,6 +43,20 @@ export default function BrowseTutorsScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = useState("");
   const [tutors, setTutors] = useState<DirectoryTutor[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Collapsed by default - a tutor can teach a long list of subjects/
+  // modules, and showing every one of them for every tutor up front
+  // turned this into one very long scroll. Tapping a tutor's card
+  // expands just that one.
+  const [expandedTutorIds, setExpandedTutorIds] = useState<Set<number>>(new Set());
+
+  function toggleExpanded(tutorId: number) {
+    setExpandedTutorIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tutorId)) next.delete(tutorId);
+      else next.add(tutorId);
+      return next;
+    });
+  }
 
   // Search is free-text and client-side now (below), so the full
   // directory is always fetched unfiltered - the API's subject param
@@ -162,9 +176,24 @@ export default function BrowseTutorsScreen({ navigation }: any) {
           {query ? "No approved tutors match that search." : "No approved tutors right now."}
         </Text>
       ) : (
-        visibleTutors.map((tutor) => (
+        visibleTutors.map((tutor) => {
+          const subjectMatches = matchingSubjectsFor(tutor);
+          const moduleMatches = matchingModulesFor(tutor);
+          const offerCount = subjectMatches.length + moduleMatches.length;
+          // A search that matched one of THIS tutor's subjects/modules
+          // (rather than just their name/bio) should show that match
+          // right away, not make the learner expand to find what they
+          // just searched for - manual expand/collapse still applies
+          // otherwise (including a plain name search with no query).
+          const forceExpanded = !!query && !tutorNameMatches(tutor);
+          const isExpanded = forceExpanded || expandedTutorIds.has(tutor.id);
+          return (
           <View key={tutor.id} style={styles.card}>
-            <View style={styles.cardHeaderRow}>
+            <Pressable
+              style={styles.cardHeaderRow}
+              onPress={() => toggleExpanded(tutor.id)}
+              disabled={forceExpanded}
+            >
               <View style={[styles.cardAvatar, { backgroundColor: colorForName(tutor.name) }]}>
                 <Text style={styles.cardAvatarText}>{tutor.name.charAt(0).toUpperCase()}</Text>
               </View>
@@ -182,45 +211,59 @@ export default function BrowseTutorsScreen({ navigation }: any) {
                   {tutor.average_rating != null ? ` · ${tutor.average_rating.toFixed(1)}★ avg` : ""}
                 </Text>
               </View>
-            </View>
+              {!forceExpanded ? (
+                <Text style={styles.expandChevron}>{isExpanded ? "▲" : "▼"}</Text>
+              ) : null}
+            </Pressable>
             {tutor.bio ? <Text style={styles.bio}>{tutor.bio}</Text> : null}
             {tutor.availability_note ? (
               <Text style={styles.cardMeta}>Availability: {tutor.availability_note}</Text>
             ) : null}
 
-            {matchingSubjectsFor(tutor).map((s) => (
-                <View key={s.subject} style={styles.offerRow}>
-                  <View style={[styles.offerDot, { backgroundColor: colorForName(s.subject) }]} />
-                  <View style={styles.offerTextCol}>
-                    <Text style={styles.offerTitle}>{s.subject}</Text>
-                    <Text style={styles.offerMeta}>
-                      {s.hourly_rate_zar != null ? `R${s.hourly_rate_zar}/hr` : ""}
-                      {s.hourly_rate_zar != null && s.topics ? " · " : ""}
-                      {s.topics ?? ""}
-                    </Text>
-                  </View>
-                  <Pressable style={styles.requestButton} onPress={() => requestSubject(tutor, s.subject)}>
-                    <Text style={styles.requestButtonText}>Request</Text>
-                  </Pressable>
-                </View>
-              ))}
+            {!isExpanded ? (
+              <Pressable style={styles.expandLink} onPress={() => toggleExpanded(tutor.id)}>
+                <Text style={styles.expandLinkText}>
+                  Show {offerCount} subject{offerCount === 1 ? "" : "s"}/module{offerCount === 1 ? "" : "s"}
+                </Text>
+              </Pressable>
+            ) : (
+              <>
+                {subjectMatches.map((s) => (
+                    <View key={s.subject} style={styles.offerRow}>
+                      <View style={[styles.offerDot, { backgroundColor: colorForName(s.subject) }]} />
+                      <View style={styles.offerTextCol}>
+                        <Text style={styles.offerTitle}>{s.subject}</Text>
+                        <Text style={styles.offerMeta}>
+                          {s.hourly_rate_zar != null ? `R${s.hourly_rate_zar}/hr` : ""}
+                          {s.hourly_rate_zar != null && s.topics ? " · " : ""}
+                          {s.topics ?? ""}
+                        </Text>
+                      </View>
+                      <Pressable style={styles.requestButton} onPress={() => requestSubject(tutor, s.subject)}>
+                        <Text style={styles.requestButtonText}>Request</Text>
+                      </Pressable>
+                    </View>
+                  ))}
 
-            {matchingModulesFor(tutor).map((m) => (
-                <View key={m.id} style={styles.offerRow}>
-                  <View style={[styles.offerDot, { backgroundColor: colorForName(m.name) }]} />
-                  <View style={styles.offerTextCol}>
-                    <Text style={styles.offerTitle}>{m.name} ({m.year_level_label})</Text>
-                    <Text style={styles.offerMeta}>
-                      {m.qualification ?? "—"}{m.institution ? ` · ${m.institution}` : ""}
-                    </Text>
-                  </View>
-                  <Pressable style={styles.requestButton} onPress={() => requestModule(tutor, m)}>
-                    <Text style={styles.requestButtonText}>Request</Text>
-                  </Pressable>
-                </View>
-              ))}
+                {moduleMatches.map((m) => (
+                    <View key={m.id} style={styles.offerRow}>
+                      <View style={[styles.offerDot, { backgroundColor: colorForName(m.name) }]} />
+                      <View style={styles.offerTextCol}>
+                        <Text style={styles.offerTitle}>{m.name} ({m.year_level_label})</Text>
+                        <Text style={styles.offerMeta}>
+                          {m.qualification ?? "—"}{m.institution ? ` · ${m.institution}` : ""}
+                        </Text>
+                      </View>
+                      <Pressable style={styles.requestButton} onPress={() => requestModule(tutor, m)}>
+                        <Text style={styles.requestButtonText}>Request</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+              </>
+            )}
           </View>
-        ))
+          );
+        })
       )}
     </ScrollView>
     </GradientBackground>
@@ -272,6 +315,9 @@ const styles = StyleSheet.create({
   badgePillText: { fontSize: 10, fontWeight: "800", color: "#fff", letterSpacing: 0.4 },
   cardMeta: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
   bio: { fontSize: 13, color: colors.text, marginTop: 8, lineHeight: 18 },
+  expandChevron: { color: colors.textSecondary, fontSize: 13, marginLeft: 8 },
+  expandLink: { marginTop: 10 },
+  expandLinkText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
   offerRow: {
     flexDirection: "row",
     alignItems: "center",

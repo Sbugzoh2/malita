@@ -28,6 +28,9 @@ import {
   suggestRefundAdmin,
   markRefundProcessingAdmin,
   markRefundProcessedAdmin,
+  resolveNoShowAsTutorNoShowAdmin,
+  resolveNoShowAsLearnerNoShowAdmin,
+  dismissNoShowReportAdmin,
   TutoringPayout,
   fetchPendingPayoutsAdmin,
   markPayoutPaidAdmin,
@@ -1097,6 +1100,46 @@ function RefundsSection({ token }: { token: string }) {
     }
   }
 
+  function confirmResolveNoShow(id: number, asTutorNoShow: boolean) {
+    Alert.alert(
+      asTutorNoShow ? "Resolve as tutor no-show?" : "Resolve as learner no-show?",
+      asTutorNoShow
+        ? "The learner will be refunded in full and the tutor charged Malita's late-cancellation fee against their running payout balance."
+        : "The tutor will be paid in full and the learner will get no refund.",
+      [
+        { text: "Never mind", style: "cancel" },
+        { text: "Confirm", style: "destructive", onPress: () => handleResolveNoShow(id, asTutorNoShow) },
+      ]
+    );
+  }
+
+  async function handleResolveNoShow(id: number, asTutorNoShow: boolean) {
+    setBusyId(id);
+    setError(null);
+    try {
+      if (asTutorNoShow) await resolveNoShowAsTutorNoShowAdmin(token, id);
+      else await resolveNoShowAsLearnerNoShowAdmin(token, id);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not resolve this no-show report.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDismissNoShow(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await dismissNoShowReportAdmin(token, id);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not dismiss this report.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -1125,7 +1168,50 @@ function RefundsSection({ token }: { token: string }) {
               </Text>
             ) : null}
 
-            {r.status === "tutor_cancelled" ? (
+            {r.no_show_reported_at && !r.no_show_resolved_at ? (
+              <>
+                <Text style={styles.detailLine}>
+                  {r.no_show_reported_by === "learner" ? "The learner" : "The tutor"} reported this session didn't
+                  happen{r.no_show_reason ? `: "${r.no_show_reason}"` : "."} It couldn't be auto-resolved (the two
+                  sides' own check-in records disagree, or both are blaming each other) - this needs your call.
+                </Text>
+                <View style={styles.actionRow}>
+                  <Pressable
+                    style={[styles.approveButton, { flex: 1 }]}
+                    onPress={() => confirmResolveNoShow(r.id, true)}
+                    disabled={busyId === r.id}
+                  >
+                    {busyId === r.id ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.approveButtonText}>Tutor No-Show</Text>
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={[styles.approveButton, { flex: 1 }]}
+                    onPress={() => confirmResolveNoShow(r.id, false)}
+                    disabled={busyId === r.id}
+                  >
+                    {busyId === r.id ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.approveButtonText}>Learner No-Show</Text>
+                    )}
+                  </Pressable>
+                </View>
+                <Pressable
+                  style={[styles.rejectButton, { marginTop: 10 }]}
+                  onPress={() => handleDismissNoShow(r.id)}
+                  disabled={busyId === r.id}
+                >
+                  {busyId === r.id ? (
+                    <ActivityIndicator color={colors.error} />
+                  ) : (
+                    <Text style={styles.rejectButtonText}>Dismiss (No Action)</Text>
+                  )}
+                </Pressable>
+              </>
+            ) : r.status === "tutor_cancelled" ? (
               <>
                 <Text style={styles.detailLine}>
                   Tutor cancelled this paid session - the learner hasn't yet chosen between re-allocation and a

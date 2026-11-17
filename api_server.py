@@ -99,6 +99,9 @@ from backend.tutoring import (
     admin_suggest_refund, admin_mark_refund_processing, mark_refund_processed, list_requests_needing_attention,
     suspend_tutor, block_tutor, reinstate_tutor, list_tutors_for_admin,
     update_tutor_profile, update_tutor_study_details, set_tutor_accepting_new_sessions,
+    check_in_to_session, report_no_show,
+    admin_resolve_no_show_as_tutor_no_show, admin_resolve_no_show_as_learner_no_show,
+    admin_dismiss_no_show_report,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -420,6 +423,10 @@ class SessionCancelRequest(BaseModel):
 
 class SessionRecordingRequest(BaseModel):
     recording_link: str
+
+
+class ReportNoShowRequest(BaseModel):
+    reason: str = ""
 
 
 class PayoutMarkPaidRequest(BaseModel):
@@ -1675,6 +1682,29 @@ def tutor_cancel_accepted_session(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/tutor/sessions/{request_id}/check-in")
+def tutor_check_in(request_id: int, authorization: str = Header(None)):
+    """The tutor tapping "I'm on the call" (see check_in_to_session)."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return check_in_to_session(request_id, by="tutor", person_id=tutor["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutor/sessions/{request_id}/report-no-show")
+def tutor_report_no_show(
+    request_id: int, payload: ReportNoShowRequest, authorization: str = Header(None)
+):
+    """The tutor reporting that the learner didn't show up (see
+    report_no_show) - may auto-resolve into a full payout on the spot."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return report_no_show(request_id, by="tutor", person_id=tutor["id"], reason=payload.reason)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/tutor/sessions/{request_id}/recording")
 def tutor_submit_session_recording(
     request_id: int, payload: SessionRecordingRequest, authorization: str = Header(None)
@@ -2002,6 +2032,29 @@ def tutoring_request_refund(request_id: int, authorization: str = Header(None)):
     user = _auth_user(authorization)
     try:
         return request_refund_for_cancelled_session(request_id, user["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/check-in")
+def tutoring_check_in(request_id: int, authorization: str = Header(None)):
+    """The learner tapping "I'm on the call" (see check_in_to_session)."""
+    user = _auth_user(authorization)
+    try:
+        return check_in_to_session(request_id, by="learner", person_id=user["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/report-no-show")
+def tutoring_report_no_show(
+    request_id: int, payload: ReportNoShowRequest, authorization: str = Header(None)
+):
+    """The learner reporting that the tutor didn't show up (see
+    report_no_show) - may auto-resolve into a full refund on the spot."""
+    user = _auth_user(authorization)
+    try:
+        return report_no_show(request_id, by="learner", person_id=user["id"], reason=payload.reason)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2505,6 +2558,45 @@ def admin_tutoring_mark_refund_processing(request_id: int, authorization: str = 
         raise HTTPException(status_code=403, detail="Admin access required.")
     try:
         return admin_mark_refund_processing(request_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/tutoring/requests/{request_id}/resolve-no-show-tutor")
+def admin_tutoring_resolve_no_show_tutor(request_id: int, authorization: str = Header(None)):
+    """Admin's manual call on a disputed no-show report - the tutor
+    didn't show (see admin_resolve_no_show_as_tutor_no_show)."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return admin_resolve_no_show_as_tutor_no_show(request_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/tutoring/requests/{request_id}/resolve-no-show-learner")
+def admin_tutoring_resolve_no_show_learner(request_id: int, authorization: str = Header(None)):
+    """Admin's manual call on a disputed no-show report - the learner
+    didn't show (see admin_resolve_no_show_as_learner_no_show)."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return admin_resolve_no_show_as_learner_no_show(request_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/tutoring/requests/{request_id}/dismiss-no-show")
+def admin_tutoring_dismiss_no_show(request_id: int, authorization: str = Header(None)):
+    """Admin deciding a no-show report was a false alarm (see
+    admin_dismiss_no_show_report)."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return admin_dismiss_no_show_report(request_id)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

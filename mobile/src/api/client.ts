@@ -500,6 +500,18 @@ export type TutoringRequest = {
   lapse_reason: "no_tutor_accepted" | "payment_not_completed" | null;
   recording_link: string | null;
   recording_shared_at: string | null;
+  // Self-reported "I'm on the call" timestamps (see backend/tutoring.py's
+  // check_in_to_session) - the only presence signal available without a
+  // Google Workspace plan. Used client-side to decide whether to show
+  // the check-in button (status=="confirmed" and not yet checked in) and
+  // to compute whether a no-show report can auto-resolve.
+  learner_checked_in_at: string | null;
+  tutor_checked_in_at: string | null;
+  no_show_reported_by: "learner" | "tutor" | null;
+  no_show_reported_at: string | null;
+  no_show_reason: string | null;
+  no_show_resolved_at: string | null;
+  no_show_resolution: "tutor_no_show" | "learner_no_show" | "dismissed" | null;
 };
 
 export type TutoringRequestParams = {
@@ -628,6 +640,47 @@ export function submitSessionRecording(token: string, requestId: number, recordi
   return request<{ id: number; status: string }>(`/tutor/sessions/${requestId}/recording`, {
     method: "POST",
     body: { recording_link: recordingLink },
+    token,
+  });
+}
+
+export type CheckInResult = { id: number; learner_checked_in_at: string | null; tutor_checked_in_at: string | null };
+
+// Either side tapping "I'm on the call" once they've joined the Google
+// Meet - see backend/tutoring.py's check_in_to_session for why this is
+// the only presence signal this app can offer.
+export function checkInToSessionAsLearner(token: string, requestId: number) {
+  return request<CheckInResult>(`/tutoring/requests/${requestId}/check-in`, { method: "POST", token });
+}
+
+export function checkInToSessionAsTutor(token: string, requestId: number) {
+  return request<CheckInResult>(`/tutor/sessions/${requestId}/check-in`, { method: "POST", token });
+}
+
+export type ReportNoShowResult = {
+  id: number;
+  status: string;
+  // "tutor_no_show" | "learner_no_show" if it auto-resolved on the spot
+  // (see backend/tutoring.py's report_no_show), null if it needs an
+  // admin's judgment call instead.
+  auto_resolved: "tutor_no_show" | "learner_no_show" | null;
+};
+
+// Either side reporting that the session didn't actually happen - may
+// auto-resolve into a refund/payout immediately, or sit unresolved for
+// admin to decide (see backend/tutoring.py's report_no_show).
+export function reportNoShowAsLearner(token: string, requestId: number, reason: string = "") {
+  return request<ReportNoShowResult>(`/tutoring/requests/${requestId}/report-no-show`, {
+    method: "POST",
+    body: { reason },
+    token,
+  });
+}
+
+export function reportNoShowAsTutor(token: string, requestId: number, reason: string = "") {
+  return request<ReportNoShowResult>(`/tutor/sessions/${requestId}/report-no-show`, {
+    method: "POST",
+    body: { reason },
     token,
   });
 }
@@ -1223,6 +1276,30 @@ export function markRefundProcessingAdmin(token: string, requestId: number) {
 
 export function markRefundProcessedAdmin(token: string, requestId: number) {
   return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/mark-refund-processed`, {
+    method: "POST",
+    token,
+  });
+}
+
+// Admin's manual call on a disputed no-show report (see
+// backend/tutoring.py's admin_resolve_no_show_as_tutor_no_show /
+// admin_resolve_no_show_as_learner_no_show / admin_dismiss_no_show_report).
+export function resolveNoShowAsTutorNoShowAdmin(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/resolve-no-show-tutor`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function resolveNoShowAsLearnerNoShowAdmin(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/resolve-no-show-learner`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function dismissNoShowReportAdmin(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/dismiss-no-show`, {
     method: "POST",
     token,
   });

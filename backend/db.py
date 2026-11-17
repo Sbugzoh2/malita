@@ -838,6 +838,27 @@ class TutoringSessionRequest(Base):
     tutor_rating = Column(Integer, nullable=True)  # 1-5, the tutor's rating OF the learner
     tutor_rating_comment = Column(String, nullable=True)
 
+    # Self-reported "I'm on the call" timestamps - the only presence
+    # signal available without a Google Workspace plan (recording/
+    # attendance reports need one; this app connects a single ordinary
+    # Google account, not a Workspace domain - see backend/
+    # google_calendar.py). Set once, first tap wins (see check_in_to_
+    # session) - not proof in a cryptographic sense, just a timestamped
+    # record admin can compare against a no-show report below.
+    learner_checked_in_at = Column(DateTime, nullable=True)
+    tutor_checked_in_at = Column(DateTime, nullable=True)
+    # A "this session didn't happen" report from either side (see
+    # report_no_show) - resolved either automatically (the reporter
+    # waited NO_SHOW_MIN_CHECKED_IN_MINUTES+ and the accused side never
+    # checked in at all) or by an admin (see admin_resolve_no_show_as_
+    # tutor_no_show/admin_resolve_no_show_as_learner_no_show/admin_
+    # dismiss_no_show_report) when the two sides' own data disagrees.
+    no_show_reported_by = Column(String(10), nullable=True)  # "learner" | "tutor"
+    no_show_reported_at = Column(DateTime, nullable=True)
+    no_show_reason = Column(String, nullable=True)
+    no_show_resolved_at = Column(DateTime, nullable=True)
+    no_show_resolution = Column(String(20), nullable=True)  # tutor_no_show | learner_no_show | dismissed
+
     learner = relationship("User")
     tutor = relationship("TutorAccount", back_populates="sessions", foreign_keys=[tutor_id])
     preferred_tutor = relationship("TutorAccount", foreign_keys=[preferred_tutor_id])
@@ -1098,6 +1119,13 @@ def init_db():
     _ensure_column("tutoring_session_requests", "tutor_confirmed_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "tutor_rating", "INTEGER")
     _ensure_column("tutoring_session_requests", "tutor_rating_comment", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "learner_checked_in_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "tutor_checked_in_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "no_show_reported_by", "VARCHAR(10)")
+    _ensure_column("tutoring_session_requests", "no_show_reported_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "no_show_reason", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "no_show_resolved_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "no_show_resolution", "VARCHAR(20)")
     _ensure_column("tutoring_session_requests", "proposed_scheduled_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "admin_proposed_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "admin_match_note", "VARCHAR")

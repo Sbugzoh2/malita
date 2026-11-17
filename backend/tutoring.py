@@ -2817,6 +2817,13 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "lapsed_at": _iso_utc(r.lapsed_at),
         "recording_link": r.recording_link,
         "recording_shared_at": _iso_utc(r.recording_shared_at),
+        "learner_checked_in_at": _iso_utc(r.learner_checked_in_at),
+        "tutor_checked_in_at": _iso_utc(r.tutor_checked_in_at),
+        "no_show_reported_by": r.no_show_reported_by,
+        "no_show_reported_at": _iso_utc(r.no_show_reported_at),
+        "no_show_reason": r.no_show_reason,
+        "no_show_resolved_at": _iso_utc(r.no_show_resolved_at),
+        "no_show_resolution": r.no_show_resolution,
     }
 
 
@@ -3720,6 +3727,322 @@ def confirm_session_by_tutor(
         return {"id": req.id, "status": req.status}
 
 
+# Minimum minutes a no-show reporter must have been checked in for their
+# OWN report to auto-qualify them for the tutor-no-show refund below -
+# proves they genuinely waited rather than reporting after barely
+# glancing at the call. There's no equivalent minimum required of the
+# accused side; what matters there is simply whether they checked in
+# AT ALL (see report_no_show).
+NO_SHOW_MIN_CHECKED_IN_MINUTES = 15
+
+
+def check_in_to_session(request_id: int, *, by: str, person_id: int) -> dict:
+    """Either side tapping "I'm on the call" once they've joined - the
+    only presence signal available without a Google Workspace plan
+    (Meet's own recording/attendance reports need one; this app
+    connects a single ordinary Google account, not a Workspace domain -
+    see backend/google_calendar.py). Idempotent - only the FIRST tap is
+    recorded, so a double-tap or a later re-check-in can't push the
+    timestamp later and understate how early someone actually joined.
+    This is self-reported, not cryptographic proof - same trust level as
+    everything else admin reviews manually in this app (bank details,
+    cancellation reasons, etc.)."""
+    if by not in ("learner", "tutor"):
+        raise TutoringError("Invalid check-in.")
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Session not found.")
+        if by == "learner" and req.learner_user_id != person_id:
+            raise TutoringError("Session not found.")
+        if by == "tutor" and req.tutor_id != person_id:
+            raise TutoringError("Session not found.")
+        if req.status != "confirmed":
+            raise TutoringError(f"This session is '{req.status}', not a paid session you can check into.")
+        if by == "learner":
+            if req.learner_checked_in_at is None:
+                req.learner_checked_in_at = dt.datetime.utcnow()
+        else:
+            if req.tutor_checked_in_at is None:
+                req.tutor_checked_in_at = dt.datetime.utcnow()
+        return {
+            "id": req.id, "learner_checked_in_at": _iso_utc(req.learner_checked_in_at),
+            "tutor_checked_in_at": _iso_utc(req.tutor_checked_in_at),
+        }
+
+
+def report_no_show(request_id: int, *, by: str, person_id: int, reason: str = "") -> dict:
+    """Either side reporting that the session didn't actually happen -
+    the other side (or both, if nobody showed) no-showed. Auto-resolves
+    immediately if the reporter waited NO_SHOW_MIN_CHECKED_IN_MINUTES+
+    (per their own check_in_to_session timestamp) AND the accused side
+    never checked in at all - that combination is as close to
+    uncontested as this app can verify, so it's settled on the spot:
+      - learner reports (tutor no-show): 100% refund, no late-
+        cancellation fee, and the TUTOR is charged Malita's late-
+        cancellation-style penalty (see LATE_CANCELLATION_PENALTY_
+        PERCENT/_charge below) against their running payout balance -
+        same consequence as a tutor cancelling late, since not showing
+        up is at least as disruptive as a late cancellation.
+      - tutor reports (learner no-show): the tutor is paid in FULL
+        (skips the normal dual-confirmation gate - see
+        _maybe_finalize_session - since the tutor's own presence is
+        already established by this check), and the learner gets
+        nothing back.
+    Anything else - the accused side DID check in (a genuine
+    disagreement), the reporter didn't wait long enough themselves, or
+    the other side has ALREADY reported the other way (both are
+    blaming each other) - is left unresolved for an admin to decide
+    (see list_requests_needing_attention/admin_resolve_no_show_as_
+    tutor_no_show/admin_resolve_no_show_as_learner_no_show/admin_
+    dismiss_no_show_report)."""
+    if by not in ("learner", "tutor"):
+        raise TutoringError("Invalid report.")
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Session not found.")
+        if by == "learner" and req.learner_user_id != person_id:
+            raise TutoringError("Session not found.")
+        if by == "tutor" and req.tutor_id != person_id:
+            raise TutoringError("Session not found.")
+        if req.status != "confirmed":
+            raise TutoringError(f"This session is '{req.status}', not a paid session you can report.")
+        if req.no_show_resolved_at is not None:
+            raise TutoringError("This has already been resolved.")
+        if not req.scheduled_at or dt.datetime.utcnow() < req.scheduled_at:
+            raise TutoringError("You can only report this once the session was due to start.")
+
+        already_reported_by_other_side = req.no_show_reported_by is not None and req.no_show_reported_by != by
+        req.no_show_reported_by = by
+        req.no_show_reported_at = dt.datetime.utcnow()
+        req.no_show_reason = reason.strip() or None
+
+        reporter_checked_in_at = req.learner_checked_in_at if by == "learner" else req.tutor_checked_in_at
+        accused_checked_in_at = req.tutor_checked_in_at if by == "learner" else req.learner_checked_in_at
+        reporter_minutes = (
+            (req.no_show_reported_at - reporter_checked_in_at).total_seconds() / 60
+            if reporter_checked_in_at else 0
+        )
+        can_auto_resolve = (
+            not already_reported_by_other_side
+            and reporter_minutes >= NO_SHOW_MIN_CHECKED_IN_MINUTES
+            and accused_checked_in_at is None
+        )
+        if not can_auto_resolve:
+            result = {"id": req.id, "status": req.status, "auto_resolved": None}
+        elif by == "learner":
+            _apply_tutor_no_show_resolution(db, req)
+            result = {"id": req.id, "status": req.status, "auto_resolved": "tutor_no_show"}
+        else:
+            _apply_learner_no_show_resolution(db, req)
+            result = {"id": req.id, "status": req.status, "auto_resolved": "learner_no_show"}
+
+        learner = db.query(User).get(req.learner_user_id)
+        tutor = db.query(TutorAccount).get(req.tutor_id) if req.tutor_id else None
+        notify_info = {
+            "learner_id": learner.id, "learner_name": learner.name, "learner_email": learner.email,
+            "tutor_id": tutor.id if tutor else None, "tutor_name": tutor.name if tutor else None,
+            "tutor_email": tutor.email if tutor else None,
+            "subject": req.subject, "topic": req.topic, "scheduled_at": req.scheduled_at,
+            "price_zar": req.price_zar, "reported_by": by, "reason": req.no_show_reason,
+            "auto_resolved": result["auto_resolved"],
+        }
+
+    _notify_no_show_report(request_id=request_id, **notify_info)
+    return result
+
+
+def _apply_tutor_no_show_resolution(db, req: TutoringSessionRequest) -> None:
+    """Shared by report_no_show's auto-resolve path and admin_resolve_
+    no_show_as_tutor_no_show - the tutor didn't show up: the learner
+    gets a full refund (no late-cancellation fee - this isn't their
+    fault) and the tutor is charged the same late-cancellation-style
+    penalty as cancelling a paid session late (see
+    LATE_CANCELLATION_PENALTY_PERCENT), against their running payout
+    balance (see _settle_tutor_penalties)."""
+    req.status = "cancelled"
+    req.cancelled_at = dt.datetime.utcnow()
+    req.cancelled_by = "tutor"
+    req.cancellation_reason = "No-show"
+    req.refund_amount_zar = req.price_zar
+    req.refund_requested_at = dt.datetime.utcnow()
+    req.no_show_resolved_at = dt.datetime.utcnow()
+    req.no_show_resolution = "tutor_no_show"
+    if req.price_zar and req.tutor_id:
+        penalty_amount = round(req.price_zar * LATE_CANCELLATION_PENALTY_PERCENT / 100, 2)
+        db.add(TutorPenalty(tutor_id=req.tutor_id, session_id=req.id, amount_zar=penalty_amount))
+
+
+def _apply_learner_no_show_resolution(db, req: TutoringSessionRequest) -> None:
+    """Shared by report_no_show's auto-resolve path and admin_resolve_
+    no_show_as_learner_no_show - the learner didn't show up: the tutor
+    is paid in full regardless of the usual dual-confirmation
+    requirement (their own presence is what's being verified here, not
+    the learner's agreement), and the learner gets nothing back."""
+    req.status = "completed"
+    req.completed_at = dt.datetime.utcnow()
+    req.no_show_resolved_at = dt.datetime.utcnow()
+    req.no_show_resolution = "learner_no_show"
+    _create_payout_row(db, req)
+
+
+def _notify_no_show_report(
+    *, request_id: int, learner_id: int, learner_name: str, learner_email: str,
+    tutor_id: int | None, tutor_name: str | None, tutor_email: str | None,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None, price_zar: float | None,
+    reported_by: str, reason: str | None, auto_resolved: str | None,
+) -> None:
+    """Best-effort - tells both sides what was reported and, if it
+    auto-resolved, what that means for them; if it's unresolved,
+    tells every admin it needs a human call, same "nobody reviews the
+    console on a schedule" reasoning as the refund-request notifications."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        reason_str = f" Reason given: {reason}" if reason else ""
+        who_reported = "The learner" if reported_by == "learner" else "The tutor"
+
+        if auto_resolved == "tutor_no_show":
+            price_str = f"R{price_zar:.2f}" if price_zar is not None else "your payment"
+            send_email(
+                learner_email, "Tutor no-show - refund arranged",
+                f"Hi {learner_name},\n\nYour tutor didn't join the {subject}{topic_str} session scheduled for "
+                f"{when_str}. You'll be refunded in full ({price_str}) - Malita will be in touch.\n\n— The Malita team",
+            )
+            if tutor_email:
+                send_email(
+                    tutor_email, "Marked as a no-show",
+                    f"Hi {tutor_name},\n\nYour {subject}{topic_str} session scheduled for {when_str} was marked as "
+                    f"a no-show on your side.{reason_str} Malita's late-cancellation fee has been charged against "
+                    "your running payout balance.\n\n— The Malita team",
+                )
+            create_notification(
+                recipient_kind="user", recipient_id=learner_id, title="Tutor no-show - refund arranged",
+                body=f"{subject}{topic_str} session - your tutor didn't show. Full refund arranged.",
+            )
+            if tutor_id:
+                create_notification(
+                    recipient_kind="tutor", recipient_id=tutor_id, title="Marked as a no-show",
+                    body=f"{subject}{topic_str} session - marked as your no-show. Late-cancellation fee charged.",
+                )
+        elif auto_resolved == "learner_no_show":
+            send_email(
+                learner_email, "Marked as a no-show - no refund",
+                f"Hi {learner_name},\n\nYou didn't join the {subject}{topic_str} session scheduled for {when_str}, "
+                f"so it's been marked as a no-show on your side.{reason_str} Your tutor is paid for their time; "
+                "no refund applies.\n\n— The Malita team",
+            )
+            if tutor_email:
+                send_email(
+                    tutor_email, "Learner no-show - you're paid in full",
+                    f"Hi {tutor_name},\n\nThe learner didn't join your {subject}{topic_str} session scheduled for "
+                    f"{when_str}. You're paid in full for your time - no action needed.\n\n— The Malita team",
+                )
+            create_notification(
+                recipient_kind="user", recipient_id=learner_id, title="Marked as a no-show",
+                body=f"{subject}{topic_str} session - marked as your no-show. No refund applies.",
+            )
+            if tutor_id:
+                create_notification(
+                    recipient_kind="tutor", recipient_id=tutor_id, title="Learner no-show - paid in full",
+                    body=f"{subject}{topic_str} session - the learner no-showed. You're paid in full.",
+                )
+        else:
+            # Unresolved - the two sides' own data disagrees (or both
+            # are blaming each other) - needs an admin's judgment call.
+            with get_session() as db:
+                admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+            admin_body = (
+                f"{who_reported} reported that request #{request_id} - {subject}{topic_str}, scheduled "
+                f"{when_str} - didn't happen, but it couldn't be auto-resolved (the two sides' own check-in "
+                f"records disagree, or both are blaming each other).{reason_str}\n\n"
+                "Open the admin console's Needs Attention tab to review and decide.\n"
+            )
+            for admin_id, email in admins:
+                send_email(email, f"No-show reported, needs review: {subject}{topic_str}", admin_body)
+                create_notification(
+                    recipient_kind="user", recipient_id=admin_id, title="No-show reported, needs review",
+                    body=f"Request #{request_id} - {subject}{topic_str}, reported by {reported_by}.",
+                )
+    except Exception:
+        logger.exception("Failed to notify of request %s's no-show report", request_id)
+
+
+def admin_resolve_no_show_as_tutor_no_show(request_id: int) -> dict:
+    """Admin's manual call on a disputed no-show report - the tutor
+    didn't show (see _apply_tutor_no_show_resolution)."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Request not found.")
+        if req.no_show_reported_at is None:
+            raise TutoringError("No no-show was reported for this request.")
+        if req.no_show_resolved_at is not None:
+            raise TutoringError("This has already been resolved.")
+        _apply_tutor_no_show_resolution(db, req)
+        learner = db.query(User).get(req.learner_user_id)
+        tutor = db.query(TutorAccount).get(req.tutor_id) if req.tutor_id else None
+        info = {
+            "learner_id": learner.id, "learner_name": learner.name, "learner_email": learner.email,
+            "tutor_id": tutor.id if tutor else None, "tutor_name": tutor.name if tutor else None,
+            "tutor_email": tutor.email if tutor else None,
+            "subject": req.subject, "topic": req.topic, "scheduled_at": req.scheduled_at,
+            "price_zar": req.price_zar, "reported_by": req.no_show_reported_by, "reason": req.no_show_reason,
+            "auto_resolved": "tutor_no_show",
+        }
+        result = {"id": req.id, "status": req.status}
+    _notify_no_show_report(request_id=request_id, **info)
+    return result
+
+
+def admin_resolve_no_show_as_learner_no_show(request_id: int) -> dict:
+    """Admin's manual call on a disputed no-show report - the learner
+    didn't show (see _apply_learner_no_show_resolution)."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Request not found.")
+        if req.no_show_reported_at is None:
+            raise TutoringError("No no-show was reported for this request.")
+        if req.no_show_resolved_at is not None:
+            raise TutoringError("This has already been resolved.")
+        _apply_learner_no_show_resolution(db, req)
+        learner = db.query(User).get(req.learner_user_id)
+        tutor = db.query(TutorAccount).get(req.tutor_id) if req.tutor_id else None
+        info = {
+            "learner_id": learner.id, "learner_name": learner.name, "learner_email": learner.email,
+            "tutor_id": tutor.id if tutor else None, "tutor_name": tutor.name if tutor else None,
+            "tutor_email": tutor.email if tutor else None,
+            "subject": req.subject, "topic": req.topic, "scheduled_at": req.scheduled_at,
+            "price_zar": req.price_zar, "reported_by": req.no_show_reported_by, "reason": req.no_show_reason,
+            "auto_resolved": "learner_no_show",
+        }
+        result = {"id": req.id, "status": req.status}
+    _notify_no_show_report(request_id=request_id, **info)
+    return result
+
+
+def admin_dismiss_no_show_report(request_id: int) -> dict:
+    """Admin deciding a no-show report was a false alarm (both actually
+    attended, or there's no way to tell and the fairest call is to not
+    penalize either side) - clears it off the Needs Attention queue and
+    leaves the session exactly as it was (still "confirmed", so the
+    normal dual self-confirmation/rating flow can still run its course)
+    rather than applying either resolution."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Request not found.")
+        if req.no_show_reported_at is None:
+            raise TutoringError("No no-show was reported for this request.")
+        if req.no_show_resolved_at is not None:
+            raise TutoringError("This has already been resolved.")
+        req.no_show_resolved_at = dt.datetime.utcnow()
+        req.no_show_resolution = "dismissed"
+        return {"id": req.id, "status": req.status}
+
+
 def submit_session_recording(request_id: int, tutor_id: int, recording_link: str) -> dict:
     """The tutor submitting the link to their own manually-recorded Meet
     session afterward (see RECORDING_REMINDER_NOTE - there's no API that
@@ -4354,10 +4677,12 @@ def mark_refund_processed(request_id: int) -> dict:
 def list_requests_needing_attention() -> list[dict]:
     """Admin console feed: paid sessions a tutor just cancelled (status
     "tutor_cancelled", awaiting the learner's re-allocation/refund
-    choice) plus refunds the learner has requested but no admin has yet
-    marked processed - the two situations real money is sitting in
-    limbo on, which is exactly what nobody reviewing the console on a
-    fixed schedule would otherwise notice."""
+    choice), refunds the learner has requested but no admin has yet
+    marked processed, and no-show reports that couldn't auto-resolve
+    (see report_no_show) - the situations real money or a disputed
+    attendance claim is sitting in limbo on, which is exactly what
+    nobody reviewing the console on a fixed schedule would otherwise
+    notice."""
     with get_session() as db:
         reqs = (
             db.query(TutoringSessionRequest)
@@ -4367,6 +4692,10 @@ def list_requests_needing_attention() -> list[dict]:
                     sa.and_(
                         TutoringSessionRequest.refund_requested_at.isnot(None),
                         TutoringSessionRequest.refund_processed_at.is_(None),
+                    ),
+                    sa.and_(
+                        TutoringSessionRequest.no_show_reported_at.isnot(None),
+                        TutoringSessionRequest.no_show_resolved_at.is_(None),
                     ),
                 )
             )

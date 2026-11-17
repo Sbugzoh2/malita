@@ -17,6 +17,8 @@ import {
   cancelTutoringSessionAsLearner,
   reallocateAfterTutorCancellation,
   requestRefundForCancelledSession,
+  checkInToSessionAsLearner,
+  reportNoShowAsLearner,
   TutoringRequest,
   Badge,
 } from "../api/client";
@@ -237,6 +239,8 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
   const [cancelReason, setCancelReason] = useState("");
   const [reallocatingId, setReallocatingId] = useState<number | null>(null);
   const [refundingId, setRefundingId] = useState<number | null>(null);
+  const [checkingInId, setCheckingInId] = useState<number | null>(null);
+  const [reportingNoShowId, setReportingNoShowId] = useState<number | null>(null);
   const [group, setGroup] = useState<SessionGroup>("active");
   // Set when PayFast's checkout redirects back via the malita://tutoring
   // deep link (see api_server.py's /billing/return?target=tutoring) -
@@ -468,6 +472,46 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
       setActionError(requestId, e instanceof ApiError ? e.message : "Could not request a refund for this session.");
     } finally {
       setRefundingId(null);
+    }
+  }
+
+  async function handleCheckIn(requestId: number) {
+    if (!token) return;
+    setCheckingInId(requestId);
+    setActionError(requestId, null);
+    try {
+      await checkInToSessionAsLearner(token, requestId);
+      load();
+    } catch (e) {
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not check you in.");
+    } finally {
+      setCheckingInId(null);
+    }
+  }
+
+  function confirmReportNoShow(requestId: number) {
+    Alert.alert(
+      "Report that your tutor didn't show up?",
+      "If you checked in and waited at least 15 minutes with no sign of your tutor, this can refund you in full right away. " +
+        "Otherwise Malita will review it.",
+      [
+        { text: "Never mind", style: "cancel" },
+        { text: "Report No-Show", style: "destructive", onPress: () => handleReportNoShow(requestId) },
+      ]
+    );
+  }
+
+  async function handleReportNoShow(requestId: number) {
+    if (!token) return;
+    setReportingNoShowId(requestId);
+    setActionError(requestId, null);
+    try {
+      await reportNoShowAsLearner(token, requestId);
+      load();
+    } catch (e) {
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not report this.");
+    } finally {
+      setReportingNoShowId(null);
     }
   }
 
@@ -757,7 +801,38 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
               </Text>
             )}
 
-            {r.status === "confirmed" && !r.learner_confirmed && (
+            {r.status === "confirmed" && !r.no_show_reported_at && !r.learner_checked_in_at && (
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => handleCheckIn(r.id)}
+                disabled={checkingInId === r.id}
+              >
+                {checkingInId === r.id ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={styles.secondaryButtonText}>I'm on the call</Text>
+                )}
+              </Pressable>
+            )}
+            {r.status === "confirmed" && !r.no_show_reported_at && (
+              <Pressable style={styles.dangerLinkButton} onPress={() => confirmReportNoShow(r.id)}>
+                <Text style={styles.dangerButtonText}>This didn't happen</Text>
+              </Pressable>
+            )}
+            {r.no_show_reported_at && !r.no_show_resolved_at && (
+              <Text style={styles.cardMeta}>
+                {r.no_show_reported_by === "learner"
+                  ? "You reported this session didn't happen - Malita is reviewing it."
+                  : "Your tutor reported this session didn't happen - Malita is reviewing it."}
+              </Text>
+            )}
+            {r.no_show_resolution === "dismissed" && (
+              <Text style={styles.cardMeta}>
+                Malita reviewed the no-show report on this session and found no action was needed.
+              </Text>
+            )}
+
+            {r.status === "confirmed" && !r.learner_confirmed && !r.no_show_reported_at && (
               <View style={styles.confirmBox}>
                 <Text style={styles.confirmLabel}>Did this session happen? Rate your tutor:</Text>
                 <StarPicker

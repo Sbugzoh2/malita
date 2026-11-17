@@ -70,6 +70,7 @@ from backend.tutoring import (
     list_pending_custom_claims, respond_to_custom_module_claim,
     list_notifications, count_unread_notifications, mark_all_notifications_read,
     list_requests_needing_attention, admin_suggest_refund, admin_mark_refund_processing, mark_refund_processed,
+    admin_resolve_no_show_as_tutor_no_show, admin_resolve_no_show_as_learner_no_show, admin_dismiss_no_show_report,
 )
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -2421,7 +2422,10 @@ elif mode == "🛠️ Tutoring Admin":
             st.caption(f"{len(attention_items)} item(s) needing attention.")
             for r in attention_items:
                 topic_str = f" ({r['topic']})" if r["topic"] else ""
-                if r["status"] == "tutor_cancelled":
+                no_show_unresolved = r.get("no_show_reported_at") and not r.get("no_show_resolved_at")
+                if no_show_unresolved:
+                    label = f"#{r['id']} — {r['subject']}{topic_str} — no-show reported, needs review"
+                elif r["status"] == "tutor_cancelled":
                     label = f"#{r['id']} — {r['subject']}{topic_str} — awaiting the learner's choice"
                 else:
                     label = f"#{r['id']} — {r['subject']}{topic_str} — refund requested"
@@ -2436,7 +2440,41 @@ elif mode == "🛠️ Tutoring Admin":
                         st.write(price_line)
                     if r.get("cancellation_reason"):
                         st.write(f"**Tutor's reason:** {r['cancellation_reason']}")
-                    if r["status"] == "tutor_cancelled":
+                    if no_show_unresolved:
+                        who = "The learner" if r.get("no_show_reported_by") == "learner" else "The tutor"
+                        st.write(f"**{who} reported this session didn't happen.**")
+                        if r.get("no_show_reason"):
+                            st.write(f"**Reason given:** {r['no_show_reason']}")
+                        st.write(
+                            "It couldn't be auto-resolved (the two sides' own check-in records disagree, or "
+                            "both are blaming each other) - this needs your call."
+                        )
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if st.button("Tutor no-show", key=f"no_show_tutor_{r['id']}"):
+                                try:
+                                    admin_resolve_no_show_as_tutor_no_show(r["id"])
+                                    st.success("Learner refunded in full; tutor charged the late-cancellation fee.")
+                                    st.rerun()
+                                except TutoringError as e:
+                                    st.error(str(e))
+                        with col2:
+                            if st.button("Learner no-show", key=f"no_show_learner_{r['id']}"):
+                                try:
+                                    admin_resolve_no_show_as_learner_no_show(r["id"])
+                                    st.success("Tutor paid in full; no refund for the learner.")
+                                    st.rerun()
+                                except TutoringError as e:
+                                    st.error(str(e))
+                        with col3:
+                            if st.button("Dismiss", key=f"no_show_dismiss_{r['id']}"):
+                                try:
+                                    admin_dismiss_no_show_report(r["id"])
+                                    st.success("Dismissed - no action taken.")
+                                    st.rerun()
+                                except TutoringError as e:
+                                    st.error(str(e))
+                    elif r["status"] == "tutor_cancelled":
                         st.write(
                             "The learner has already paid and hasn't chosen yet between re-allocation "
                             "(it's open to any eligible tutor to accept) and a refund."

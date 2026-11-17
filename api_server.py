@@ -96,7 +96,7 @@ from backend.tutoring import (
     send_due_reminders, submit_session_recording,
     list_notifications, count_unread_notifications, mark_notification_read, mark_all_notifications_read,
     reallocate_after_tutor_cancellation, request_refund_for_cancelled_session,
-    admin_suggest_refund, mark_refund_processed, list_requests_needing_attention,
+    admin_suggest_refund, admin_mark_refund_processing, mark_refund_processed, list_requests_needing_attention,
     suspend_tutor, block_tutor, reinstate_tutor, list_tutors_for_admin,
     update_tutor_profile, update_tutor_study_details, set_tutor_accepting_new_sessions,
 )
@@ -2470,6 +2470,21 @@ def admin_tutoring_suggest_refund(request_id: int, authorization: str = Header(N
         raise HTTPException(status_code=403, detail="Admin access required.")
     try:
         return admin_suggest_refund(request_id)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/tutoring/requests/{request_id}/mark-refund-processing")
+def admin_tutoring_mark_refund_processing(request_id: int, authorization: str = Header(None)):
+    """Admin confirming they've started arranging the refund (see
+    admin_mark_refund_processing) - lets the learner see a concrete
+    "being processed, expect it in 5-7 working days" status instead of
+    just "requested" for however long it takes."""
+    user = _auth_user(authorization)
+    if not is_user_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    try:
+        return admin_mark_refund_processing(request_id)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

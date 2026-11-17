@@ -705,6 +705,8 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
               <Text style={styles.cardMeta}>
                 {r.refund_processed_at
                   ? "✓ Your refund has been processed."
+                  : r.refund_processing_at
+                  ? "Your refund is being processed - expect it in your bank account within 5-7 working days."
                   : "Refund requested - Malita is arranging it."}
               </Text>
             )}

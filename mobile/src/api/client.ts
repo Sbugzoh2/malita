@@ -476,6 +476,12 @@ export type TutoringRequest = {
   // refund_processed_at is set once an admin has actually arranged it
   // (no automated PayFast refund - see backend/tutoring.py).
   refund_requested_at: string | null;
+  // Set once an admin starts actually arranging the refund (before it's
+  // fully done) - lets the learner's screen show "being processed,
+  // expect it within 5-7 working days" instead of just "requested" the
+  // whole time. Optional step - a refund can go straight from requested
+  // to processed below without ever passing through this.
+  refund_processing_at: string | null;
   refund_processed_at: string | null;
   lapsed_at: string | null;
   // Why a "lapsed" row lapsed - "no_tutor_accepted" (nobody ever
@@ -1192,6 +1198,13 @@ export function fetchRequestsNeedingAttention(token: string) {
 
 export function suggestRefundAdmin(token: string, requestId: number) {
   return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/suggest-refund`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function markRefundProcessingAdmin(token: string, requestId: number) {
+  return request<{ id: number; status: string }>(`/admin/tutoring/requests/${requestId}/mark-refund-processing`, {
     method: "POST",
     token,
   });

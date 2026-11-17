@@ -2798,6 +2798,7 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "cancelled_by": r.cancelled_by,
         "cancellation_reason": r.cancellation_reason,
         "refund_requested_at": _iso_utc(r.refund_requested_at),
+        "refund_processing_at": _iso_utc(r.refund_processing_at),
         "refund_processed_at": _iso_utc(r.refund_processed_at),
         "lapsed_at": _iso_utc(r.lapsed_at),
         "recording_link": r.recording_link,
@@ -4158,6 +4159,54 @@ def admin_suggest_refund(request_id: int) -> dict:
     except Exception:
         logger.exception("Failed to notify learner of request %s's suggested refund", request_id)
     return {"id": request_id, "status": "tutor_cancelled"}
+
+
+def admin_mark_refund_processing(request_id: int) -> dict:
+    """Admin confirming they've actually started arranging the refund
+    (e.g. submitted the EFT) but it hasn't landed yet - gives the
+    learner a concrete status instead of "requested" the whole time
+    they're waiting, and is the one actionable step the admin console
+    was missing entirely (an admin could only ever see that a refund was
+    requested, with no button to do anything about it in-app). Optional
+    step - mark_refund_processed below can still be called directly
+    without this ever being set first, for a refund arranged so quickly
+    there was no in-between state worth recording."""
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Request not found.")
+        if req.refund_requested_at is None:
+            raise TutoringError("No refund was requested for this request.")
+        if req.refund_processing_at is not None:
+            raise TutoringError("This refund is already marked as processing.")
+        if req.refund_processed_at is not None:
+            raise TutoringError("This refund has already been marked processed.")
+        req.refund_processing_at = dt.datetime.utcnow()
+        learner = db.query(User).get(req.learner_user_id)
+        learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
+        subject, topic, price_zar = req.subject, req.topic, req.price_zar
+        result = {"id": req.id, "status": req.status}
+
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        price_str = f"R{price_zar:.2f}" if price_zar is not None else ""
+        send_email(
+            learner_email,
+            "Your refund is being processed",
+            (
+                f"Hi {learner_name},\n\n"
+                f"We're now processing your refund ({price_str}) for the {subject}{topic_str} session. "
+                "It should reflect in your bank account within 5-7 working days.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Your refund is being processed",
+            body=f"Your refund ({price_str}) for {subject}{topic_str} is being processed - expect it within 5-7 working days.",
+        )
+    except Exception:
+        logger.exception("Failed to notify learner that request %s's refund started processing", request_id)
+    return result
 
 
 def mark_refund_processed(request_id: int) -> dict:

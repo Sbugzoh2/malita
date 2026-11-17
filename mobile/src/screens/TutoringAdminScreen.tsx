@@ -24,6 +24,10 @@ import {
   TutoringRequest,
   fetchOpenTutoringRequestsAdmin,
   matchTutorToRequestAdmin,
+  fetchRequestsNeedingAttention,
+  suggestRefundAdmin,
+  markRefundProcessingAdmin,
+  markRefundProcessedAdmin,
   TutoringPayout,
   fetchPendingPayoutsAdmin,
   markPayoutPaidAdmin,
@@ -75,7 +79,7 @@ import Dropdown from "../components/Dropdown";
 import GradientBackground from "../components/GradientBackground";
 
 type Section =
-  | "applications" | "higherEdApplications" | "catalog" | "match" | "sessions" | "tutors" | "payouts"
+  | "applications" | "higherEdApplications" | "catalog" | "match" | "refunds" | "sessions" | "tutors" | "payouts"
   | "accounts" | "support";
 
 // Shared by ApplicationsSection/HigherEdApplicationsSection/PayoutsSection
@@ -128,6 +132,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
           { key: "higherEdApplications", label: "Higher-Ed Applications" },
           { key: "catalog", label: "Higher-Ed Catalog" },
           { key: "match", label: "Match Requests" },
+          { key: "refunds", label: "Needs Attention" },
           { key: "sessions", label: "All Sessions" },
           { key: "tutors", label: "Tutors" },
           { key: "payouts", label: "Payouts" },
@@ -150,6 +155,7 @@ export default function TutoringAdminScreen({ navigation }: any) {
       {token && section === "higherEdApplications" && <HigherEdApplicationsSection token={token} />}
       {token && section === "catalog" && <CatalogSection token={token} />}
       {token && section === "match" && <MatchSection token={token} />}
+      {token && section === "refunds" && <RefundsSection token={token} />}
       {token && section === "sessions" && <SessionsSection token={token} />}
       {token && section === "tutors" && <TutorsSection token={token} />}
       {token && section === "payouts" && <PayoutsSection token={token} />}
@@ -1013,6 +1019,162 @@ function MatchSection({ token }: { token: string }) {
             </View>
           );
         })
+      )}
+    </View>
+  );
+}
+
+// Two situations real money is sitting in limbo on and nobody reviewing
+// the console on a fixed schedule would otherwise notice (see backend/
+// tutoring.py's list_requests_needing_attention): a paid session a tutor
+// just cancelled, where the learner hasn't yet chosen re-allocation vs. a
+// refund, and a refund the learner HAS chosen/requested that no admin has
+// marked processed yet. Previously the app only ever notified admins of
+// these by email/push - there was no button anywhere to actually act on
+// one in the console itself.
+function RefundsSection({ token }: { token: string }) {
+  const [requests, setRequests] = useState<TutoringRequest[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    fetchRequestsNeedingAttention(token)
+      .then((res) => setRequests(res.requests))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load this list."));
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleSuggestRefund(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await suggestRefundAdmin(token, id);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not suggest a refund.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleMarkProcessing(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await markRefundProcessingAdmin(token, id);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not mark this refund as processing.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function confirmMarkProcessed(id: number) {
+    Alert.alert(
+      "Mark this refund as processed?",
+      "Only do this once you've actually sent the learner their money back (bank transfer/PayFast console) - this tells them it's done.",
+      [
+        { text: "Not yet", style: "cancel" },
+        { text: "Mark Processed", onPress: () => handleMarkProcessed(id) },
+      ]
+    );
+  }
+
+  async function handleMarkProcessed(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await markRefundProcessedAdmin(token, id);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not mark this refund as processed.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!requests ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      ) : requests.length === 0 ? (
+        <Text style={styles.empty}>Nothing needs attention right now.</Text>
+      ) : (
+        requests.map((r) => (
+          <View key={r.id} style={styles.card}>
+            <Text style={styles.cardTitle}>
+              Request #{r.id} — {r.subject}{r.topic ? ` (${r.topic})` : ""}
+            </Text>
+            <Text style={styles.cardSubtitle}>Learner: {r.learner_name ?? "—"}</Text>
+            {r.price_zar != null ? (
+              <Text style={styles.detailLine}>R{r.price_zar.toFixed(2)}</Text>
+            ) : null}
+            {r.scheduled_at ? (
+              <Text style={styles.detailLine}>
+                Scheduled: {new Date(r.scheduled_at).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" })}
+              </Text>
+            ) : null}
+
+            {r.status === "tutor_cancelled" ? (
+              <>
+                <Text style={styles.detailLine}>
+                  Tutor cancelled this paid session - the learner hasn't yet chosen between re-allocation and a
+                  refund.
+                </Text>
+                <Pressable
+                  style={styles.approveButton}
+                  onPress={() => handleSuggestRefund(r.id)}
+                  disabled={busyId === r.id}
+                >
+                  {busyId === r.id ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.approveButtonText}>Suggest a Refund to the Learner</Text>
+                  )}
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.detailLine}>
+                  {r.refund_processing_at
+                    ? "Processing - the learner has been told to expect it within 5-7 working days."
+                    : "Refund requested - not yet started."}
+                </Text>
+                <View style={styles.actionRow}>
+                  {!r.refund_processing_at && (
+                    <Pressable
+                      style={[styles.approveButton, { flex: 1 }]}
+                      onPress={() => handleMarkProcessing(r.id)}
+                      disabled={busyId === r.id}
+                    >
+                      {busyId === r.id ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.approveButtonText}>Mark as Processing</Text>
+                      )}
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={[styles.approveButton, { flex: 1 }]}
+                    onPress={() => confirmMarkProcessed(r.id)}
+                    disabled={busyId === r.id}
+                  >
+                    {busyId === r.id ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.approveButtonText}>Mark Refund Processed</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        ))
       )}
     </View>
   );

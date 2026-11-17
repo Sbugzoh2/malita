@@ -726,6 +726,13 @@ class TutoringSessionRequest(Base):
     # is owed; refund_processed_at records when an admin has actually
     # arranged it (no automated PayFast refund in v1).
     refund_requested_at = Column(DateTime, nullable=True)
+    # Set when an admin starts actually arranging the refund (before it's
+    # fully done) - lets the learner's own screen show a concrete "it's
+    # being processed, expect it in your bank within 5-7 working days"
+    # instead of just "requested" the whole time, and gives admin a
+    # distinct action/status between "requested" and "processed" (see
+    # admin_mark_refund_processing/mark_refund_processed below).
+    refund_processing_at = Column(DateTime, nullable=True)
     refund_processed_at = Column(DateTime, nullable=True)
     topic = Column(String(60), nullable=True)
     # Free-text extra context (e.g. "need help with proofs specifically")
@@ -1090,6 +1097,7 @@ def init_db():
     _ensure_column("tutoring_session_requests", "is_custom_higher_ed", "BOOLEAN DEFAULT FALSE")
     _ensure_column("tutoring_session_requests", "grade", "INTEGER")
     _ensure_column("tutoring_session_requests", "refund_requested_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "refund_processing_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "refund_processed_at", "TIMESTAMP")
     _ensure_column("users", "account_type", "VARCHAR(20) DEFAULT 'high_school'")
     _ensure_column("users", "higher_ed_institution_id", "INTEGER")

@@ -726,6 +726,14 @@ class TutoringSessionRequest(Base):
     # is owed; refund_processed_at records when an admin has actually
     # arranged it (no automated PayFast refund in v1).
     refund_requested_at = Column(DateTime, nullable=True)
+    # The actual amount owed - full price_zar normally, or price_zar
+    # reduced by LATE_CANCELLATION_PENALTY_PERCENT if whoever cancelled
+    # did so within CANCELLATION_CUTOFF_HOURS of the scheduled time (see
+    # cancel_accepted_session). Set at the moment a refund becomes owed,
+    # not recomputed later, so it can't drift if price_zar's meaning
+    # ever changes - also what every refund-related email/notification
+    # and the admin console now show instead of the raw session price.
+    refund_amount_zar = Column(Float, nullable=True)
     # Set when an admin starts actually arranging the refund (before it's
     # fully done) - lets the learner's own screen show a concrete "it's
     # being processed, expect it in your bank within 5-7 working days"
@@ -857,6 +865,29 @@ class TutoringPayout(Base):
     paid_at = Column(DateTime, nullable=True)
 
     session = relationship("TutoringSessionRequest", back_populates="payout")
+
+
+class TutorPenalty(Base):
+    """A deduction a tutor owes for cancelling an already-PAID session
+    within CANCELLATION_CUTOFF_HOURS of its start (see backend/
+    tutoring.py's cancel_accepted_session) - charged against their
+    running payout balance rather than against this specific session,
+    since a cancelled session is never completed and so never gets its
+    own TutoringPayout row to deduct from. "pending" until a real
+    payout settlement is large enough to absorb it, at which point it's
+    marked "settled" and that much less is actually transferred (see
+    _settle_tutor_penalties/settle_all_pending_payouts/mark_payout_paid)
+    - same deliberately-manual, no-automated-money-movement spirit as
+    TutoringPayout itself."""
+    __tablename__ = "tutor_penalties"
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, ForeignKey("tutor_accounts.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("tutoring_session_requests.id"), nullable=False)
+    amount_zar = Column(Float, nullable=False)
+    status = Column(String(20), default="pending", nullable=False)  # pending | settled
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    settled_at = Column(DateTime, nullable=True)
 
 
 class TutorApiToken(Base):
@@ -1097,6 +1128,7 @@ def init_db():
     _ensure_column("tutoring_session_requests", "is_custom_higher_ed", "BOOLEAN DEFAULT FALSE")
     _ensure_column("tutoring_session_requests", "grade", "INTEGER")
     _ensure_column("tutoring_session_requests", "refund_requested_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "refund_amount_zar", "FLOAT")
     _ensure_column("tutoring_session_requests", "refund_processing_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "refund_processed_at", "TIMESTAMP")
     _ensure_column("users", "account_type", "VARCHAR(20) DEFAULT 'high_school'")

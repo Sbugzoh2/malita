@@ -82,7 +82,7 @@ from backend.tutoring import (
     match_tutor_to_request, tutor_respond_to_admin_match, accept_tutoring_request, propose_new_time,
     respond_to_time_proposal, confirm_session_by_learner, confirm_session_by_tutor,
     cancel_session, complete_session, list_pending_payouts, mark_payout_paid,
-    summarize_pending_payouts, settle_all_pending_payouts,
+    summarize_pending_payouts, settle_all_pending_payouts, get_tutor_pending_penalty_total,
     get_tutor_document_url, get_tutor_profile, login_tutor,
     create_tutor_api_token, get_tutor_by_token, revoke_tutor_api_token,
     list_tutor_own_payouts, create_tutor_password_reset, reset_tutor_password,
@@ -411,6 +411,11 @@ class SessionConfirmRequest(BaseModel):
 
 class SessionCancelRequest(BaseModel):
     reason: str = ""
+    # True once the caller has shown the late-cancellation-fee warning
+    # and the person confirmed - see cancel_accepted_session, which
+    # otherwise rejects a within-24h cancellation of a paid session with
+    # an error describing the fee instead of applying it unconfirmed.
+    confirm_late_cancellation: bool = False
 
 
 class SessionRecordingRequest(BaseModel):
@@ -1571,7 +1576,14 @@ def update_my_tutor_study_details(payload: TutorStudyDetailsRequest, authorizati
 @app.get("/tutor/me/payouts")
 def tutor_me_payouts(authorization: str = Header(None)):
     tutor = _auth_tutor(authorization)
-    return {"payouts": list_tutor_own_payouts(tutor["id"])}
+    return {
+        "payouts": list_tutor_own_payouts(tutor["id"]),
+        # Not-yet-settled late-cancellation fees (see TutorPenalty) -
+        # shown as a deduction on the tutor's own Payouts tab so their
+        # next payout being smaller than the session total isn't a
+        # surprise.
+        "pending_penalty_zar": get_tutor_pending_penalty_total(tutor["id"]),
+    }
 
 
 @app.get("/tutor/requests/open")
@@ -1650,11 +1662,15 @@ def tutor_cancel_accepted_session(
     request_id: int, payload: SessionCancelRequest, authorization: str = Header(None)
 ):
     """The tutor cancelling an already-accepted session (see
-    cancel_accepted_session) - blocked within 24 hours of the scheduled
-    time."""
+    cancel_accepted_session) - within 24 hours of a PAID session's
+    scheduled time, this charges the tutor Malita's late-cancellation
+    fee unless payload.confirm_late_cancellation is set."""
     tutor = _auth_tutor(authorization)
     try:
-        return cancel_accepted_session(request_id, by="tutor", person_id=tutor["id"], reason=payload.reason)
+        return cancel_accepted_session(
+            request_id, by="tutor", person_id=tutor["id"], reason=payload.reason,
+            confirm_late_cancellation=payload.confirm_late_cancellation,
+        )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1955,11 +1971,15 @@ def tutoring_cancel_accepted_session(
     request_id: int, payload: SessionCancelRequest, authorization: str = Header(None)
 ):
     """The learner cancelling an already-accepted session (see
-    cancel_accepted_session) - blocked within 24 hours of the scheduled
-    time."""
+    cancel_accepted_session) - within 24 hours of a PAID session's
+    scheduled time, this reduces their refund by Malita's late-
+    cancellation fee unless payload.confirm_late_cancellation is set."""
     user = _auth_user(authorization)
     try:
-        return cancel_accepted_session(request_id, by="learner", person_id=user["id"], reason=payload.reason)
+        return cancel_accepted_session(
+            request_id, by="learner", person_id=user["id"], reason=payload.reason,
+            confirm_late_cancellation=payload.confirm_late_cancellation,
+        )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2536,10 +2556,10 @@ def admin_tutoring_mark_paid(payout_id: int, payload: PayoutMarkPaidRequest, aut
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
     try:
-        mark_payout_paid(payout_id, user["id"], payload.payment_reference)
+        result = mark_payout_paid(payout_id, user["id"], payload.payment_reference)
     except TutoringError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return {"status": "paid"}
+    return {"status": "paid", **result}
 
 
 # ---------------------------------------------------------------------------

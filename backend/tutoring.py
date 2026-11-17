@@ -64,7 +64,7 @@ import sqlalchemy as sa
 
 from .db import (
     get_session, User, TutorAccount, TutorSubject, TutoringSessionRequest,
-    TutoringPayout, TutorApiToken, TutorPasswordReset, Notification,
+    TutoringPayout, TutorPenalty, TutorApiToken, TutorPasswordReset, Notification,
     Institution, Qualification, Module, TutorHigherEdModule, TutorCustomHigherEdModule, YEAR_LEVEL_LABELS,
     ACCOUNT_STANDING_LABELS,
 )
@@ -146,10 +146,23 @@ MIN_REQUEST_LEAD_HOURS = 24
 # How long a learner has to pay after a tutor accepts/is matched before
 # the request automatically lapses - see _expire_lapsed_payments.
 PAYMENT_DEADLINE_HOURS = 24
-# Neither party can cancel an already-accepted (awaiting_payment or
-# confirmed) session within this many hours of when it's due to happen -
-# see cancel_accepted_session.
+# Cancelling an already-accepted (awaiting_payment or confirmed) session
+# within this many hours of when it's due to happen is still allowed,
+# but only after confirming - see cancel_accepted_session - since this
+# close to the session, backing out has a real cost to the other side
+# (a tutor who kept the slot open, or a learner who was counting on it).
 CANCELLATION_CUTOFF_HOURS = 24
+# The late-cancellation fee applied to an already-PAID session cancelled
+# within CANCELLATION_CUTOFF_HOURS: the learner's refund is reduced by
+# this percentage (so a learner cancelling late gets 70% back, not
+# 100%), and if it's the TUTOR who cancels late instead, they're charged
+# the same percentage of that session's price against their own running
+# payout balance (see _charge_tutor_penalty/_settle_tutor_penalties).
+# Deliberately its own constant, not a reuse of platform_cut_percent -
+# the two happen to both be 30% today but are conceptually unrelated
+# (one is Malita's normal marketplace cut, this is a late-cancellation
+# penalty) and must be free to change independently.
+LATE_CANCELLATION_PENALTY_PERCENT = 30
 # How long before a CONFIRMED (paid) session's start time to send the
 # "coming up" reminders - see send_due_reminders. Each fires once, guarded
 # by its own reminder_*_sent_at column.
@@ -2798,6 +2811,7 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "cancelled_by": r.cancelled_by,
         "cancellation_reason": r.cancellation_reason,
         "refund_requested_at": _iso_utc(r.refund_requested_at),
+        "refund_amount_zar": r.refund_amount_zar,
         "refund_processing_at": _iso_utc(r.refund_processing_at),
         "refund_processed_at": _iso_utc(r.refund_processed_at),
         "lapsed_at": _iso_utc(r.lapsed_at),
@@ -3797,23 +3811,36 @@ def cancel_session(request_id: int, reason: str = "") -> None:
         req.admin_notes = reason.strip() or req.admin_notes
 
 
-def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason: str = "") -> dict:
+def cancel_accepted_session(
+    request_id: int, *, by: str, person_id: int, reason: str = "",
+    confirm_late_cancellation: bool = False,
+) -> dict:
     """Either party cancelling an ALREADY-ACCEPTED session (awaiting_
-    payment or confirmed/paid) - not available within
-    CANCELLATION_CUTOFF_HOURS of the scheduled time, so a last-minute
-    cancellation always needs admin involvement (see cancel_session
-    above) rather than silently leaving the other side stranded. Use
-    withdraw_tutoring_request instead for a request a tutor hasn't fully
-    accepted yet (no time restriction, since nothing is committed yet).
-    Notifies BOTH sides. A tutor cancelling an already-PAID session
-    doesn't dead-end it like a learner's own cancellation does - see
-    reallocate_after_tutor_cancellation/request_refund_for_cancelled_
-    session, which the learner chooses between afterwards.
+    payment or confirmed/paid). Within CANCELLATION_CUTOFF_HOURS of the
+    scheduled time this is still allowed, but costs something: an
+    already-PAID session cancelled this late applies Malita's
+    LATE_CANCELLATION_PENALTY_PERCENT, which reduces the learner's own
+    refund if THEY cancel, or gets charged against the TUTOR's running
+    payout balance if the TUTOR cancels instead (see
+    _charge_tutor_penalty). `confirm_late_cancellation` must be true to
+    actually go through with a late, paid cancellation - otherwise this
+    raises describing the fee so the caller can show it and ask first
+    (see mobile's own client-side confirm, which computes and displays
+    the same number before ever calling this); a client that skips its
+    own prompt still can't bypass the fee, just the warning about it.
+
+    Use withdraw_tutoring_request instead for a request a tutor hasn't
+    fully accepted yet (no time restriction, since nothing is committed
+    yet). Notifies BOTH sides. A tutor cancelling an already-PAID
+    session doesn't dead-end it like a learner's own cancellation does -
+    see reallocate_after_tutor_cancellation/request_refund_for_
+    cancelled_session, which the learner chooses between afterwards.
 
     `by` is "learner" or "tutor" - `person_id` must match whichever side
     is cancelling (the learner's user id or the tutor's tutor_id)."""
     if by not in ("learner", "tutor"):
         raise TutoringError("Invalid cancellation request.")
+    penalty_amount = None
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
         if not req:
@@ -3826,12 +3853,28 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
             raise TutoringError(f"This session is '{req.status}' and can't be cancelled this way.")
         if not req.scheduled_at:
             raise TutoringError("This session has no scheduled time.")
-        if dt.datetime.utcnow() > req.scheduled_at - dt.timedelta(hours=CANCELLATION_CUTOFF_HOURS):
-            raise TutoringError(
-                f"This session is less than {CANCELLATION_CUTOFF_HOURS} hours away - "
-                "contact support to cancel it."
-            )
         was_paid = req.status == "confirmed"
+        is_late = dt.datetime.utcnow() > req.scheduled_at - dt.timedelta(hours=CANCELLATION_CUTOFF_HOURS)
+        # The fee only ever applies to money that's actually changed
+        # hands - an unpaid session cancelled late costs nobody anything
+        # (the learner never paid, so there's nothing to refund-minus-
+        # fee, and the tutor never earned anything on it to be charged
+        # against).
+        penalty_applies = is_late and was_paid
+        if penalty_applies and not confirm_late_cancellation:
+            fee_amount = round((req.price_zar or 0) * LATE_CANCELLATION_PENALTY_PERCENT / 100, 2)
+            raise TutoringError(
+                f"This session is less than {CANCELLATION_CUTOFF_HOURS} hours away. Cancelling now still goes "
+                f"through, but Malita's {LATE_CANCELLATION_PENALTY_PERCENT}% late-cancellation fee applies "
+                f"(R{fee_amount:.2f} of R{(req.price_zar or 0):.2f}) - confirm to proceed."
+            )
+        refund_amount = None
+        if was_paid:
+            refund_amount = round(
+                req.price_zar * (100 - LATE_CANCELLATION_PENALTY_PERCENT) / 100 if penalty_applies else req.price_zar,
+                2,
+            )
+            req.refund_amount_zar = refund_amount
         # A tutor backing out before the learner has even paid leaves no
         # money to refund - reopen the request (same as if it had never
         # been matched) so any approved tutor can pick it up again,
@@ -3873,6 +3916,9 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
             # heading toward "cancelled" at all.
             req.cancelled_by = by
             req.cancellation_reason = reason.strip() or None
+            if penalty_applies:
+                penalty_amount = round(req.price_zar * LATE_CANCELLATION_PENALTY_PERCENT / 100, 2)
+                db.add(TutorPenalty(tutor_id=tutor_id, session_id=request_id, amount_zar=penalty_amount))
         else:
             req.status = "cancelled"
             req.cancelled_at = dt.datetime.utcnow()
@@ -3889,7 +3935,6 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
                 # way (mark_refund_processed) as the tutor-cancellation
                 # case.
                 req.refund_requested_at = dt.datetime.utcnow()
-        price_zar = req.price_zar
         result = {"id": req.id, "status": req.status}
 
     if reopen_for_other_tutors:
@@ -3902,16 +3947,22 @@ def cancel_accepted_session(request_id: int, *, by: str, person_id: int, reason:
             request_id=request_id,
             learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
             tutor_name=tutor_name, subject=subject, topic=topic, scheduled_at=scheduled_at, reason=reason,
+            refund_amount_zar=refund_amount,
         )
+        if penalty_amount is not None:
+            _notify_tutor_of_cancellation_penalty(
+                tutor_id=tutor_id, tutor_email=tutor_email, tutor_name=tutor_name,
+                amount_zar=penalty_amount, subject=subject, topic=topic, scheduled_at=scheduled_at,
+            )
     else:
         _notify_session_cancelled(
             learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
             tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
             subject=subject, topic=topic, scheduled_at=scheduled_at,
-            cancelled_by=by, reason=reason, was_paid=was_paid,
+            cancelled_by=by, reason=reason, was_paid=was_paid, refund_amount_zar=refund_amount,
         )
         if was_paid:
-            _notify_admins_of_refund_request(request_id=request_id, price_zar=price_zar, subject=subject, topic=topic)
+            _notify_admins_of_refund_request(request_id=request_id, amount_zar=refund_amount, subject=subject, topic=topic)
     return result
 
 
@@ -3919,21 +3970,27 @@ def _notify_session_cancelled(
     *, learner_id: int, learner_name: str, learner_email: str,
     tutor_id: int, tutor_name: str, tutor_email: str,
     subject: str, topic: str | None, scheduled_at: dt.datetime | None,
-    cancelled_by: str, reason: str, was_paid: bool,
+    cancelled_by: str, reason: str, was_paid: bool, refund_amount_zar: float | None = None,
 ) -> None:
     """Best-effort - tells BOTH sides a session was cancelled, who
     cancelled it, and (for an already-paid session) that a refund will
-    be arranged manually."""
+    be arranged manually - quoting the reduced amount if this was a
+    late cancellation (see cancel_accepted_session's own
+    LATE_CANCELLATION_PENALTY_PERCENT) rather than letting the learner
+    assume the full price is coming back."""
     try:
         topic_str = f" ({topic})" if topic else ""
         when_str = _format_sast(scheduled_at)
         who = "the learner" if cancelled_by == "learner" else "the tutor"
         reason_str = f"\n\nReason given: {reason.strip()}" if reason.strip() else ""
-        refund_note = (
-            "\n\nSince this session was already paid for, Malita will arrange your "
-            "refund manually - we'll be in touch."
-            if was_paid else ""
-        )
+        if was_paid:
+            amount_str = f"R{refund_amount_zar:.2f}" if refund_amount_zar is not None else "your payment"
+            refund_note = (
+                f"\n\nSince this session was already paid for, Malita will arrange your refund "
+                f"({amount_str}) manually - we'll be in touch."
+            )
+        else:
+            refund_note = ""
         send_email(
             learner_email,
             "Your tutoring session was cancelled",
@@ -4005,17 +4062,24 @@ def _notify_request_reopened_after_tutor_cancel(
 def _notify_paid_session_tutor_cancelled(
     *, request_id: int, learner_id: int, learner_name: str, learner_email: str, tutor_name: str,
     subject: str, topic: str | None, scheduled_at: dt.datetime | None, reason: str,
+    refund_amount_zar: float | None = None,
 ) -> None:
     """Best-effort - tells the LEARNER their tutor cancelled an
     already-paid session and they need to choose between re-allocation
     and a refund (see reallocate_after_tutor_cancellation/
     request_refund_for_cancelled_session), and tells every admin the
     same, since real money is on the line and nobody reviews the admin
-    console on a fixed schedule."""
+    console on a fixed schedule. refund_amount_zar (already reduced by
+    the late-cancellation fee if this was within CANCELLATION_CUTOFF_
+    HOURS - see cancel_accepted_session) is quoted so the learner knows
+    what a refund would actually be worth before choosing."""
     try:
         topic_str = f" ({topic})" if topic else ""
         when_str = _format_sast(scheduled_at)
         reason_str = f"\n\nReason given: {reason.strip()}" if reason.strip() else ""
+        refund_hint = (
+            f" (a refund would be R{refund_amount_zar:.2f})" if refund_amount_zar is not None else ""
+        )
         send_email(
             learner_email,
             "Your tutor cancelled - choose what happens next",
@@ -4023,8 +4087,8 @@ def _notify_paid_session_tutor_cancelled(
                 f"Hi {learner_name},\n\n"
                 f"{tutor_name} cancelled your {subject}{topic_str} session scheduled for "
                 f"{when_str}, which you've already paid for.{reason_str}\n\n"
-                "Open the Malita app to choose: we can find you another tutor for the same "
-                "price and time, or arrange a refund - whichever you'd prefer.\n\n"
+                f"Open the Malita app to choose: we can find you another tutor for the same "
+                f"price and time, or arrange a refund{refund_hint} - whichever you'd prefer.\n\n"
                 "— The Malita team"
             ),
         )
@@ -4053,6 +4117,38 @@ def _notify_paid_session_tutor_cancelled(
         logger.exception("Failed to notify learner/admins of request %s's paid-session tutor cancellation", request_id)
 
 
+def _notify_tutor_of_cancellation_penalty(
+    *, tutor_id: int, tutor_email: str, tutor_name: str, amount_zar: float,
+    subject: str, topic: str | None, scheduled_at: dt.datetime | None,
+) -> None:
+    """Best-effort - tells the TUTOR themselves that cancelling this
+    paid session within CANCELLATION_CUTOFF_HOURS cost them a late-
+    cancellation fee, charged against their running payout balance (see
+    _charge_tutor_penalty/_settle_tutor_penalties) rather than this
+    session's own payout, since a cancelled session never gets one."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        send_email(
+            tutor_email,
+            "Late-cancellation fee applied",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"Cancelling your {subject}{topic_str} session scheduled for {when_str} within "
+                f"{CANCELLATION_CUTOFF_HOURS} hours of its start applies Malita's "
+                f"{LATE_CANCELLATION_PENALTY_PERCENT}% late-cancellation fee - R{amount_zar:.2f} has been "
+                "deducted from your running payout balance and will come off your next payout.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="Late-cancellation fee applied",
+            body=f"R{amount_zar:.2f} late-cancellation fee for {subject}{topic_str} - deducted from your next payout.",
+        )
+    except Exception:
+        logger.exception("Failed to notify tutor %s of their late-cancellation fee", tutor_id)
+
+
 def reallocate_after_tutor_cancellation(request_id: int, learner_user_id: int) -> dict:
     """The learner choosing re-allocation after a tutor cancelled their
     already-paid session (status "tutor_cancelled" - see
@@ -4070,6 +4166,7 @@ def reallocate_after_tutor_cancellation(request_id: int, learner_user_id: int) -
         req.status = "requested"
         req.cancelled_by = None
         req.cancellation_reason = None
+        req.refund_amount_zar = None
         return {"id": req.id, "status": req.status}
 
 
@@ -4089,14 +4186,19 @@ def request_refund_for_cancelled_session(request_id: int, learner_user_id: int) 
         req.cancelled_at = dt.datetime.utcnow()
         req.refund_requested_at = dt.datetime.utcnow()
         result = {"id": req.id, "status": req.status}
-        price_zar, subject, topic = req.price_zar, req.subject, req.topic
+        # refund_amount_zar was already set by cancel_accepted_session at
+        # the moment the tutor cancelled (reduced by the late-
+        # cancellation fee if that happened within CANCELLATION_CUTOFF_
+        # HOURS) - read it back rather than price_zar, which may no
+        # longer be the actual amount owed.
+        refund_amount_zar, subject, topic = req.refund_amount_zar, req.subject, req.topic
 
-    _notify_admins_of_refund_request(request_id=request_id, price_zar=price_zar, subject=subject, topic=topic)
+    _notify_admins_of_refund_request(request_id=request_id, amount_zar=refund_amount_zar, subject=subject, topic=topic)
     return result
 
 
 def _notify_admins_of_refund_request(
-    *, request_id: int, price_zar: float | None, subject: str, topic: str | None,
+    *, request_id: int, amount_zar: float | None, subject: str, topic: str | None,
 ) -> None:
     """Best-effort email to every admin - same "nobody checks the
     console on a schedule" reasoning as _notify_admins_of_custom_claim."""
@@ -4106,7 +4208,7 @@ def _notify_admins_of_refund_request(
         if not admins:
             return
         topic_str = f" ({topic})" if topic else ""
-        price_str = f"R{price_zar:.2f}" if price_zar is not None else "an unknown amount"
+        price_str = f"R{amount_zar:.2f}" if amount_zar is not None else "an unknown amount"
         body = (
             f"The learner on request #{request_id} - {subject}{topic_str} - chose a refund "
             f"({price_str}) after their tutor cancelled the paid session.\n\n"
@@ -4136,11 +4238,11 @@ def admin_suggest_refund(request_id: int) -> dict:
             raise TutoringError(f"This request is '{req.status}', not awaiting a re-allocation/refund choice.")
         learner = db.query(User).get(req.learner_user_id)
         learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
-        subject, topic, price_zar = req.subject, req.topic, req.price_zar
+        subject, topic, refund_amount_zar = req.subject, req.topic, req.refund_amount_zar
 
     try:
         topic_str = f" ({topic})" if topic else ""
-        price_str = f"R{price_zar:.2f}" if price_zar is not None else ""
+        price_str = f"R{refund_amount_zar:.2f}" if refund_amount_zar is not None else ""
         send_email(
             learner_email,
             "Malita suggests a refund for your cancelled session",
@@ -4184,12 +4286,12 @@ def admin_mark_refund_processing(request_id: int) -> dict:
         req.refund_processing_at = dt.datetime.utcnow()
         learner = db.query(User).get(req.learner_user_id)
         learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
-        subject, topic, price_zar = req.subject, req.topic, req.price_zar
+        subject, topic, refund_amount_zar = req.subject, req.topic, req.refund_amount_zar
         result = {"id": req.id, "status": req.status}
 
     try:
         topic_str = f" ({topic})" if topic else ""
-        price_str = f"R{price_zar:.2f}" if price_zar is not None else ""
+        price_str = f"R{refund_amount_zar:.2f}" if refund_amount_zar is not None else ""
         send_email(
             learner_email,
             "Your refund is being processed",
@@ -4225,12 +4327,12 @@ def mark_refund_processed(request_id: int) -> dict:
         req.refund_processed_at = dt.datetime.utcnow()
         learner = db.query(User).get(req.learner_user_id)
         learner_id, learner_name, learner_email = learner.id, learner.name, learner.email
-        subject, topic, price_zar = req.subject, req.topic, req.price_zar
+        subject, topic, refund_amount_zar = req.subject, req.topic, req.refund_amount_zar
         result = {"id": req.id, "status": req.status}
 
     try:
         topic_str = f" ({topic})" if topic else ""
-        price_str = f"R{price_zar:.2f}" if price_zar is not None else ""
+        price_str = f"R{refund_amount_zar:.2f}" if refund_amount_zar is not None else ""
         send_email(
             learner_email,
             "Your refund has been processed",
@@ -4316,7 +4418,54 @@ def list_pending_payouts() -> list[dict]:
         return out
 
 
-def mark_payout_paid(payout_id: int, admin_user_id: int, payment_reference: str = "") -> None:
+def _settle_tutor_penalties(db, tutor_id: int, available_zar: float) -> float:
+    """Marks as many of this tutor's PENDING late-cancellation penalties
+    (oldest first) as `available_zar` can fully cover "settled", and
+    returns how much was actually absorbed - called the moment a real
+    payout for this tutor is marked paid (see mark_payout_paid/
+    settle_all_pending_payouts), so the fee comes off that payout
+    instead of needing its own separate transfer. A penalty bigger than
+    what's currently available is left pending rather than partially
+    settled, so it isn't split across two payouts' records - it just
+    rolls into the next one, which in practice (a single cancellation
+    fee against a whole payout batch) will absorb it easily."""
+    pending = (
+        db.query(TutorPenalty)
+        .filter(TutorPenalty.tutor_id == tutor_id, TutorPenalty.status == "pending")
+        .order_by(TutorPenalty.created_at.asc())
+        .all()
+    )
+    remaining = available_zar
+    absorbed = 0.0
+    now = dt.datetime.utcnow()
+    for penalty in pending:
+        if penalty.amount_zar > remaining:
+            continue
+        penalty.status = "settled"
+        penalty.settled_at = now
+        remaining -= penalty.amount_zar
+        absorbed += penalty.amount_zar
+    return round(absorbed, 2)
+
+
+def get_tutor_pending_penalty_total(tutor_id: int) -> float:
+    """What a tutor currently owes in not-yet-settled late-cancellation
+    fees - shown on their own Payouts tab so a smaller-than-expected
+    payout isn't a surprise."""
+    with get_session() as db:
+        total = (
+            db.query(sa.func.coalesce(sa.func.sum(TutorPenalty.amount_zar), 0.0))
+            .filter(TutorPenalty.tutor_id == tutor_id, TutorPenalty.status == "pending")
+            .scalar()
+        )
+        return round(total or 0.0, 2)
+
+
+def mark_payout_paid(payout_id: int, admin_user_id: int, payment_reference: str = "") -> dict:
+    """Marks one session's payout as paid, settling as much of that
+    tutor's pending late-cancellation fees as this payout covers (see
+    _settle_tutor_penalties) - the returned net_paid_zar is what should
+    actually be transferred, after that deduction."""
     with get_session() as db:
         payout = db.query(TutoringPayout).get(payout_id)
         if not payout:
@@ -4325,6 +4474,12 @@ def mark_payout_paid(payout_id: int, admin_user_id: int, payment_reference: str 
         payout.paid_at = dt.datetime.utcnow()
         payout.paid_by_admin_user_id = admin_user_id
         payout.payment_reference = payment_reference.strip() or None
+        penalty_settled = _settle_tutor_penalties(db, payout.tutor_id, payout.amount_zar)
+        return {
+            "id": payout.id, "gross_zar": round(payout.amount_zar, 2),
+            "penalty_settled_zar": penalty_settled,
+            "net_paid_zar": round(payout.amount_zar - penalty_settled, 2),
+        }
 
 
 def _next_pay_day(from_date: dt.date | None = None) -> dt.date:
@@ -4352,7 +4507,15 @@ def summarize_pending_payouts() -> dict:
     the gross session price behind it, plus the next payday those
     amounts are due. Session gross comes from the underlying
     TutoringSessionRequest rather than being backed out of the snapshotted
-    cut percent, since that's the exact figure the learner paid."""
+    cut percent, since that's the exact figure the learner paid.
+
+    net_zar/overall.net_zar are the payout amounts BEFORE any pending
+    late-cancellation fee (see TutorPenalty) - pending_penalty_zar is
+    that tutor's/the overall not-yet-settled fee total, and
+    final_net_zar is net_zar with it actually subtracted (floored at 0 -
+    a fee bigger than this batch's payout just rolls into the next one,
+    see _settle_tutor_penalties), i.e. what they'll actually be paid if
+    this gets settled right now."""
     with get_session() as db:
         payouts = db.query(TutoringPayout).filter(TutoringPayout.status == "pending").all()
         by_tutor: dict[int, dict] = {}
@@ -4374,6 +4537,16 @@ def summarize_pending_payouts() -> dict:
             row["gross_zar"] += gross
             row["net_zar"] += p.amount_zar
             row["count"] += 1
+        pending_penalties = db.query(TutorPenalty).filter(TutorPenalty.status == "pending").all()
+        penalty_by_tutor: dict[int, float] = {}
+        for pen in pending_penalties:
+            penalty_by_tutor[pen.tutor_id] = penalty_by_tutor.get(pen.tutor_id, 0.0) + pen.amount_zar
+        overall_pending_penalty = 0.0
+        for row in by_tutor.values():
+            pending_penalty = round(penalty_by_tutor.get(row["tutor_id"], 0.0), 2)
+            row["pending_penalty_zar"] = pending_penalty
+            row["final_net_zar"] = round(max(0.0, row["net_zar"] - pending_penalty), 2)
+            overall_pending_penalty += min(pending_penalty, row["net_zar"])
         by_tutor_list = sorted(
             ({**r, "gross_zar": round(r["gross_zar"], 2), "net_zar": round(r["net_zar"], 2)} for r in by_tutor.values()),
             key=lambda r: r["net_zar"], reverse=True,
@@ -4381,6 +4554,8 @@ def summarize_pending_payouts() -> dict:
         return {
             "overall": {
                 "gross_zar": round(overall_gross, 2), "net_zar": round(overall_net, 2), "count": len(payouts),
+                "pending_penalty_zar": round(overall_pending_penalty, 2),
+                "final_net_zar": round(overall_net - overall_pending_penalty, 2),
             },
             "by_tutor": by_tutor_list,
             "next_pay_day": _next_pay_day().isoformat(),
@@ -4389,21 +4564,30 @@ def summarize_pending_payouts() -> dict:
 
 def _notify_payout_settled(
     tutor_id: int, email: str, name: str, *, net_zar: float, count: int, payment_reference: str,
+    penalty_settled_zar: float = 0.0,
 ) -> None:
     """Best-effort - mirrors _notify_tutor_of_decision's try/except
     pattern, so a failed email/notification send never breaks the
-    admin's bulk-settle action itself."""
+    admin's bulk-settle action itself. net_zar is what actually got
+    transferred (after penalty_settled_zar, if any, was already
+    deducted) - the tutor sees their final payout after all of Malita's
+    deductions, not just the pre-fee session total."""
     try:
         plural = "s" if count != 1 else ""
         subject = "Your Malita payout has been paid"
+        penalty_line = (
+            f"\n(R{penalty_settled_zar:.2f} late-cancellation fee deducted)" if penalty_settled_zar else ""
+        )
         body = (
             f"Hi {name},\n\n"
-            f"Your payout of R{net_zar:.2f} for {count} session{plural} has been paid out."
+            f"Your payout of R{net_zar:.2f} for {count} session{plural} has been paid out.{penalty_line}"
             + (f"\nReference: {payment_reference}" if payment_reference else "")
             + "\n\n— The Malita team"
         )
         notif_title = "Payout paid"
-        notif_body = f"R{net_zar:.2f} for {count} session{plural} has been paid."
+        notif_body = f"R{net_zar:.2f} for {count} session{plural} has been paid." + (
+            f" (R{penalty_settled_zar:.2f} fee deducted)" if penalty_settled_zar else ""
+        )
         send_email(email, subject, body)
         create_notification(recipient_kind="tutor", recipient_id=tutor_id, title=notif_title, body=notif_body)
     except Exception:
@@ -4416,12 +4600,19 @@ def settle_all_pending_payouts(admin_user_id: int, payment_reference: str = "") 
     Paid' once per session), so admin's pending total and each tutor's
     own pending total both reset to zero at once; the now-paid rows show
     up as 'Paid' in the tutor's own payout history automatically, since
-    that view reads the same TutoringPayout rows by status."""
+    that view reads the same TutoringPayout rows by status. Also settles
+    as much of each tutor's pending late-cancellation fees as their own
+    share of this batch can cover (see _settle_tutor_penalties) -
+    settled_net_zar is the pre-fee total (unchanged meaning, for
+    backwards compatibility), settled_penalty_zar and
+    settled_final_net_zar are the new fee deduction and the TRUE total
+    actually transferred."""
     ref = payment_reference.strip() or None
     now = dt.datetime.utcnow()
     per_tutor_net: dict[int, float] = {}
     per_tutor_count: dict[int, int] = {}
     tutor_contacts: dict[int, tuple[str, str]] = {}
+    per_tutor_penalty: dict[int, float] = {}
     with get_session() as db:
         payouts = db.query(TutoringPayout).filter(TutoringPayout.status == "pending").all()
         for p in payouts:
@@ -4436,12 +4627,20 @@ def settle_all_pending_payouts(admin_user_id: int, payment_reference: str = "") 
             tutor = db.query(TutorAccount).get(tutor_id)
             if tutor:
                 tutor_contacts[tutor_id] = (tutor.email, tutor.name)
+            per_tutor_penalty[tutor_id] = _settle_tutor_penalties(db, tutor_id, per_tutor_net[tutor_id])
 
     for tutor_id, (email, name) in tutor_contacts.items():
+        penalty_settled = per_tutor_penalty.get(tutor_id, 0.0)
         _notify_payout_settled(
             tutor_id, email, name,
-            net_zar=per_tutor_net[tutor_id], count=per_tutor_count[tutor_id],
-            payment_reference=ref or "",
+            net_zar=round(per_tutor_net[tutor_id] - penalty_settled, 2), count=per_tutor_count[tutor_id],
+            payment_reference=ref or "", penalty_settled_zar=penalty_settled,
         )
 
-    return {"settled_count": count, "settled_net_zar": round(sum(per_tutor_net.values()), 2)}
+    settled_penalty_total = round(sum(per_tutor_penalty.values()), 2)
+    settled_net_total = round(sum(per_tutor_net.values()), 2)
+    return {
+        "settled_count": count, "settled_net_zar": settled_net_total,
+        "settled_penalty_zar": settled_penalty_total,
+        "settled_final_net_zar": round(settled_net_total - settled_penalty_total, 2),
+    }

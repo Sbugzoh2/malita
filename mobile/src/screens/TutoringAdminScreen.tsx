@@ -1112,7 +1112,12 @@ function RefundsSection({ token }: { token: string }) {
             </Text>
             <Text style={styles.cardSubtitle}>Learner: {r.learner_name ?? "—"}</Text>
             {r.price_zar != null ? (
-              <Text style={styles.detailLine}>R{r.price_zar.toFixed(2)}</Text>
+              <Text style={styles.detailLine}>
+                Session price: R{r.price_zar.toFixed(2)}
+                {r.refund_amount_zar != null && r.refund_amount_zar !== r.price_zar
+                  ? ` — refund amount: R${r.refund_amount_zar.toFixed(2)} (late-cancellation fee applied)`
+                  : ""}
+              </Text>
             ) : null}
             {r.scheduled_at ? (
               <Text style={styles.detailLine}>
@@ -1754,10 +1759,14 @@ function PayoutsSection({ token }: { token: string }) {
 
   function confirmSettleAll() {
     if (!summary || summary.overall.count === 0) return;
+    const feeNote =
+      summary.overall.pending_penalty_zar > 0
+        ? ` (R${summary.overall.pending_penalty_zar.toFixed(2)} in late-cancellation fees already deducted)`
+        : "";
     Alert.alert(
       "Settle this payday?",
-      `This marks all ${summary.overall.count} pending payout(s) — R${summary.overall.net_zar.toFixed(2)} total — as paid. ` +
-        "Only do this once you've actually sent every tutor their EFT.",
+      `This marks all ${summary.overall.count} pending payout(s) — R${summary.overall.final_net_zar.toFixed(2)} ` +
+        `total${feeNote} — as paid. Only send tutors that final amount, not the pre-fee total.`,
       [
         { text: "Not yet", style: "cancel" },
         { text: "Settle all", style: "destructive", onPress: handleSettleAll },
@@ -1792,11 +1801,14 @@ function PayoutsSection({ token }: { token: string }) {
             </View>
             <View style={{ alignItems: "flex-end" }}>
               <Text style={styles.payoutsSummaryLabel}>Net to pay out</Text>
-              <Text style={styles.payoutsSummaryValuePayout}>R{summary.overall.net_zar.toFixed(2)}</Text>
+              <Text style={styles.payoutsSummaryValuePayout}>R{summary.overall.final_net_zar.toFixed(2)}</Text>
             </View>
           </View>
           <Text style={styles.payoutsSummaryFooter}>
             R{summary.overall.gross_zar.toFixed(2)} gross (before Malita's cut) across {summary.overall.count} session(s)
+            {summary.overall.pending_penalty_zar > 0
+              ? ` — R${summary.overall.pending_penalty_zar.toFixed(2)} late-cancellation fees already deducted above`
+              : ""}
           </Text>
 
           {summary.by_tutor.length > 0 && (
@@ -1808,7 +1820,11 @@ function PayoutsSection({ token }: { token: string }) {
                     {t.tutor_name ?? `Tutor #${t.tutor_id}`} ({t.count})
                   </Text>
                   <Text style={styles.payoutsByTutorAmount}>
-                    R{t.net_zar.toFixed(2)} <Text style={styles.payoutsByTutorGross}>(R{t.gross_zar.toFixed(2)} gross)</Text>
+                    R{t.final_net_zar.toFixed(2)}{" "}
+                    <Text style={styles.payoutsByTutorGross}>
+                      (R{t.gross_zar.toFixed(2)} gross
+                      {t.pending_penalty_zar > 0 ? `, R${t.pending_penalty_zar.toFixed(2)} fee deducted` : ""})
+                    </Text>
                   </Text>
                 </View>
               ))}

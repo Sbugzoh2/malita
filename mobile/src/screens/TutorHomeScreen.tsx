@@ -44,6 +44,11 @@ function payoutPreview(priceZar: number, cutPercent: number): string {
   return `R${(priceZar * (1 - cutPercent / 100)).toFixed(2)}`;
 }
 
+// Mirrors backend/tutoring.py's LATE_CANCELLATION_PENALTY_PERCENT - used
+// here purely to show the fee amount in the confirmation prompt before
+// the API call; the backend enforces the real cutoff/percentage either way.
+const LATE_CANCELLATION_PENALTY_PERCENT = 30;
+
 // "Grade 12" for a high-school request, "1st Year"/"2nd Year"/etc. for a
 // higher-ed one (real catalog module or a custom/"Other" one) - previously
 // only the grade case was shown, so a module request's year never
@@ -389,6 +394,7 @@ export default function TutorHomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<TutorProfile | null>(null);
   const [payouts, setPayouts] = useState<TutorPayout[] | null>(null);
+  const [pendingPenaltyZar, setPendingPenaltyZar] = useState<number>(0);
   const [openRequests, setOpenRequests] = useState<TutoringRequest[] | null>(null);
   const [openCutPercent, setOpenCutPercent] = useState<number>(30);
   // Screen-wide (load failures only) - shown at the top. Per-session
@@ -432,7 +438,7 @@ export default function TutorHomeScreen({ navigation }: any) {
       .then(setProfile)
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load your profile."));
     fetchTutorMyPayouts(token)
-      .then((res) => setPayouts(res.payouts))
+      .then((res) => { setPayouts(res.payouts); setPendingPenaltyZar(res.pending_penalty_zar); })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load your payouts."));
     fetchTutorOpenRequests(token)
       .then((res) => {
@@ -519,12 +525,12 @@ export default function TutorHomeScreen({ navigation }: any) {
     }
   }
 
-  async function handleCancel(requestId: number) {
+  async function handleCancel(requestId: number, confirmLateCancellation: boolean = false) {
     if (!token) return;
     setCancelingId(requestId);
     setActionError(requestId, null);
     try {
-      await cancelTutoringSessionAsTutor(token, requestId, cancelReason.trim());
+      await cancelTutoringSessionAsTutor(token, requestId, cancelReason.trim(), confirmLateCancellation);
       setCancelReasonId(null);
       setCancelReason("");
       load();
@@ -554,15 +560,36 @@ export default function TutorHomeScreen({ navigation }: any) {
     }
   }
 
-  function confirmCancel(requestId: number) {
-    Alert.alert(
-      "Cancel this session?",
-      "The learner will be notified. This can't be undone.",
-      [
-        { text: "Never mind", style: "cancel" },
-        { text: "Cancel Session", style: "destructive", onPress: () => handleCancel(requestId) },
-      ]
-    );
+  // Cancelling a PAID session within 24 hours of its start costs the
+  // TUTOR Malita's late-cancellation fee, charged against their running
+  // payout balance (see backend/tutoring.py's cancel_accepted_session/
+  // LATE_CANCELLATION_PENALTY_PERCENT) - warn with the actual amount
+  // before asking them to confirm, rather than a generic "can't be
+  // undone" that doesn't mention money.
+  function confirmCancel(sess: TutoringRequest) {
+    const isPaid = sess.status === "confirmed";
+    const isLate = !!sess.scheduled_at && new Date(sess.scheduled_at).getTime() - Date.now() < 24 * 60 * 60 * 1000;
+    if (isPaid && isLate && sess.price_zar != null) {
+      const fee = Math.round(sess.price_zar * LATE_CANCELLATION_PENALTY_PERCENT) / 100;
+      Alert.alert(
+        "Cancel within 24 hours?",
+        `This session is less than 24 hours away. Cancelling now applies Malita's ${LATE_CANCELLATION_PENALTY_PERCENT}% ` +
+          `late-cancellation fee - R${fee.toFixed(2)} will be deducted from your next payout. The learner will be notified.`,
+        [
+          { text: "Never mind", style: "cancel" },
+          { text: "Cancel anyway", style: "destructive", onPress: () => handleCancel(sess.id, true) },
+        ]
+      );
+    } else {
+      Alert.alert(
+        "Cancel this session?",
+        "The learner will be notified. This can't be undone.",
+        [
+          { text: "Never mind", style: "cancel" },
+          { text: "Cancel Session", style: "destructive", onPress: () => handleCancel(sess.id) },
+        ]
+      );
+    }
   }
 
   // Refreshes every time this screen regains focus, so a new match or a
@@ -1023,7 +1050,7 @@ export default function TutorHomeScreen({ navigation }: any) {
                           </Pressable>
                           <Pressable
                             style={[styles.acceptButton, styles.proposalApproveButton, styles.dangerButton]}
-                            onPress={() => confirmCancel(sess.id)}
+                            onPress={() => confirmCancel(sess)}
                             disabled={cancelingId === sess.id}
                           >
                             {cancelingId === sess.id ? (
@@ -1034,7 +1061,8 @@ export default function TutorHomeScreen({ navigation }: any) {
                           </Pressable>
                         </View>
                         <Text style={styles.payoutNote}>
-                          Not available within 24 hours of the session - contact support for anything that close.
+                          Cancelling a paid session within 24 hours still works, but applies Malita's{" "}
+                          {LATE_CANCELLATION_PENALTY_PERCENT}% late-cancellation fee against your next payout.
                         </Text>
                       </View>
                     ) : (
@@ -1087,6 +1115,11 @@ export default function TutorHomeScreen({ navigation }: any) {
                     <Text style={styles.statFooterText}>R{paidAmount.toFixed(0)} paid</Text>
                     <Text style={styles.statFooterText}>R{pendingAmount.toFixed(0)} pending</Text>
                   </View>
+                  {pendingPenaltyZar > 0 ? (
+                    <Text style={[styles.statFooterText, { color: colors.error, marginTop: 6 }]}>
+                      R{pendingPenaltyZar.toFixed(2)} late-cancellation fee owed - will come off your next payout
+                    </Text>
+                  ) : null}
                 </View>
 
                 {payouts.length === 0 ? (

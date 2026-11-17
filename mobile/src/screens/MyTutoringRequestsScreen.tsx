@@ -46,6 +46,11 @@ function isHiddenHistory(r: TutoringRequest): boolean {
 // requests can carry any subject string, so there's no fixed catalog to
 // hand-map from.
 const AVATAR_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+
+// Mirrors backend/tutoring.py's LATE_CANCELLATION_PENALTY_PERCENT - used
+// here purely to show the fee amount in the confirmation prompt before
+// the API call; the backend enforces the real cutoff/percentage either way.
+const LATE_CANCELLATION_PENALTY_PERCENT = 30;
 function colorForSubject(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
@@ -385,12 +390,12 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
     }
   }
 
-  async function handleCancel(requestId: number) {
+  async function handleCancel(requestId: number, confirmLateCancellation: boolean = false) {
     if (!token) return;
     setCancelingId(requestId);
     setActionError(requestId, null);
     try {
-      await cancelTutoringSessionAsLearner(token, requestId, cancelReason.trim());
+      await cancelTutoringSessionAsLearner(token, requestId, cancelReason.trim(), confirmLateCancellation);
       setCancelReasonId(null);
       setCancelReason("");
       load();
@@ -398,6 +403,32 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
       setActionError(requestId, e instanceof ApiError ? e.message : "Could not cancel this session.");
     } finally {
       setCancelingId(null);
+    }
+  }
+
+  // Cancelling a PAID session within 24 hours of its start costs a late-
+  // cancellation fee (see backend/tutoring.py's cancel_accepted_session/
+  // LATE_CANCELLATION_PENALTY_PERCENT) - warn and get explicit agreement
+  // BEFORE calling the API with confirmLateCancellation, rather than
+  // letting the fee apply silently. Computed client-side purely to show
+  // the number early; the backend enforces the same cutoff/fee either way.
+  function confirmCancelWithLateFeeCheck(r: TutoringRequest) {
+    const isPaid = r.status === "confirmed";
+    const isLate = !!r.scheduled_at && new Date(r.scheduled_at).getTime() - Date.now() < 24 * 60 * 60 * 1000;
+    if (isPaid && isLate && r.price_zar != null) {
+      const fee = Math.round(r.price_zar * LATE_CANCELLATION_PENALTY_PERCENT) / 100;
+      const refund = Math.round((r.price_zar - fee) * 100) / 100;
+      Alert.alert(
+        "Cancel within 24 hours?",
+        `This session is less than 24 hours away. Cancelling now applies Malita's ${LATE_CANCELLATION_PENALTY_PERCENT}% ` +
+          `late-cancellation fee - you'll be refunded R${refund.toFixed(2)} instead of the full R${r.price_zar.toFixed(2)}.`,
+        [
+          { text: "Never mind", style: "cancel" },
+          { text: "Cancel anyway", style: "destructive", onPress: () => handleCancel(r.id, true) },
+        ]
+      );
+    } else {
+      handleCancel(r.id);
     }
   }
 
@@ -668,7 +699,7 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
                     <View style={styles.proposalButtonRow}>
                       <Pressable
                         style={[styles.dangerButton, styles.actionButtonFlex]}
-                        onPress={() => handleCancel(r.id)}
+                        onPress={() => confirmCancelWithLateFeeCheck(r)}
                         disabled={cancelingId === r.id}
                       >
                         {cancelingId === r.id ? (
@@ -691,7 +722,8 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
                   </Pressable>
                 )}
                 <Text style={styles.helperText}>
-                  Cancelling isn't available within 24 hours of the session.
+                  Cancelling a paid session within 24 hours still works, but applies Malita's{" "}
+                  {LATE_CANCELLATION_PENALTY_PERCENT}% late-cancellation fee to your refund.
                 </Text>
               </View>
             )}
@@ -703,11 +735,18 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
             )}
             {r.status === "cancelled" && r.refund_requested_at && (
               <Text style={styles.cardMeta}>
-                {r.refund_processed_at
-                  ? "✓ Your refund has been processed."
-                  : r.refund_processing_at
-                  ? "Your refund is being processed - expect it in your bank account within 5-7 working days."
-                  : "Refund requested - Malita is arranging it."}
+                {(() => {
+                  const amountStr = r.refund_amount_zar != null ? `R${r.refund_amount_zar.toFixed(2)}` : "your refund";
+                  const feeNote =
+                    r.price_zar != null && r.refund_amount_zar != null && r.refund_amount_zar < r.price_zar
+                      ? ` (R${r.price_zar.toFixed(2)} minus Malita's late-cancellation fee)`
+                      : "";
+                  if (r.refund_processed_at) return `✓ Your refund (${amountStr}) has been processed.`;
+                  if (r.refund_processing_at) {
+                    return `Your refund (${amountStr}${feeNote}) is being processed - expect it in your bank account within 5-7 working days.`;
+                  }
+                  return `Refund requested (${amountStr}${feeNote}) - Malita is arranging it.`;
+                })()}
               </Text>
             )}
             {r.status === "lapsed" && (

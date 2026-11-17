@@ -69,7 +69,7 @@ from backend.tutoring import (
     approve_tutor_higher_ed, reject_tutor_higher_ed, list_learner_requests,
     list_pending_custom_claims, respond_to_custom_module_claim,
     list_notifications, count_unread_notifications, mark_all_notifications_read,
-    list_requests_needing_attention, admin_suggest_refund, mark_refund_processed,
+    list_requests_needing_attention, admin_suggest_refund, admin_mark_refund_processing, mark_refund_processed,
 )
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
@@ -2429,7 +2429,11 @@ elif mode == "🛠️ Tutoring Admin":
                     if r["scheduled_at"]:
                         st.write(f"**Originally scheduled:** {to_sast_str(r['scheduled_at'])}")
                     if r["price_zar"] is not None:
-                        st.write(f"**Price:** R{r['price_zar']:.2f} ({r['duration_minutes']} min)")
+                        price_line = f"**Price:** R{r['price_zar']:.2f} ({r['duration_minutes']} min)"
+                        refund_amount = r.get("refund_amount_zar")
+                        if refund_amount is not None and refund_amount != r["price_zar"]:
+                            price_line += f" — **refund amount:** R{refund_amount:.2f} (late-cancellation fee applied)"
+                        st.write(price_line)
                     if r.get("cancellation_reason"):
                         st.write(f"**Tutor's reason:** {r['cancellation_reason']}")
                     if r["status"] == "tutor_cancelled":
@@ -2444,7 +2448,17 @@ elif mode == "🛠️ Tutoring Admin":
                             except TutoringError as e:
                                 st.error(str(e))
                     elif r.get("refund_requested_at") and not r.get("refund_processed_at"):
-                        st.write("The learner chose a refund - arrange it, then mark it processed below.")
+                        if not r.get("refund_processing_at"):
+                            st.write("The learner chose a refund - mark it processing once you've started arranging it.")
+                            if st.button("Mark as processing", key=f"mark_processing_{r['id']}"):
+                                try:
+                                    admin_mark_refund_processing(r["id"])
+                                    st.success("Marked processing - the learner has been notified (5-7 working days).")
+                                    st.rerun()
+                                except TutoringError as e:
+                                    st.error(str(e))
+                        else:
+                            st.write("Processing - arrange the refund, then mark it fully processed below.")
                         if st.button("Mark refund processed", key=f"mark_refund_{r['id']}"):
                             try:
                                 mark_refund_processed(r["id"])

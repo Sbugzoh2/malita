@@ -476,6 +476,13 @@ export type TutoringRequest = {
   // refund_processed_at is set once an admin has actually arranged it
   // (no automated PayFast refund - see backend/tutoring.py).
   refund_requested_at: string | null;
+  // The actual amount owed - full price_zar normally, or price_zar
+  // reduced by Malita's late-cancellation fee if whoever cancelled did
+  // so within 24 hours of the scheduled time (see backend/tutoring.py's
+  // cancel_accepted_session/CANCELLATION_CUTOFF_HOURS). Set the moment
+  // a refund becomes owed - show this, not price_zar, anywhere a refund
+  // amount is quoted.
+  refund_amount_zar: number | null;
   // Set once an admin starts actually arranging the refund (before it's
   // fully done) - lets the learner's screen show "being processed,
   // expect it within 5-7 working days" instead of just "requested" the
@@ -576,18 +583,22 @@ export function withdrawTutoringRequest(token: string, requestId: number) {
 
 // Either party cancelling an ALREADY-ACCEPTED session (awaiting_payment
 // or confirmed) - blocked within 24 hours of the scheduled time.
-export function cancelTutoringSessionAsLearner(token: string, requestId: number, reason: string = "") {
+export function cancelTutoringSessionAsLearner(
+  token: string, requestId: number, reason: string = "", confirmLateCancellation: boolean = false
+) {
   return request<{ id: number; status: string }>(`/tutoring/requests/${requestId}/cancel`, {
     method: "POST",
-    body: { reason },
+    body: { reason, confirm_late_cancellation: confirmLateCancellation },
     token,
   });
 }
 
-export function cancelTutoringSessionAsTutor(token: string, requestId: number, reason: string = "") {
+export function cancelTutoringSessionAsTutor(
+  token: string, requestId: number, reason: string = "", confirmLateCancellation: boolean = false
+) {
   return request<{ id: number; status: string }>(`/tutor/sessions/${requestId}/cancel`, {
     method: "POST",
-    body: { reason },
+    body: { reason, confirm_late_cancellation: confirmLateCancellation },
     token,
   });
 }
@@ -903,7 +914,7 @@ export type TutorPayout = {
 };
 
 export function fetchTutorMyPayouts(token: string) {
-  return request<{ payouts: TutorPayout[] }>("/tutor/me/payouts", { token });
+  return request<{ payouts: TutorPayout[]; pending_penalty_zar: number }>("/tutor/me/payouts", { token });
 }
 
 // A tutor's own "open requests" queue - only requests for subjects
@@ -1237,16 +1248,21 @@ export function fetchPendingPayoutsAdmin(token: string) {
 }
 
 export function markPayoutPaidAdmin(token: string, payoutId: number, paymentReference: string) {
-  return request<{ status: string }>(`/admin/tutoring/payouts/${payoutId}/mark-paid`, {
-    method: "POST",
-    body: { payment_reference: paymentReference },
-    token,
-  });
+  return request<{ status: string; gross_zar: number; penalty_settled_zar: number; net_paid_zar: number }>(
+    `/admin/tutoring/payouts/${payoutId}/mark-paid`,
+    { method: "POST", body: { payment_reference: paymentReference }, token }
+  );
 }
 
-export type PayoutsByTutor = { tutor_id: number; tutor_name: string | null; gross_zar: number; net_zar: number; count: number };
+export type PayoutsByTutor = {
+  tutor_id: number; tutor_name: string | null; gross_zar: number; net_zar: number; count: number;
+  // net_zar is before any pending late-cancellation fee (see backend's
+  // TutorPenalty) - pending_penalty_zar is what's owed, final_net_zar is
+  // net_zar with it actually subtracted (floored at 0).
+  pending_penalty_zar: number; final_net_zar: number;
+};
 export type PayoutsSummary = {
-  overall: { gross_zar: number; net_zar: number; count: number };
+  overall: { gross_zar: number; net_zar: number; count: number; pending_penalty_zar: number; final_net_zar: number };
   by_tutor: PayoutsByTutor[];
   next_pay_day: string;
 };
@@ -1256,11 +1272,10 @@ export function fetchPayoutsSummaryAdmin(token: string) {
 }
 
 export function settleAllPayoutsAdmin(token: string, paymentReference: string) {
-  return request<{ settled_count: number; settled_net_zar: number }>("/admin/tutoring/payouts/settle-all", {
-    method: "POST",
-    body: { payment_reference: paymentReference },
-    token,
-  });
+  return request<{ settled_count: number; settled_net_zar: number; settled_penalty_zar: number; settled_final_net_zar: number }>(
+    "/admin/tutoring/payouts/settle-all",
+    { method: "POST", body: { payment_reference: paymentReference }, token }
+  );
 }
 
 export type PracticeSolutionStep = { explain: string; latex: string };

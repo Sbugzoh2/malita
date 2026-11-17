@@ -2684,11 +2684,17 @@ def _tutor_eligible_subjects_and_modules(db, tutor: TutorAccount) -> tuple[set, 
 
 
 def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
-    """A tutor's own "open requests" queue, covering BOTH segments in one
-    list - a high-school request whose subject the tutor is approved and
-    active to teach, and/or a higher-ed request for a module the tutor is
-    approved to tutor - so a tutor never sees (or can accept) a request
-    outside what they were vetted for on EITHER track."""
+    """A tutor's own "open requests" queue - EVERY open request across
+    both segments is broadcast to every approved tutor, regardless of
+    subject/module match, so a tutor can see the full queue coming in
+    and judge for themselves what they can actually teach. This is
+    deliberately NOT filtered by the tutor's own approved subjects/
+    modules (that used to hide, say, every Physical Sciences request
+    from a Mathematics-only tutor) - accept_tutoring_request still
+    enforces real eligibility server-side via
+    _check_tutor_eligible_for_request, so a tutor tapping Accept on
+    something outside their approval still gets turned away there; this
+    function only controls what's visible to browse."""
     _expire_lapsed_payments()
     _expire_stale_admin_proposals()
     _expire_unaccepted_past_requests()
@@ -2696,48 +2702,12 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
         tutor = db.query(TutorAccount).get(tutor_id)
         if not tutor:
             raise TutoringError("Tutor account not found.")
-        subjects, module_ids = _tutor_eligible_subjects_and_modules(db, tutor)
-        # A custom ("Other") module has no catalog Module row, so it can't
-        # be matched by id - broadcast it to every higher-ed-approved
-        # tutor who's year-eligible instead (same "at least one year
-        # ahead" rule the catalog uses - see
-        # _tutor_eligible_for_custom_module), same as a high-school
-        # request broadcasts by subject string. Accepting one of these
-        # doesn't finalize it though (see accept_tutoring_request) - year
-        # level alone can't confirm the module is even in the tutor's
-        # actual field, so an admin still has to sign off before the
-        # learner ever sees it as accepted.
-        custom_eligible = tutor.higher_ed_status == "approved"
-        if not subjects and not module_ids and not custom_eligible:
-            return []
-        filters = []
-        if subjects:
-            filters.append(sa.and_(
-                TutoringSessionRequest.module_id.is_(None),
-                TutoringSessionRequest.is_custom_higher_ed.is_(False),
-                TutoringSessionRequest.subject.in_(subjects),
-            ))
-        if module_ids:
-            filters.append(TutoringSessionRequest.module_id.in_(module_ids))
-        if custom_eligible:
-            if tutor.higher_ed_qualification_complete or tutor.higher_ed_year_of_study is None:
-                custom_filter = TutoringSessionRequest.is_custom_higher_ed.is_(True)
-            else:
-                custom_filter = sa.and_(
-                    TutoringSessionRequest.is_custom_higher_ed.is_(True),
-                    sa.or_(
-                        TutoringSessionRequest.custom_module_year_level.is_(None),
-                        TutoringSessionRequest.custom_module_year_level < tutor.higher_ed_year_of_study,
-                    ),
-                )
-            filters.append(custom_filter)
-        if not filters:
+        if tutor.status != "approved" and tutor.higher_ed_status != "approved":
             return []
         reqs = (
             db.query(TutoringSessionRequest)
             .filter(
                 TutoringSessionRequest.status == "requested",
-                sa.or_(*filters),
                 # A request directed at a specific tutor (see
                 # request_tutoring_session's preferred_tutor_id) is only
                 # ever visible to that one tutor, not broadcast to others.
@@ -3082,7 +3052,7 @@ def match_tutor_to_request(
         if req.status not in ("requested", "time_proposed"):
             raise TutoringError(f"This request is already '{req.status}', not awaiting a match.")
         tutor = db.query(TutorAccount).get(tutor_id)
-        if not tutor or tutor.status != "approved":
+        if not tutor or (tutor.status != "approved" and tutor.higher_ed_status != "approved"):
             raise TutoringError("That tutor is not an approved, active tutor.")
 
         req.tutor_id = tutor_id
@@ -3132,7 +3102,7 @@ def tutor_respond_to_admin_match(request_id: int, tutor_id: int, accept: bool) -
             req.status = "requested"
             result = {"id": req.id, "status": req.status}
         else:
-            if not tutor or tutor.status != "approved":
+            if not tutor or (tutor.status != "approved" and tutor.higher_ed_status != "approved"):
                 raise TutoringError("Your tutor account isn't approved.")
 
             if req.proposed_scheduled_at:

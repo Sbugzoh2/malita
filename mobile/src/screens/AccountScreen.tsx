@@ -12,7 +12,9 @@ import {
   fetchInstitutions,
   fetchQualifications,
   fetchMyTutoringRequests,
+  fetchProvinces,
   updateStudyDetails,
+  updatePersonalInfo,
   Institution,
   Qualification,
   YEAR_LEVEL_LABELS,
@@ -22,6 +24,13 @@ const ACCOUNT_TYPE_LABEL: Record<string, string> = {
   high_school: "High School",
   higher_ed: "Higher Ed",
 };
+
+// Mirrors backend/db.py's SA_PROVINCES - used only if fetchProvinces()
+// hasn't resolved yet (same fallback pattern as RegisterScreen.tsx).
+const FALLBACK_PROVINCES = [
+  "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
+  "Mpumalanga", "Northern Cape", "North West", "Western Cape",
+];
 
 function formatDateJoined(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -51,6 +60,18 @@ export default function AccountScreen({ navigation }: any) {
   const [savingStudyDetails, setSavingStudyDetails] = useState(false);
   const [studyDetailsError, setStudyDetailsError] = useState<string | null>(null);
 
+  // Editing personal info (province/city-town, plus school/grade for a
+  // high-school account) - id_number stays read-only (see
+  // backend/auth.py's update_personal_info for why).
+  const [provinces, setProvinces] = useState<string[]>(FALLBACK_PROVINCES);
+  const [editingPersonalInfo, setEditingPersonalInfo] = useState(false);
+  const [draftProvince, setDraftProvince] = useState<string | null>(null);
+  const [draftCityTown, setDraftCityTown] = useState("");
+  const [draftSchool, setDraftSchool] = useState("");
+  const [draftGrade, setDraftGrade] = useState<number | null>(null);
+  const [savingPersonalInfo, setSavingPersonalInfo] = useState(false);
+  const [personalInfoError, setPersonalInfoError] = useState<string | null>(null);
+
   const isHigherEd = me?.user.account_type === "higher_ed";
   const firstName = me?.user.name.split(" ")[0] ?? "";
 
@@ -68,6 +89,14 @@ export default function AccountScreen({ navigation }: any) {
     if (!isHigherEd) return;
     fetchInstitutions().then((res) => setInstitutions(res.institutions)).catch(() => {});
   }, [isHigherEd]);
+
+  useEffect(() => {
+    fetchProvinces()
+      .then((res) => setProvinces(res.provinces))
+      .catch(() => {
+        // Non-fatal - FALLBACK_PROVINCES is already in state.
+      });
+  }, []);
 
   useEffect(() => {
     if (!me?.user.higher_ed_institution_id) return;
@@ -125,6 +154,35 @@ export default function AccountScreen({ navigation }: any) {
     }
   }
 
+  function openEditPersonalInfo() {
+    setPersonalInfoError(null);
+    setDraftProvince(me?.user.province ?? null);
+    setDraftCityTown(me?.user.city_town ?? "");
+    setDraftSchool(me?.user.school ?? "");
+    setDraftGrade(me?.user.grade ?? null);
+    setEditingPersonalInfo(true);
+  }
+
+  async function handleSavePersonalInfo() {
+    if (!token) return;
+    setPersonalInfoError(null);
+    setSavingPersonalInfo(true);
+    try {
+      await updatePersonalInfo(token, {
+        province: draftProvince ?? "",
+        city_town: draftCityTown.trim(),
+        school: isHigherEd ? undefined : draftSchool.trim(),
+        grade: isHigherEd ? undefined : draftGrade,
+      });
+      await refreshMe();
+      setEditingPersonalInfo(false);
+    } catch (e) {
+      setPersonalInfoError(e instanceof ApiError ? e.message : "Could not save your personal info.");
+    } finally {
+      setSavingPersonalInfo(false);
+    }
+  }
+
   if (!me) return null;
 
   return (
@@ -160,6 +218,85 @@ export default function AccountScreen({ navigation }: any) {
             <Text style={styles.pillText}>Admin</Text>
           </View>
         ) : null}
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.sectionLabelRow}>
+          <Text style={styles.sectionLabel}>Personal info</Text>
+          {!editingPersonalInfo ? (
+            <Pressable onPress={openEditPersonalInfo}>
+              <Text style={styles.editLinkText}>Edit</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {editingPersonalInfo ? (
+          <>
+            <Dropdown
+              label="Province"
+              options={provinces.map((p) => ({ label: p, value: p }))}
+              value={draftProvince}
+              onChange={setDraftProvince}
+            />
+            <Text style={styles.fieldLabel}>City / Town</Text>
+            <TextInput style={styles.input} value={draftCityTown} onChangeText={setDraftCityTown} />
+
+            {!isHigherEd ? (
+              <>
+                <Text style={styles.fieldLabel}>School</Text>
+                <TextInput style={styles.input} value={draftSchool} onChangeText={setDraftSchool} />
+                <Dropdown
+                  label="Grade"
+                  options={[10, 11, 12].map((g) => ({ label: `Grade ${g}`, value: String(g) }))}
+                  value={draftGrade != null ? String(draftGrade) : null}
+                  onChange={(v) => setDraftGrade(parseInt(v, 10))}
+                />
+              </>
+            ) : null}
+
+            {personalInfoError ? <Text style={styles.error}>{personalInfoError}</Text> : null}
+
+            <View style={styles.editButtonRow}>
+              <Pressable
+                style={styles.cancelEditButton}
+                onPress={() => setEditingPersonalInfo(false)}
+                disabled={savingPersonalInfo}
+              >
+                <Text style={styles.cancelEditButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.saveEditButton} onPress={handleSavePersonalInfo} disabled={savingPersonalInfo}>
+                {savingPersonalInfo ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveEditButtonText}>Save</Text>}
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Province</Text>
+              <Text style={styles.detailValue}>{me.user.province ?? "—"}</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>City / Town</Text>
+              <Text style={styles.detailValue}>{me.user.city_town ?? "—"}</Text>
+            </View>
+            {!isHigherEd ? (
+              <>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>School</Text>
+                  <Text style={styles.detailValue}>{me.user.school ?? "—"}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Grade</Text>
+                  <Text style={styles.detailValue}>{me.user.grade ?? "—"}</Text>
+                </View>
+              </>
+            ) : null}
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>ID number</Text>
+              <Text style={styles.detailValue}>{me.user.id_number ?? "—"}</Text>
+            </View>
+          </>
+        )}
       </View>
 
       <View style={styles.card}>

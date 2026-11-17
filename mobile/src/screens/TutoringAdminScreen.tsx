@@ -881,7 +881,11 @@ function MatchSection({ token }: { token: string }) {
   const [requests, setRequests] = useState<TutoringRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [candidatesBySubject, setCandidatesBySubject] = useState<Record<string, ApprovedTutor[]>>({});
+  // Every approved tutor, regardless of subject/module - an admin can
+  // manually match any request to any tutor (e.g. assign a Physical
+  // Sciences request to a Mathematics tutor), same reasoning as
+  // match_tutor_to_request's own lack of a subject check server-side.
+  const [candidates, setCandidates] = useState<ApprovedTutor[] | null>(null);
   const [selectedTutor, setSelectedTutor] = useState<Record<number, number | null>>({});
   const [adminNote, setAdminNote] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -899,10 +903,10 @@ function MatchSection({ token }: { token: string }) {
   async function expandRequest(r: TutoringRequest) {
     const nowExpanded = expandedId === r.id ? null : r.id;
     setExpandedId(nowExpanded);
-    if (nowExpanded !== null && !candidatesBySubject[r.subject]) {
+    if (nowExpanded !== null && candidates === null) {
       try {
-        const res = await fetchApprovedTutors(token, r.subject);
-        setCandidatesBySubject((prev) => ({ ...prev, [r.subject]: res.tutors }));
+        const res = await fetchApprovedTutors(token);
+        setCandidates(res.tutors);
       } catch (e) {
         setError(e instanceof ApiError ? e.message : "Could not load tutors.");
       }
@@ -942,7 +946,7 @@ function MatchSection({ token }: { token: string }) {
       ) : (
         requests.map((r) => {
           const expanded = expandedId === r.id;
-          const candidates = candidatesBySubject[r.subject] || [];
+          const requestCandidates = candidates || [];
           return (
             <View key={r.id} style={styles.card}>
               <Pressable onPress={() => expandRequest(r)}>
@@ -961,13 +965,13 @@ function MatchSection({ token }: { token: string }) {
               </Pressable>
               {expanded && (
                 <View style={styles.cardDetail}>
-                  {candidates.length === 0 ? (
-                    <Text style={styles.detailLine}>No approved tutors for {r.subject} yet.</Text>
+                  {requestCandidates.length === 0 ? (
+                    <Text style={styles.detailLine}>No approved tutors yet.</Text>
                   ) : (
                     <>
                       <Dropdown
                         label="Tutor"
-                        options={candidates.map((t) => ({
+                        options={requestCandidates.map((t) => ({
                           label: `${t.name} (${t.email}) — ${t.sessions_completed} completed`,
                           value: String(t.id),
                         }))}

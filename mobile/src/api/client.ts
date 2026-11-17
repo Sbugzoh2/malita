@@ -72,6 +72,12 @@ export type UserInfo = {
   higher_ed_qualification_custom_name?: string | null;
   higher_ed_year_of_study?: number | null;
   student_number?: string | null;
+  province: string | null;
+  city_town: string | null;
+  id_number: string | null;
+  // High-school only - null/absent for a higher_ed account.
+  school: string | null;
+  grade: number | null;
 };
 
 export const YEAR_LEVEL_LABELS: Record<number, string> = {
@@ -382,6 +388,15 @@ export function updateStudyDetails(
   }
 ) {
   return request<{ ok: boolean }>("/me/study-details", { method: "PATCH", body, token });
+}
+
+// school/grade are only used for a high_school account - see
+// backend/auth.py's update_personal_info.
+export function updatePersonalInfo(
+  token: string,
+  body: { province: string; city_town: string; school?: string; grade?: number | null }
+) {
+  return request<{ ok: boolean }>("/me/personal-info", { method: "PATCH", body, token });
 }
 
 // 1-on-1 tutoring, billed separately from the subscription - available

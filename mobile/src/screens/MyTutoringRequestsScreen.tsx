@@ -37,7 +37,8 @@ function closedAtFor(r: TutoringRequest): string | null {
 // already-closed cycle. Nothing is deleted: lifetimeStats above comes
 // from the backend's own unfiltered count, so it's unaffected.
 function isHiddenHistory(r: TutoringRequest): boolean {
-  if (groupForStatus(r.status) === "active") return false;
+  const group = groupForStatus(r.status);
+  if (group !== "completed" && group !== "cancelled" && group !== "lapsed") return false;
   return isBeforeCurrentCycle(closedAtFor(r));
 }
 
@@ -77,27 +78,34 @@ const STATUS_COLOR: Record<TutoringRequest["status"], string> = {
   lapsed: colors.error,
 };
 
-type SessionGroup = "active" | "completed" | "cancelled" | "lapsed";
+type SessionGroup = "active" | "upcoming" | "completed" | "cancelled" | "lapsed";
 
 // Keeps cancelled/lapsed sessions out of the same list as upcoming ones -
 // previously everything rendered in one flat list regardless of status,
-// which a tester flagged as confusing ("don't mix these two").
+// which a tester flagged as confusing ("don't mix these two"). Paid
+// sessions just waiting for their date ("confirmed") get their own
+// "upcoming" group instead of sitting in the same "active" bucket as a
+// request still awaiting payment or a tutor's acceptance - those two
+// situations need genuinely different attention from the learner.
 function groupForStatus(status: TutoringRequest["status"]): SessionGroup {
   if (status === "cancelled") return "cancelled";
   if (status === "lapsed") return "lapsed";
   if (status === "completed") return "completed";
-  return "active"; // requested, time_proposed, admin_proposed, awaiting_payment, confirmed
+  if (status === "confirmed") return "upcoming";
+  return "active"; // requested, time_proposed, admin_proposed, awaiting_payment, tutor_cancelled
 }
 
 const GROUP_TABS: { key: SessionGroup; label: string }[] = [
   { key: "active", label: "Active" },
+  { key: "upcoming", label: "Upcoming" },
   { key: "completed", label: "Completed" },
   { key: "cancelled", label: "Cancelled" },
   { key: "lapsed", label: "Lapsed" },
 ];
 
 const GROUP_EMPTY_LABEL: Record<SessionGroup, string> = {
-  active: "No active requests or upcoming sessions.",
+  active: "No requests awaiting payment or acceptance.",
+  upcoming: "No upcoming paid sessions.",
   completed: "No completed sessions yet.",
   cancelled: "No cancelled sessions.",
   lapsed: "No lapsed sessions.",
@@ -114,6 +122,14 @@ function GroupTabIcon({ name, size = 20, color }: { name: SessionGroup; size?: n
           <View style={{ width: size * 0.82, height: size * 0.82, borderRadius: 999, borderWidth: 1.6, borderColor: color }} />
           <View style={{ position: "absolute", width: 1.4, height: size * 0.26, backgroundColor: color, top: size * 0.16, borderRadius: 1 }} />
           <View style={{ position: "absolute", width: size * 0.2, height: 1.4, backgroundColor: color, borderRadius: 1 }} />
+        </View>
+      );
+    case "upcoming":
+      return (
+        <View style={box}>
+          <View style={{ width: size * 0.82, height: size * 0.7, borderWidth: 1.6, borderColor: color, borderRadius: 3 }}>
+            <View style={{ height: size * 0.2, borderBottomWidth: 1.6, borderBottomColor: color }} />
+          </View>
         </View>
       );
     case "completed":

@@ -25,6 +25,7 @@ import SessionDateTimePicker, {
   sessionDateTimeToIso,
 } from "../components/SessionDateTimePicker";
 import GradientBackground from "../components/GradientBackground";
+import Dropdown from "../components/Dropdown";
 
 type Section = "open" | "sessions" | "payouts";
 
@@ -154,15 +155,23 @@ const STATUS_COLOR: Record<string, string> = {
   suspended: colors.error,
 };
 
-type SessionGroup = "active" | "completed" | "cancelled" | "lapsed";
+type SessionGroup = "active" | "accepted" | "upcomingPaid" | "completed" | "cancelled" | "lapsed";
 
 // Keeps cancelled/lapsed sessions out of the same list as upcoming ones -
 // previously everything rendered in one flat list regardless of status.
+// Splits what used to be one catch-all "active" bucket into three, since
+// "matched but the tutor hasn't even confirmed it yet" (admin_proposed/
+// time_proposed), "accepted but the learner hasn't paid" (awaiting_
+// payment), and "paid, just waiting for its date" (confirmed) are
+// different enough situations to deserve their own counts/payout
+// estimates rather than one blended total.
 function groupForStatus(status: string): SessionGroup {
   if (status === "cancelled") return "cancelled";
   if (status === "lapsed") return "lapsed";
   if (status === "completed") return "completed";
-  return "active";
+  if (status === "awaiting_payment") return "accepted";
+  if (status === "confirmed") return "upcomingPaid";
+  return "active"; // admin_proposed, time_proposed - not yet locked in
 }
 
 // Whichever timestamp actually closed this session, by status - the one
@@ -185,7 +194,8 @@ function closedAtFor(s: {
 // state is needed, and get_tutor_profile for why lifetime stats (the
 // completed count/rating/badge a tutor's profile shows) are unaffected.
 function isHiddenHistory(s: Parameters<typeof closedAtFor>[0] & { status: string }): boolean {
-  if (groupForStatus(s.status) === "active") return false;
+  const group = groupForStatus(s.status);
+  if (group !== "completed" && group !== "cancelled" && group !== "lapsed") return false;
   return isBeforeCurrentCycle(closedAtFor(s));
 }
 
@@ -193,23 +203,26 @@ const BADGE_COLORS: Record<string, string> = { bronze: "#cd7f32", silver: "#9aa0
 
 const SESSION_GROUP_TABS: { key: SessionGroup; label: string }[] = [
   { key: "active", label: "Active" },
+  { key: "accepted", label: "Accepted" },
+  { key: "upcomingPaid", label: "Upcoming Paid" },
   { key: "completed", label: "Completed" },
   { key: "cancelled", label: "Cancelled" },
   { key: "lapsed", label: "Lapsed" },
 ];
 
 const SESSION_GROUP_EMPTY_LABEL: Record<SessionGroup, string> = {
-  active: "No active or upcoming sessions.",
+  active: "Nothing awaiting a decision right now.",
+  accepted: "No accepted sessions awaiting payment.",
+  upcomingPaid: "No upcoming paid sessions.",
   completed: "No completed sessions yet.",
   cancelled: "No cancelled sessions.",
   lapsed: "No lapsed sessions.",
 };
 
-// The stat card above the Active/Completed/Cancelled/Lapsed tabs shows
-// whichever tab is currently selected - "expected payout" for the still-
-// open Active group, "payout earned" for Completed, and "payout missed"
-// (in red) for Cancelled/Lapsed - rather than one fixed cancelled+lapsed
-// total regardless of which tab a tutor is actually looking at.
+// The stat card above the session-type dropdown shows whichever type is
+// currently selected - a different count/payout estimate (and wording)
+// for each of the six groups, rather than one fixed total regardless of
+// which one a tutor is actually looking at.
 const STAT_CARD_COPY: Record<SessionGroup, {
   countLabel: string;
   amountLabel: string;
@@ -219,10 +232,24 @@ const STAT_CARD_COPY: Record<SessionGroup, {
 }> = {
   active: {
     countLabel: "Active sessions",
+    amountLabel: "Potential payout",
+    isLoss: false,
+    emptyFooter: "Nothing awaiting a decision right now.",
+    nonEmptyFooterRight: "not locked in until accepted & paid",
+  },
+  accepted: {
+    countLabel: "Accepted sessions",
     amountLabel: "Expected payout",
     isLoss: false,
-    emptyFooter: "No active sessions right now.",
-    nonEmptyFooterRight: "once confirmed & paid",
+    emptyFooter: "Nothing accepted and awaiting payment.",
+    nonEmptyFooterRight: "once the learner pays",
+  },
+  upcomingPaid: {
+    countLabel: "Upcoming paid sessions",
+    amountLabel: "Confirmed payout",
+    isLoss: false,
+    emptyFooter: "No upcoming paid sessions this cycle yet.",
+    nonEmptyFooterRight: "after Malita's fee",
   },
   completed: {
     countLabel: "Completed sessions",
@@ -800,21 +827,16 @@ export default function TutorHomeScreen({ navigation }: any) {
                     )}
                   </View>
                 </View>
-                <View style={styles.sectionRow}>
-                  {SESSION_GROUP_TABS.map((tab) => {
-                    const count = visibleSessions.filter((s) => groupForStatus(s.status) === tab.key).length;
-                    return (
-                      <Pressable
-                        key={tab.key}
-                        style={[styles.sectionChip, sessionGroup === tab.key && styles.sectionChipActive]}
-                        onPress={() => setSessionGroup(tab.key)}
-                      >
-                        <Text style={[styles.sectionChipText, sessionGroup === tab.key && styles.sectionChipTextActive]}>
-                          {tab.label}{count ? ` (${count})` : ""}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                <View style={styles.sessionTypeWrap}>
+                  <Dropdown
+                    label="Session type"
+                    options={SESSION_GROUP_TABS.map((tab) => {
+                      const count = visibleSessions.filter((s) => groupForStatus(s.status) === tab.key).length;
+                      return { label: `${tab.label}${count ? ` (${count})` : ""}`, value: tab.key };
+                    })}
+                    value={sessionGroup}
+                    onChange={(v) => setSessionGroup(v as SessionGroup)}
+                  />
                 </View>
                 {visibleSessions.filter((s) => groupForStatus(s.status) === sessionGroup).length === 0 ? (
                   <Text style={styles.empty}>{SESSION_GROUP_EMPTY_LABEL[sessionGroup]}</Text>
@@ -1136,23 +1158,7 @@ const styles = StyleSheet.create({
   statusBadgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   error: { color: colors.error, marginBottom: 12 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 16 },
-  // flexWrap so a 4th+ chip (e.g. the inner Active/Completed/Cancelled/
-  // Lapsed tabs) wraps to a second line instead of being clipped off the
-  // right edge of the screen - this row is reused for both the outer
-  // Open Requests/My Sessions/My Payouts tabs (3 chips, never wraps) and
-  // the inner session-status tabs (4 chips, needs to wrap).
-  sectionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  sectionChip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: colors.surface,
-  },
-  sectionChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
-  sectionChipText: { color: colors.text, fontSize: 13, fontWeight: "600" },
-  sectionChipTextActive: { color: "#fff" },
+  sessionTypeWrap: { marginBottom: 16 },
   statCard: {
     backgroundColor: colors.primaryDark,
     borderRadius: 20,

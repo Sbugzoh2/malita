@@ -338,9 +338,14 @@ def is_user_admin(user_id: int) -> bool:
 
 def create_password_reset(email: str):
     """Generate a one-time reset token for this email, valid for one hour.
-    Returns the token, or None if no account matches — callers should show
-    the SAME message either way so this can't be used to enumerate which
-    emails are registered."""
+    Returns {"token": str, "account_type": str} or None if no account
+    matches — callers should show the SAME message either way so this
+    can't be used to enumerate which emails are registered.
+    account_type is handed back alongside the token so a caller building
+    a deep link back into the mobile app (see api_server.py's
+    /auth/forgot-password) knows which app build/scheme this learner
+    belongs to - same high_school/higher_ed split SCHEME_BY_ACCOUNT_TYPE
+    already uses for the Play Billing return flow."""
     email = (email or "").strip().lower()
     with get_session() as db:
         user = db.query(User).filter(User.email == email).first()
@@ -353,7 +358,7 @@ def create_password_reset(email: str):
             token=token,
             expires_at=dt.datetime.utcnow() + dt.timedelta(minutes=RESET_TOKEN_VALID_MINUTES),
         ))
-        return token
+        return {"token": token, "account_type": user.account_type}
 
 
 def cancel_subscription(user_id: int) -> dict:

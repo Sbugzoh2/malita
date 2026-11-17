@@ -20,6 +20,7 @@ RUN IT WITH:
 import datetime as dt
 import html
 import json
+import urllib.parse
 import logging
 import os
 import uuid
@@ -109,9 +110,8 @@ from backend.llm_tutor import solve_with_llm, solve_full_paper
 from backend.ai_teacher import generate_lesson
 from backend.llm_ocr import solve_photo_with_llm, transcribe_pdf_with_llm
 
-# Same env vars app.py reads - the mobile checkout link has to round-trip
+# Same env var app.py reads - the mobile checkout link has to round-trip
 # through the same webhook, so both apps' PayFast configuration must agree.
-APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501")
 APP_WEBHOOK_URL = os.environ.get("APP_WEBHOOK_URL", "http://localhost:8001/payfast/notify")
 # This service's own public URL - needed so PayFast's mobile checkout can
 # redirect back to a real https page (see /billing/return below).
@@ -525,13 +525,20 @@ def logout(authorization: str = Header(None)):
 
 @app.post("/auth/forgot-password")
 def forgot_password(body: ForgotPasswordRequest):
-    token = create_password_reset(body.email)
-    if not token:
+    reset_info = create_password_reset(body.email)
+    if not reset_info:
         # Never reveal whether an email is registered - same generic
         # message as the "sent" case below.
         return {"message": "If an account exists for that email, a reset link has been generated.", "reset_token": None}
 
-    reset_url = f"{APP_BASE_URL}/?reset_token={token}"
+    token = reset_info["token"]
+    # Routes straight back into the mobile app (via RootNavigator's
+    # "reset-password" deep link) instead of the Streamlit web app -
+    # the mobile app has no other connection to Streamlit, so landing
+    # there was confusing, and Streamlit sleeping/cold-starting made it
+    # worse. See /auth/reset-password-bridge's own docstring.
+    scheme = SCHEME_BY_ACCOUNT_TYPE.get(reset_info["account_type"], "malita")
+    reset_url = f"{API_BASE_URL}/auth/reset-password-bridge?token={urllib.parse.quote(token, safe='')}&scheme={scheme}"
     sent = send_email(
         body.email,
         "Reset your Malita password",
@@ -800,6 +807,15 @@ def billing_return(status: str = "upgraded", target: str = "billing", scheme: st
     if status not in ("upgraded", "cancelled"):
         status = "upgraded"
     app_url = f"{scheme}://{target}?{status}=1"
+    return _app_bridge_html(app_url)
+
+
+def _app_bridge_html(app_url: str) -> str:
+    """Shared by billing_return above and auth_reset_bridge below - both
+    need a real http(s) page that immediately forwards into the app via
+    a custom-scheme deep link, since a raw malita:// link is either
+    rejected outright (PayFast) or unreliable across mail clients (many
+    strip/refuse non-http(s) links in an email body) if used directly."""
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Returning to Malita…</title></head>
 <body onload='window.location.href = {json.dumps(app_url)};'>
@@ -807,6 +823,22 @@ def billing_return(status: str = "upgraded", target: str = "billing", scheme: st
 <p style="font-family: sans-serif; text-align: center;">
 <a href="{html.escape(app_url)}">Tap here if it doesn't open automatically</a></p>
 </body></html>"""
+
+
+@app.get("/auth/reset-password-bridge", response_class=HTMLResponse)
+def auth_reset_password_bridge(token: str, scheme: str = "malita"):
+    """Bridge page for the "Reset my password" link in the forgot-password
+    email (see /auth/forgot-password below) - same reasoning as
+    /billing/return above, so the learner lands back in the mobile app's
+    own reset-password screen instead of the Streamlit web app, which the
+    mobile app has no other connection to and is a confusing place to end
+    up (and is slated to be replaced by a real marketing site eventually,
+    so nothing mobile should depend on it). See RootNavigator's linking
+    config for the matching "reset-password" deep-link route, and
+    LoginScreen for how the token in the query string pre-fills the
+    reset form."""
+    app_url = f"{scheme}://reset-password?token={urllib.parse.quote(token, safe='')}"
+    return _app_bridge_html(app_url)
 
 
 @app.post("/billing/cancel")

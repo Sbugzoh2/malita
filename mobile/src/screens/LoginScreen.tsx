@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import { colors } from "../theme";
 import GradientBackground from "../components/GradientBackground";
 import { ApiError, forgotPassword, resetPassword } from "../api/client";
 
-export default function LoginScreen({ navigation }: any) {
+export default function LoginScreen({ navigation, route }: any) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,6 +30,20 @@ export default function LoginScreen({ navigation }: any) {
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [resetDone, setResetDone] = useState(false);
+
+  // Tapping "Reset my password" in the forgot-password email opens
+  // malita://reset-password?token=... (via api_server.py's
+  // /auth/reset-password-bridge) - RootNavigator's linking config routes
+  // that straight to this screen with the token as a route param, so the
+  // reset form below can open pre-filled instead of asking the learner
+  // to copy/paste a code out of the email.
+  useEffect(() => {
+    const incomingToken = route?.params?.token;
+    if (incomingToken) {
+      setResetToken(incomingToken);
+      setResetCode(incomingToken);
+    }
+  }, [route?.params?.token]);
 
   async function handleLogin() {
     setError(null);

@@ -256,7 +256,8 @@ if st.session_state.auth_user is None:
                 forgot_email = st.text_input("Email", key="forgot_email")
                 submitted_forgot = st.form_submit_button("Send reset link")
                 if submitted_forgot:
-                    token = create_password_reset(forgot_email)
+                    reset_info = create_password_reset(forgot_email)
+                    token = reset_info["token"] if reset_info else None
                     if token:
                         reset_url = f"{APP_BASE_URL}/?reset_token={token}"
                         sent = send_email(

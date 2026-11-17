@@ -233,6 +233,13 @@ export default function RootNavigator() {
           screens: {
             Subscription: "billing",
             MyTutoringRequests: "tutoring",
+            // The forgot-password email's link points at api_server.py's
+            // /auth/reset-password-bridge, which forwards here with the
+            // reset token as a query param - matches only while logged
+            // out (AuthNavigator), which is the normal case for "forgot
+            // password" anyway. See LoginScreen for how route.params.token
+            // pre-fills the reset form.
+            Login: "reset-password",
           },
         },
       }}

@@ -509,6 +509,14 @@ class TutorAccount(Base):
     wants_high_school = Column(Boolean, default=True, nullable=False)
     wants_higher_ed = Column(Boolean, default=False, nullable=False)
 
+    # Self-service pause: when False, this tutor is hidden from Browse
+    # Tutors, excluded as a match candidate (self-service AND admin
+    # override), and stops seeing new requests in their own queue -
+    # without touching anything already booked. Separate from
+    # account_status below, which is an admin-only suspend/block, not
+    # something the tutor can toggle themselves.
+    accepting_new_sessions = Column(Boolean, default=True, nullable=False)
+
     # ---- Higher-ed vetting track (independent of the fields above) ----
     # NULL higher_ed_status means "never applied for this track" (distinct
     # from "pending_review", which means they applied and are waiting).
@@ -1092,6 +1100,7 @@ def init_db():
     _ensure_column("users", "cross_segment_access", "BOOLEAN DEFAULT FALSE")
     _ensure_column("tutor_accounts", "wants_high_school", "BOOLEAN DEFAULT TRUE")
     _ensure_column("tutor_accounts", "wants_higher_ed", "BOOLEAN DEFAULT FALSE")
+    _ensure_column("tutor_accounts", "accepting_new_sessions", "BOOLEAN DEFAULT TRUE")
     _ensure_column("tutor_accounts", "higher_ed_status", "VARCHAR(20)")
     _ensure_column("tutor_accounts", "higher_ed_institution_id", "INTEGER")
     _ensure_column("tutor_accounts", "higher_ed_qualification_id", "INTEGER")

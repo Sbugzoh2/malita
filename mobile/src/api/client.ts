@@ -365,6 +365,10 @@ export function updateTutorProfile(
   return request<{ ok: boolean }>("/tutor/me/profile", { method: "PATCH", body, token });
 }
 
+export function updateTutorAcceptingSessions(token: string, accepting: boolean) {
+  return request<{ ok: boolean }>("/tutor/me/accepting-sessions", { method: "PATCH", body: { accepting }, token });
+}
+
 export function updateTutorStudyDetails(
   token: string,
   body: {
@@ -697,6 +701,10 @@ export type TutorMe = {
   account_status: "active" | "suspended" | "blocked";
   account_status_label: string;
   account_status_reason: string | null;
+  // Self-service pause - see backend/tutoring.py's
+  // set_tutor_accepting_new_sessions. When false, this tutor is hidden
+  // from Browse Tutors and stops being offered new requests.
+  accepting_new_sessions: boolean;
 };
 
 export function tutorLogin(email: string, password: string) {
@@ -1083,6 +1091,7 @@ export type TutorProfile = {
   account_status: "active" | "suspended" | "blocked";
   account_status_label: string;
   account_status_reason: string | null;
+  accepting_new_sessions: boolean;
   availability_note: string | null;
   wants_higher_ed: boolean;
   higher_ed_status: TutorApplication["status"] | null;

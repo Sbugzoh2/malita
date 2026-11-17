@@ -97,7 +97,7 @@ from backend.tutoring import (
     reallocate_after_tutor_cancellation, request_refund_for_cancelled_session,
     admin_suggest_refund, mark_refund_processed, list_requests_needing_attention,
     suspend_tutor, block_tutor, reinstate_tutor, list_tutors_for_admin,
-    update_tutor_profile, update_tutor_study_details,
+    update_tutor_profile, update_tutor_study_details, set_tutor_accepting_new_sessions,
 )
 from backend.google_calendar import (
     GoogleCalendarError, build_auth_url as build_google_calendar_auth_url,
@@ -325,6 +325,10 @@ class TutorStudyDetailsRequest(BaseModel):
     higher_ed_qualification_id: int | None = None
     higher_ed_qualification_custom_name: str = ""
     higher_ed_year_of_study: int | None = None
+
+
+class TutorAcceptingSessionsRequest(BaseModel):
+    accepting: bool
 
 
 class SupportTicketCreateRequest(BaseModel):
@@ -1485,6 +1489,18 @@ def update_my_tutor_profile(payload: TutorProfileUpdateRequest, authorization: s
     tutor = _auth_tutor(authorization)
     try:
         update_tutor_profile(tutor["id"], phone=payload.phone, bio=payload.bio, availability_note=payload.availability_note)
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.patch("/tutor/me/accepting-sessions")
+def update_my_tutor_accepting_sessions(payload: TutorAcceptingSessionsRequest, authorization: str = Header(None)):
+    """A tutor pausing/resuming their own bookability - see
+    backend/tutoring.py's set_tutor_accepting_new_sessions."""
+    tutor = _auth_tutor(authorization)
+    try:
+        set_tutor_accepting_new_sessions(tutor["id"], payload.accepting)
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}

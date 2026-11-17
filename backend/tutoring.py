@@ -296,6 +296,7 @@ def _serialize_tutor_self(tutor: TutorAccount) -> dict:
         "account_status": tutor.account_status,
         "account_status_label": ACCOUNT_STANDING_LABELS.get(tutor.account_status, tutor.account_status),
         "account_status_reason": tutor.account_status_reason,
+        "accepting_new_sessions": tutor.accepting_new_sessions,
     }
 
 
@@ -1662,7 +1663,12 @@ def list_approved_tutors(subject: str | None = None, module_id: int | None = Non
         # match candidates for exactly the higher-ed requests they can
         # actually tutor.
         q = db.query(TutorAccount).filter(
-            sa.or_(TutorAccount.status == "approved", TutorAccount.higher_ed_status == "approved")
+            sa.or_(TutorAccount.status == "approved", TutorAccount.higher_ed_status == "approved"),
+            # A tutor who's paused themselves (see
+            # set_tutor_accepting_new_sessions) is hidden from both the
+            # public Browse Tutors directory and admin's match
+            # candidates - they stay a real tutor, just not bookable.
+            TutorAccount.accepting_new_sessions.is_(True),
         )
         out = []
         for t in q.all():
@@ -1799,6 +1805,7 @@ def get_tutor_profile(tutor_id: int) -> dict:
             "account_status": tutor.account_status,
             "account_status_label": ACCOUNT_STANDING_LABELS.get(tutor.account_status, tutor.account_status),
             "account_status_reason": tutor.account_status_reason,
+            "accepting_new_sessions": tutor.accepting_new_sessions,
             "availability_note": tutor.availability_note,
             "wants_higher_ed": tutor.wants_higher_ed,
             "higher_ed_status": tutor.higher_ed_status,
@@ -1838,6 +1845,18 @@ def update_tutor_profile(tutor_id: int, *, phone: str = "", bio: str = "", avail
         tutor.phone = phone.strip() or None
         tutor.bio = bio.strip() or None
         tutor.availability_note = availability_note.strip() or None
+
+
+def set_tutor_accepting_new_sessions(tutor_id: int, accepting: bool) -> None:
+    """A tutor pausing/resuming their own bookability - see
+    TutorAccount.accepting_new_sessions's docstring for exactly what
+    this hides. Nothing already booked is touched; this only affects
+    whether they're offered NEW work going forward."""
+    with get_session() as db:
+        tutor = db.query(TutorAccount).get(tutor_id)
+        if not tutor:
+            raise TutoringError("Tutor account not found.")
+        tutor.accepting_new_sessions = accepting
 
 
 def update_tutor_study_details(
@@ -1985,6 +2004,8 @@ def _validate_request_fields(
         tutor = db.query(TutorAccount).get(preferred_tutor_id)
         if not tutor:
             raise TutoringError("That tutor no longer exists.")
+        if not tutor.accepting_new_sessions:
+            raise TutoringError("That tutor isn't accepting new session requests right now.")
         subjects, module_ids = _tutor_eligible_subjects_and_modules(db, tutor)
         eligible = (module_id in module_ids) if module_id is not None else (subject in subjects)
         if not eligible:
@@ -2704,6 +2725,8 @@ def list_open_requests_for_tutor(tutor_id: int) -> list[dict]:
             raise TutoringError("Tutor account not found.")
         if tutor.status != "approved" and tutor.higher_ed_status != "approved":
             return []
+        if not tutor.accepting_new_sessions:
+            return []
         reqs = (
             db.query(TutoringSessionRequest)
             .filter(
@@ -2826,6 +2849,8 @@ def _check_tutor_eligible_for_request(db, tutor: TutorAccount, req: TutoringSess
     higher_ed_status), a custom ("Other") higher-ed request (year-level
     only - see _tutor_eligible_for_custom_module), or a high-school one
     (matched against TutorSubject + status, as before)."""
+    if not tutor.accepting_new_sessions:
+        raise TutoringError("You've paused new session requests - turn that back on in your profile to accept this.")
     if req.module_id is not None:
         if tutor.higher_ed_status != "approved":
             raise TutoringError("Your higher-ed tutor application isn't approved.")

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, TextInput, StyleSheet, ScrollView, ActivityIndicator, Pressable, Alert } from "react-native";
+import { View, Text, TextInput, StyleSheet, ScrollView, ActivityIndicator, Pressable, Alert, Switch } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTutorAuth } from "../context/TutorAuthContext";
 import { colors } from "../theme";
@@ -12,6 +12,7 @@ import {
   fetchTutorMyProfile,
   fetchTutorMyPayouts,
   updateTutorProfile,
+  updateTutorAcceptingSessions,
   updateTutorStudyDetails,
   deleteTutorAccount,
   fetchInstitutions,
@@ -62,6 +63,11 @@ export default function TutorProfileScreen({ navigation }: any) {
   const [studyDetailsError, setStudyDetailsError] = useState<string | null>(null);
 
   const [deletingAccount, setDeletingAccount] = useState(false);
+
+  // Pausing/resuming new bookings - see client.ts's
+  // updateTutorAcceptingSessions. togglingAccepting guards against a
+  // double-tap firing two overlapping requests.
+  const [togglingAccepting, setTogglingAccepting] = useState(false);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -154,6 +160,20 @@ export default function TutorProfileScreen({ navigation }: any) {
     }
   }
 
+  async function handleToggleAccepting(next: boolean) {
+    if (!token || togglingAccepting) return;
+    setTogglingAccepting(true);
+    setError(null);
+    try {
+      await updateTutorAcceptingSessions(token, next);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not update this setting.");
+    } finally {
+      setTogglingAccepting(false);
+    }
+  }
+
   async function runDeleteAccount() {
     if (!token) return;
     setDeletingAccount(true);
@@ -215,6 +235,28 @@ export default function TutorProfileScreen({ navigation }: any) {
             <Text style={styles.pillTextLight}>{profile.badge.toUpperCase()}</Text>
           </View>
         ) : null}
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.acceptingRow}>
+          <View style={styles.acceptingTextCol}>
+            <Text style={styles.sectionLabel}>Accepting new sessions</Text>
+            <Text style={styles.acceptingHint}>
+              {profile.accepting_new_sessions
+                ? "Learners can find and book you for new sessions."
+                : "You're hidden from Browse Tutors and won't be offered new requests. Sessions already booked are unaffected."}
+            </Text>
+          </View>
+          {togglingAccepting ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : (
+            <Switch
+              value={profile.accepting_new_sessions}
+              onValueChange={handleToggleAccepting}
+              trackColor={{ true: colors.primary }}
+            />
+          )}
+        </View>
       </View>
 
       <View style={styles.card}>
@@ -441,6 +483,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: { fontSize: 12, fontWeight: "700", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 10 },
   sectionLabelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  acceptingRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  acceptingTextCol: { flex: 1 },
+  acceptingHint: { fontSize: 12, color: colors.textSecondary, marginTop: 2, lineHeight: 17 },
   editLinkText: { fontSize: 12, fontWeight: "700", color: colors.primary, marginBottom: 10 },
   bioText: { fontSize: 14, color: colors.text, lineHeight: 20 },
   detailRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 7 },

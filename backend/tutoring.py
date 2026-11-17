@@ -503,7 +503,10 @@ def delete_tutor_account(tutor_id: int) -> dict:
 def list_tutor_own_payouts(tutor_id: int) -> list[dict]:
     """A tutor's own payout history (pending + paid), for their own
     "My Payouts" view - distinct from list_pending_payouts(), which is
-    the admin's global pending-only queue across every tutor."""
+    the admin's global pending-only queue across every tutor. Includes
+    each payout's own session details (subject, learner, when it was
+    scheduled) so a tutor isn't left reading a bare "Session #N" with
+    nothing to place it by."""
     with get_session() as db:
         payouts = (
             db.query(TutoringPayout)
@@ -511,15 +514,22 @@ def list_tutor_own_payouts(tutor_id: int) -> list[dict]:
             .order_by(TutoringPayout.created_at.desc())
             .all()
         )
-        return [
-            {
+        out = []
+        for p in payouts:
+            req = db.query(TutoringSessionRequest).get(p.session_id)
+            learner = db.query(User).get(req.learner_user_id) if req else None
+            out.append({
                 "id": p.id, "session_id": p.session_id,
                 "amount_zar": p.amount_zar, "status": p.status,
                 "payment_reference": p.payment_reference,
                 "created_at": _iso_utc(p.created_at), "paid_at": _iso_utc(p.paid_at),
-            }
-            for p in payouts
-        ]
+                "subject": req.subject if req else None,
+                "topic": req.topic if req else None,
+                "scheduled_at": _iso_utc(req.scheduled_at) if req else None,
+                "price_zar": req.price_zar if req else None,
+                "learner_name": learner.name if learner else None,
+            })
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -2824,6 +2834,12 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "no_show_reason": r.no_show_reason,
         "no_show_resolved_at": _iso_utc(r.no_show_resolved_at),
         "no_show_resolution": r.no_show_resolution,
+        "refund_bank_name": r.refund_bank_name,
+        "refund_branch_code": r.refund_branch_code,
+        "refund_account_number": r.refund_account_number,
+        "refund_account_type": r.refund_account_type,
+        "refund_account_holder": r.refund_account_holder,
+        "refund_bank_details_submitted_at": _iso_utc(r.refund_bank_details_submitted_at),
     }
 
 
@@ -4545,6 +4561,43 @@ def _notify_admins_of_refund_request(
             )
     except Exception:
         logger.exception("Failed to notify admins of request %s's refund request", request_id)
+
+
+def submit_refund_bank_details(
+    request_id: int, learner_user_id: int, *,
+    bank_name: str, branch_code: str, account_number: str, account_type: str, account_holder: str,
+) -> dict:
+    """The learner providing where to actually send their refund - v1
+    refunds are a manual EFT (see request_refund_for_cancelled_session's
+    docstring), so admin needs real banking details before they can act
+    on refund_requested_at, the same way a tutor's own bank details are
+    needed before a payout can be arranged. Callable for a refund
+    requested through ANY path (an explicit refund request, the
+    learner's own paid-session cancellation, or an auto-resolved tutor
+    no-show) - all three just set refund_requested_at and leave this as
+    a separate step, so one function covers every case instead of
+    duplicating bank-detail handling in each of them. Re-submittable
+    until the refund is actually processed, in case the learner made a
+    mistake."""
+    bank_name, branch_code = bank_name.strip(), branch_code.strip()
+    account_number, account_type, account_holder = account_number.strip(), account_type.strip(), account_holder.strip()
+    if not all([bank_name, branch_code, account_number, account_type, account_holder]):
+        raise TutoringError("Please fill in every banking detail field.")
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req or req.learner_user_id != learner_user_id:
+            raise TutoringError("Request not found.")
+        if req.refund_requested_at is None:
+            raise TutoringError("There's no refund pending on this request.")
+        if req.refund_processed_at is not None:
+            raise TutoringError("This refund has already been processed.")
+        req.refund_bank_name = bank_name
+        req.refund_branch_code = branch_code
+        req.refund_account_number = account_number
+        req.refund_account_type = account_type
+        req.refund_account_holder = account_holder
+        req.refund_bank_details_submitted_at = dt.datetime.utcnow()
+        return {"id": req.id, "refund_bank_details_submitted_at": _iso_utc(req.refund_bank_details_submitted_at)}
 
 
 def admin_suggest_refund(request_id: int) -> dict:

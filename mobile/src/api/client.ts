@@ -512,6 +512,15 @@ export type TutoringRequest = {
   no_show_reason: string | null;
   no_show_resolved_at: string | null;
   no_show_resolution: "tutor_no_show" | "learner_no_show" | "dismissed" | null;
+  // Where a pending refund gets sent (see backend/tutoring.py's
+  // submit_refund_bank_details) - null until the learner fills in the
+  // bank-details form that appears once refund_requested_at is set.
+  refund_bank_name: string | null;
+  refund_branch_code: string | null;
+  refund_account_number: string | null;
+  refund_account_type: string | null;
+  refund_account_holder: string | null;
+  refund_bank_details_submitted_at: string | null;
 };
 
 export type TutoringRequestParams = {
@@ -630,6 +639,25 @@ export function requestRefundForCancelledSession(token: string, requestId: numbe
     method: "POST",
     token,
   });
+}
+
+export type RefundBankDetails = {
+  bank_name: string;
+  branch_code: string;
+  account_number: string;
+  account_type: string;
+  account_holder: string;
+};
+
+// Where to actually send a pending refund - works no matter which path
+// set refund_requested_at (an explicit refund request, the learner's
+// own cancellation, or an auto-resolved tutor no-show). Re-submittable
+// until the refund is processed, in case of a mistake.
+export function submitRefundBankDetails(token: string, requestId: number, details: RefundBankDetails) {
+  return request<{ id: number; refund_bank_details_submitted_at: string }>(
+    `/tutoring/requests/${requestId}/refund-bank-details`,
+    { method: "POST", body: details, token }
+  );
 }
 
 // There's no API that can force a recording on a non-Google-Workspace
@@ -964,6 +992,13 @@ export type TutorPayout = {
   payment_reference: string | null;
   created_at: string | null;
   paid_at: string | null;
+  // The session this payout is for - so a tutor can place it by what it
+  // was actually for, not just a bare session id.
+  subject: string | null;
+  topic: string | null;
+  scheduled_at: string | null;
+  price_zar: number | null;
+  learner_name: string | null;
 };
 
 export function fetchTutorMyPayouts(token: string) {

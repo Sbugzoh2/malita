@@ -1231,6 +1231,16 @@ function RefundsSection({ token }: { token: string }) {
               </>
             ) : (
               <>
+                {r.refund_bank_details_submitted_at ? (
+                  <Text style={styles.detailLine}>
+                    Send to: {r.refund_account_holder} — {r.refund_bank_name}, branch {r.refund_branch_code}, acc.{" "}
+                    {r.refund_account_number} ({r.refund_account_type})
+                  </Text>
+                ) : (
+                  <Text style={[styles.detailLine, { color: colors.error }]}>
+                    Bank details not yet provided by the learner - wait before arranging this refund.
+                  </Text>
+                )}
                 <Text style={styles.detailLine}>
                   {r.refund_processing_at
                     ? "Processing - the learner has been told to expect it within 5-7 working days."

@@ -2486,6 +2486,14 @@ elif mode == "🛠️ Tutoring Admin":
                             except TutoringError as e:
                                 st.error(str(e))
                     elif r.get("refund_requested_at") and not r.get("refund_processed_at"):
+                        if r.get("refund_bank_details_submitted_at"):
+                            st.write(
+                                f"**Send to:** {r['refund_account_holder']} — {r['refund_bank_name']}, "
+                                f"branch {r['refund_branch_code']}, acc. {r['refund_account_number']} "
+                                f"({r['refund_account_type']})"
+                            )
+                        else:
+                            st.warning("Bank details not yet provided by the learner - wait before arranging this refund.")
                         if not r.get("refund_processing_at"):
                             st.write("The learner chose a refund - mark it processing once you've started arranging it.")
                             if st.button("Mark as processing", key=f"mark_processing_{r['id']}"):

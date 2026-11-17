@@ -96,6 +96,7 @@ from backend.tutoring import (
     send_due_reminders, submit_session_recording,
     list_notifications, count_unread_notifications, mark_notification_read, mark_all_notifications_read,
     reallocate_after_tutor_cancellation, request_refund_for_cancelled_session,
+    submit_refund_bank_details,
     admin_suggest_refund, admin_mark_refund_processing, mark_refund_processed, list_requests_needing_attention,
     suspend_tutor, block_tutor, reinstate_tutor, list_tutors_for_admin,
     update_tutor_profile, update_tutor_study_details, set_tutor_accepting_new_sessions,
@@ -427,6 +428,14 @@ class SessionRecordingRequest(BaseModel):
 
 class ReportNoShowRequest(BaseModel):
     reason: str = ""
+
+
+class RefundBankDetailsRequest(BaseModel):
+    bank_name: str
+    branch_code: str
+    account_number: str
+    account_type: str
+    account_holder: str
 
 
 class PayoutMarkPaidRequest(BaseModel):
@@ -2032,6 +2041,26 @@ def tutoring_request_refund(request_id: int, authorization: str = Header(None)):
     user = _auth_user(authorization)
     try:
         return request_refund_for_cancelled_session(request_id, user["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/refund-bank-details")
+def tutoring_submit_refund_bank_details(
+    request_id: int, payload: RefundBankDetailsRequest, authorization: str = Header(None)
+):
+    """The learner providing where to actually send a pending refund -
+    see submit_refund_bank_details. Works no matter which path set
+    refund_requested_at (an explicit refund request, the learner's own
+    cancellation, or an auto-resolved tutor no-show)."""
+    user = _auth_user(authorization)
+    try:
+        return submit_refund_bank_details(
+            request_id, user["id"],
+            bank_name=payload.bank_name, branch_code=payload.branch_code,
+            account_number=payload.account_number, account_type=payload.account_type,
+            account_holder=payload.account_holder,
+        )
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

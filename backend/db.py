@@ -859,6 +859,25 @@ class TutoringSessionRequest(Base):
     no_show_resolved_at = Column(DateTime, nullable=True)
     no_show_resolution = Column(String(20), nullable=True)  # tutor_no_show | learner_no_show | dismissed
 
+    # Where to actually send a refund - v1 refunds are a manual EFT (same
+    # "no automated money movement" approach as tutor payouts), so admin
+    # needs real banking details, not just "a refund is owed". Collected
+    # from the learner once refund_requested_at is set, via whichever
+    # path set it (an explicit refund request, the learner's own paid-
+    # session cancellation, or an auto-resolved tutor no-show) - the
+    # account holder isn't assumed to be the learner themselves (often a
+    # parent/guardian's account), so it's its own free-text field rather
+    # than reusing the learner's name. Submitted once per refund, not
+    # stored on the User - unlike a tutor's bank details (reused across
+    # every payout), a learner's refund destination can reasonably change
+    # session to session.
+    refund_bank_name = Column(String, nullable=True)
+    refund_branch_code = Column(String(20), nullable=True)
+    refund_account_number = Column(String(50), nullable=True)
+    refund_account_type = Column(String(50), nullable=True)
+    refund_account_holder = Column(String, nullable=True)
+    refund_bank_details_submitted_at = Column(DateTime, nullable=True)
+
     learner = relationship("User")
     tutor = relationship("TutorAccount", back_populates="sessions", foreign_keys=[tutor_id])
     preferred_tutor = relationship("TutorAccount", foreign_keys=[preferred_tutor_id])
@@ -1126,6 +1145,12 @@ def init_db():
     _ensure_column("tutoring_session_requests", "no_show_reason", "VARCHAR")
     _ensure_column("tutoring_session_requests", "no_show_resolved_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "no_show_resolution", "VARCHAR(20)")
+    _ensure_column("tutoring_session_requests", "refund_bank_name", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "refund_branch_code", "VARCHAR(20)")
+    _ensure_column("tutoring_session_requests", "refund_account_number", "VARCHAR(50)")
+    _ensure_column("tutoring_session_requests", "refund_account_type", "VARCHAR(50)")
+    _ensure_column("tutoring_session_requests", "refund_account_holder", "VARCHAR")
+    _ensure_column("tutoring_session_requests", "refund_bank_details_submitted_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "proposed_scheduled_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "admin_proposed_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "admin_match_note", "VARCHAR")

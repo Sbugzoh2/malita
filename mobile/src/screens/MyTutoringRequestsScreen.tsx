@@ -3,9 +3,10 @@ import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linki
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
-import { colors, isBeforeCurrentCycle } from "../theme";
+import { colors, isBeforeCurrentCycle, SA_BANKS, BANK_ACCOUNT_TYPES } from "../theme";
 import NotificationBell from "../components/NotificationBell";
 import GradientBackground from "../components/GradientBackground";
+import Dropdown from "../components/Dropdown";
 import {
   ApiError,
   fetchMyTutoringRequests,
@@ -17,6 +18,7 @@ import {
   cancelTutoringSessionAsLearner,
   reallocateAfterTutorCancellation,
   requestRefundForCancelledSession,
+  submitRefundBankDetails,
   checkInToSessionAsLearner,
   reportNoShowAsLearner,
   TutoringRequest,
@@ -241,6 +243,27 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
   const [refundingId, setRefundingId] = useState<number | null>(null);
   const [checkingInId, setCheckingInId] = useState<number | null>(null);
   const [reportingNoShowId, setReportingNoShowId] = useState<number | null>(null);
+  // Draft state for the "where should we send your refund" form that
+  // appears once refund_requested_at is set but refund_bank_details_
+  // submitted_at isn't yet - keyed per request id the same way
+  // ratingDraft/commentDraft are, since a learner could in principle
+  // have more than one pending refund at once.
+  const [bankDraft, setBankDraft] = useState<Record<number, {
+    bankName: string; bankNameOther: string; branchCode: string; accountNumber: string;
+    accountType: string; accountTypeOther: string; accountHolder: string; confirmed: boolean;
+  }>>({});
+  function setBankDraftField(requestId: number, field: string, value: string | boolean) {
+    setBankDraft((prev) => ({
+      ...prev,
+      [requestId]: {
+        bankName: "", bankNameOther: "", branchCode: "", accountNumber: "",
+        accountType: "", accountTypeOther: "", accountHolder: "", confirmed: false,
+        ...prev[requestId],
+        [field]: value,
+      },
+    }));
+  }
+  const [submittingBankDetailsId, setSubmittingBankDetailsId] = useState<number | null>(null);
   const [group, setGroup] = useState<SessionGroup>("active");
   // Set when PayFast's checkout redirects back via the malita://tutoring
   // deep link (see api_server.py's /billing/return?target=tutoring) -
@@ -512,6 +535,37 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
       setActionError(requestId, e instanceof ApiError ? e.message : "Could not report this.");
     } finally {
       setReportingNoShowId(null);
+    }
+  }
+
+  async function handleSubmitBankDetails(requestId: number) {
+    if (!token) return;
+    const d = bankDraft[requestId];
+    if (!d || !d.confirmed) {
+      setActionError(requestId, "Please confirm the bank details are correct before submitting.");
+      return;
+    }
+    const bankName = d.bankName === "Other" ? d.bankNameOther.trim() : d.bankName;
+    const accountType = d.accountType === "Other" ? d.accountTypeOther.trim() : d.accountType;
+    if (!bankName || !d.branchCode.trim() || !d.accountNumber.trim() || !accountType || !d.accountHolder.trim()) {
+      setActionError(requestId, "Please fill in every banking detail field.");
+      return;
+    }
+    setSubmittingBankDetailsId(requestId);
+    setActionError(requestId, null);
+    try {
+      await submitRefundBankDetails(token, requestId, {
+        bank_name: bankName,
+        branch_code: d.branchCode.trim(),
+        account_number: d.accountNumber.trim(),
+        account_type: accountType,
+        account_holder: d.accountHolder.trim(),
+      });
+      load();
+    } catch (e) {
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not submit your bank details.");
+    } finally {
+      setSubmittingBankDetailsId(null);
     }
   }
 
@@ -789,9 +843,97 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
                   if (r.refund_processing_at) {
                     return `Your refund (${amountStr}${feeNote}) is being processed - expect it in your bank account within 5-7 working days.`;
                   }
+                  if (!r.refund_bank_details_submitted_at) {
+                    return `Refund requested (${amountStr}${feeNote}) - please provide your banking details below so Malita can send it.`;
+                  }
                   return `Refund requested (${amountStr}${feeNote}) - Malita is arranging it.`;
                 })()}
               </Text>
+            )}
+
+            {r.status === "cancelled" && r.refund_requested_at && !r.refund_processed_at && (
+              r.refund_bank_details_submitted_at ? (
+                <Text style={styles.cardMeta}>
+                  Refund will be sent to {r.refund_account_holder}'s {r.refund_bank_name} account ending{" "}
+                  {r.refund_account_number?.slice(-4)}.
+                </Text>
+              ) : (
+                <View style={styles.cancelBox}>
+                  <Text style={styles.confirmLabel}>Where should we send your refund?</Text>
+                  <Text style={styles.label}>Account holder name</Text>
+                  <TextInput
+                    style={styles.commentInput}
+                    placeholder="As it appears on the bank statement"
+                    placeholderTextColor={colors.inputPlaceholder}
+                    value={bankDraft[r.id]?.accountHolder ?? ""}
+                    onChangeText={(v) => setBankDraftField(r.id, "accountHolder", v)}
+                  />
+                  <Dropdown
+                    label="Bank"
+                    options={SA_BANKS.map((b) => ({ label: b, value: b }))}
+                    value={bankDraft[r.id]?.bankName ?? null}
+                    onChange={(v) => setBankDraftField(r.id, "bankName", v)}
+                  />
+                  {bankDraft[r.id]?.bankName === "Other" && (
+                    <TextInput
+                      style={styles.commentInput}
+                      placeholder="Bank name"
+                      placeholderTextColor={colors.inputPlaceholder}
+                      value={bankDraft[r.id]?.bankNameOther ?? ""}
+                      onChangeText={(v) => setBankDraftField(r.id, "bankNameOther", v)}
+                    />
+                  )}
+                  <Text style={styles.label}>Branch code</Text>
+                  <TextInput
+                    style={styles.commentInput}
+                    keyboardType="number-pad"
+                    value={bankDraft[r.id]?.branchCode ?? ""}
+                    onChangeText={(v) => setBankDraftField(r.id, "branchCode", v)}
+                  />
+                  <Text style={styles.label}>Account number</Text>
+                  <TextInput
+                    style={styles.commentInput}
+                    keyboardType="number-pad"
+                    value={bankDraft[r.id]?.accountNumber ?? ""}
+                    onChangeText={(v) => setBankDraftField(r.id, "accountNumber", v)}
+                  />
+                  <Dropdown
+                    label="Account type"
+                    options={BANK_ACCOUNT_TYPES.map((t) => ({ label: t, value: t }))}
+                    value={bankDraft[r.id]?.accountType ?? null}
+                    onChange={(v) => setBankDraftField(r.id, "accountType", v)}
+                  />
+                  {bankDraft[r.id]?.accountType === "Other" && (
+                    <TextInput
+                      style={styles.commentInput}
+                      placeholder="Account type"
+                      placeholderTextColor={colors.inputPlaceholder}
+                      value={bankDraft[r.id]?.accountTypeOther ?? ""}
+                      onChangeText={(v) => setBankDraftField(r.id, "accountTypeOther", v)}
+                    />
+                  )}
+                  <Pressable
+                    style={styles.checkboxRow}
+                    onPress={() => setBankDraftField(r.id, "confirmed", !(bankDraft[r.id]?.confirmed ?? false))}
+                  >
+                    <View style={[styles.checkbox, bankDraft[r.id]?.confirmed && styles.checkboxChecked]}>
+                      {bankDraft[r.id]?.confirmed ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                    </View>
+                    <Text style={styles.checkboxLabel}>I confirm the above bank details are correct.</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.confirmButton}
+                    onPress={() => handleSubmitBankDetails(r.id)}
+                    disabled={submittingBankDetailsId === r.id}
+                  >
+                    {submittingBankDetailsId === r.id ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.confirmButtonText}>Submit Bank Details</Text>
+                    )}
+                  </Pressable>
+                </View>
+              )
             )}
             {r.status === "lapsed" && (
               <Text style={styles.cardMeta}>
@@ -922,7 +1064,7 @@ const styles = StyleSheet.create({
   badgePillText: { fontSize: 11, fontWeight: "800", color: "#fff", letterSpacing: 0.4 },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   statLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
-  statValue: { fontSize: 26, color: "#fff", fontWeight: "800", marginTop: 4 },
+  statValue: { fontSize: 26, color: colors.success, fontWeight: "800", marginTop: 4 },
   paymentDuePill: {
     flexDirection: "row",
     alignItems: "center",
@@ -1011,6 +1153,21 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   confirmButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  label: { fontSize: 13, color: colors.textSecondary, marginBottom: 4, marginTop: 12 },
+  checkboxRow: { flexDirection: "row", alignItems: "center", marginTop: 12 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
+  checkboxMark: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  checkboxLabel: { fontSize: 14, color: colors.text, flexShrink: 1 },
   proposalBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   proposalButtonRow: { flexDirection: "row", gap: 10 },
   proposalApproveButton: { flex: 1, marginTop: 0 },

@@ -54,6 +54,18 @@ function levelLabelFor(r: { grade: number | null; module_year_level: number | nu
   return yearLevel != null ? YEAR_LEVEL_LABELS[yearLevel] ?? null : null;
 }
 
+// The learner's name plus whatever else is useful for a tutor to know
+// ahead of the session (grade/year level, school) - shared by the Jobs
+// tab's open-request cards and the Sessions tab's already-matched ones,
+// which otherwise showed this on acceptance and then never again.
+function learnerLineFor(r: {
+  learner_name: string | null; learner_school: string | null;
+  grade: number | null; module_year_level: number | null; custom_module_year_level: number | null;
+}): string | null {
+  const parts = [r.learner_name, levelLabelFor(r), r.learner_school].filter((p): p is string => !!p);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 // A custom higher-ed request (module not in the catalog) always lands in
 // the Jobs tab's catch-all "Other" bucket regardless of its real subject
 // (see groupKeyFor), so unlike a catalog module - whose subject is right
@@ -682,14 +694,8 @@ export default function TutorHomeScreen({ navigation }: any) {
                             <View style={styles.jobCardInfo}>
                               <Text style={styles.jobTitle}>{jobTitleFor(r)}</Text>
                               {(() => {
-                                const levelLabel = levelLabelFor(r);
-                                return r.learner_name || levelLabel ? (
-                                  <Text style={styles.jobMetaText}>
-                                    {r.learner_name ?? ""}
-                                    {r.learner_name && levelLabel ? " · " : ""}
-                                    {levelLabel ?? ""}
-                                  </Text>
-                                ) : null;
+                                const line = learnerLineFor(r);
+                                return line ? <Text style={styles.jobMetaText}>{line}</Text> : null;
                               })()}
                               {(r.duration_minutes || r.scheduled_at) ? (
                                 <Text style={styles.jobMetaText}>
@@ -867,6 +873,10 @@ export default function TutorHomeScreen({ navigation }: any) {
                     {sess.topic ? ` · ${sess.topic}` : ""}
                   </Text>
                   <Text style={styles.cardStatus}>{sess.status_label}</Text>
+                  {(() => {
+                    const line = learnerLineFor(sess);
+                    return line ? <Text style={styles.cardMeta}>{line}</Text> : null;
+                  })()}
                   {sess.price_zar != null ? (
                     <>
                       <Text style={styles.cardMeta}>

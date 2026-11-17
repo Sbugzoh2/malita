@@ -423,6 +423,9 @@ export type TutoringRequest = {
   // The learner's name - shown to a tutor deciding whether to accept an
   // open request, same as tutor_name/preferred_tutor_name already are.
   learner_name: string | null;
+  // The learner's own school (high-school requests only, null otherwise) -
+  // extra context for a tutor preparing for the session.
+  learner_school: string | null;
   // Set when the learner picked "Other" for their qualification/module -
   // module_id is null in that case (no catalog Module row exists), so this
   // holds the free-text name instead and is_custom_higher_ed flags it as

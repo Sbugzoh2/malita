@@ -71,6 +71,7 @@ from .db import (
 from . import storage as _storage
 from . import google_calendar as _google_calendar
 from .email_util import send_email
+from .auth import INACTIVE_TOKEN_LOGOUT_DAYS
 
 logger = logging.getLogger("malita.tutoring")
 
@@ -371,6 +372,10 @@ def get_tutor_by_token(token: str) -> dict | None:
     with get_session() as db:
         api_token = db.query(TutorApiToken).filter(TutorApiToken.token == token).first()
         if not api_token:
+            return None
+        last_activity = api_token.last_used_at or api_token.created_at
+        if last_activity and dt.datetime.utcnow() - last_activity > dt.timedelta(days=INACTIVE_TOKEN_LOGOUT_DAYS):
+            db.delete(api_token)
             return None
         api_token.last_used_at = dt.datetime.utcnow()
         tutor = db.query(TutorAccount).get(api_token.tutor_id)

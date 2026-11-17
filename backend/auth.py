@@ -22,6 +22,16 @@ from .tiers import TIER_ORDER
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_TOKEN_VALID_MINUTES = 60
+# A bearer token (ApiToken/TutorApiToken) is otherwise permanent - this is
+# the one thing that eventually logs someone out: 30 days with the app
+# never opened (last_used_at only moves on an actual authenticated
+# request, not a background timer - see get_user_by_token/
+# get_tutor_by_token below and in tutoring.py). 30 days rather than a
+# short idle timer since this isn't a banking app and most of what it
+# guards (study tools, tutoring bookings) doesn't need session hygiene
+# tighter than "a genuinely abandoned/lost device eventually stops
+# working".
+INACTIVE_TOKEN_LOGOUT_DAYS = 30
 
 
 class AuthError(Exception):
@@ -474,6 +484,10 @@ def get_user_by_token(token: str):
     with get_session() as db:
         api_token = db.query(ApiToken).filter(ApiToken.token == token).first()
         if not api_token:
+            return None
+        last_activity = api_token.last_used_at or api_token.created_at
+        if last_activity and dt.datetime.utcnow() - last_activity > dt.timedelta(days=INACTIVE_TOKEN_LOGOUT_DAYS):
+            db.delete(api_token)
             return None
         api_token.last_used_at = dt.datetime.utcnow()
 

@@ -119,6 +119,12 @@
   .tutor-cta .section-sub { color: #dbe8fb; margin-left: auto; margin-right: auto; }
   .tutor-cta .btn-primary { background: #fff; color: var(--brand-dark); }
 
+  /* Used on a light (.alt) section background, unlike the hero/tutor-cta's
+     white-on-dark button - needs its own solid fill to still read as the
+     primary action. */
+  .section-cta { text-align: center; margin: 32px 0 0; }
+  .section-cta .btn-primary { background: var(--brand); color: #fff; }
+
   .founder-wrap {
     display: flex;
     align-items: center;
@@ -183,7 +189,7 @@
     </p>
     <div class="cta-row">
       <a class="btn btn-primary" href="https://malita-maths.streamlit.app">Try it on the web →</a>
-      <a class="btn btn-ghost" href="#tutoring">Find a tutor</a>
+      <a class="btn btn-ghost" href="find-a-tutor.html">Find a tutor</a>
     </div>
     <div class="badge-soon">📱 Mobile apps — Malita (school) &amp; Malita Campus (university) — launching soon</div>
   </div>
@@ -268,6 +274,7 @@
         <p>Plans change — cancel ahead of time at no cost, with a clear, fair policy if something falls through close to the session.</p>
       </div>
     </div>
+    <p class="section-cta"><a class="btn btn-primary" href="find-a-tutor.html">Find a Tutor →</a></p>
   </div>
 </section>
 
@@ -326,6 +333,7 @@
     <div>
       <a href="privacy-policy.html">Privacy Policy</a>
       <a href="delete-account.html">Delete My Account</a>
+      <a href="find-a-tutor.html">Find a Tutor</a>
       <a href="apply-to-tutor.html">Apply to Tutor</a>
       <a href="mailto:sbugzoh2@gmail.com">Contact</a>
     </div>

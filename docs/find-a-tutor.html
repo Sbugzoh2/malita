@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" type="image/png" href="favicon.png" />
+<title>Find a Tutor — Malita</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #f9f9f7;
+  }
+  h1 { font-size: 1.8em; margin-bottom: 4px; }
+  .intro { color: #475569; margin-bottom: 28px; }
+  h2 { font-size: 1.1em; margin-top: 2em; border-bottom: 1px solid #e4e7eb; padding-bottom: 6px; }
+  label { display: block; font-size: 0.88em; font-weight: 600; margin: 14px 0 4px; }
+  .hint { font-size: 0.8em; color: #666; font-weight: 400; margin-top: -2px; margin-bottom: 4px; }
+  input[type=text], input[type=email], input[type=password], input[type=number], input[type=tel],
+  input[type=date], input[type=time],
+  textarea, select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #e1e0d9;
+    border-radius: 10px;
+    font-size: 0.95em;
+    font-family: inherit;
+    box-sizing: border-box;
+    background: #fff;
+    color: #1a1a1a;
+  }
+  textarea { min-height: 70px; resize: vertical; }
+  .section-card {
+    background: #fff;
+    border: 1px solid #e4e7eb;
+    border-radius: 12px;
+    padding: 14px;
+    margin-top: 12px;
+  }
+  .row-2 { display: flex; gap: 10px; }
+  .row-2 > div { flex: 1; }
+  button.submit {
+    width: 100%;
+    margin-top: 28px;
+    background: #2a78d6;
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    padding: 14px;
+    font-weight: 700;
+    font-size: 1em;
+    cursor: pointer;
+  }
+  button.submit:disabled { opacity: 0.6; cursor: default; }
+  .message { margin-top: 16px; padding: 14px 16px; border-radius: 10px; font-size: 0.92em; display: none; }
+  .message.success { background: #e9f8ef; color: #0a6b3a; display: block; }
+  .message.error { background: #fdecec; color: #a3231f; display: block; }
+
+  .chip-row { display: flex; gap: 8px; margin-top: 8px; }
+  .chip {
+    flex: 1;
+    border: 1px solid #e1e0d9;
+    background: #fff;
+    color: #1a1a1a;
+    border-radius: 999px;
+    padding: 10px 8px;
+    font-weight: 700;
+    font-size: 0.85em;
+    cursor: pointer;
+    text-align: center;
+  }
+  .chip.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
+
+  .checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; }
+  .helper-text { font-size: 0.82em; color: #666; font-style: italic; margin-top: 6px; }
+  .hidden { display: none !important; }
+  .login-note { font-size: 0.85em; color: #475569; margin-top: -16px; margin-bottom: 20px; }
+  .login-note a { color: #2a78d6; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Find a Tutor with Malita</h1>
+<p class="intro">
+Get matched with a vetted tutor for any CAPS subject (Grade 10-12) or a university/college module.
+You set the price and the time — once a tutor accepts (or proposes a different time for you to
+approve), you'll get a secure payment link by email to confirm the session. Create your free account
+and submit your first request below.
+</p>
+
+<form id="findTutorForm">
+  <h2>I am a...</h2>
+  <div class="chip-row">
+    <button type="button" class="chip active" data-mode="school">High School Learner</button>
+    <button type="button" class="chip" data-mode="uni">University / College Student</button>
+  </div>
+
+  <h2>Your details</h2>
+  <label for="name">Full name *</label>
+  <input type="text" id="name" required />
+
+  <label for="email">Email address *</label>
+  <input type="email" id="email" required />
+
+  <label for="password">Create a password *</label>
+  <div class="hint">At least 8 characters.</div>
+  <input type="password" id="password" minlength="8" required />
+
+  <label for="passwordConfirm">Confirm password *</label>
+  <input type="password" id="passwordConfirm" minlength="8" required />
+
+  <label for="province">Province *</label>
+  <select id="province" required>
+    <option value="" disabled selected>Select your province</option>
+    <option>Eastern Cape</option>
+    <option>Free State</option>
+    <option>Gauteng</option>
+    <option>KwaZulu-Natal</option>
+    <option>Limpopo</option>
+    <option>Mpumalanga</option>
+    <option>Northern Cape</option>
+    <option>North West</option>
+    <option>Western Cape</option>
+  </select>
+
+  <label for="cityTown">City / Town *</label>
+  <input type="text" id="cityTown" required />
+
+  <label for="idNumber">South African ID number *</label>
+  <div class="hint">13 digits — used to work out your date of birth automatically.</div>
+  <input type="text" id="idNumber" maxlength="13" inputmode="numeric" required />
+
+  <div id="schoolDetailsSection">
+    <label for="school">School (optional)</label>
+    <input type="text" id="school" />
+  </div>
+
+  <div id="uniDetailsSection" class="hidden">
+    <div class="section-card">
+      <label for="institutionSelect">Institution *</label>
+      <select id="institutionSelect">
+        <option value="" disabled selected>Loading institutions…</option>
+      </select>
+
+      <label for="qualificationSelect">Your qualification *</label>
+      <select id="qualificationSelect">
+        <option value="" disabled selected>Select an institution first</option>
+      </select>
+      <div id="customQualificationWrap" class="hidden">
+        <label for="customQualificationName">Your qualification *</label>
+        <input type="text" id="customQualificationName" placeholder="e.g. BCom Investment Management" />
+      </div>
+      <p id="noQualificationsNote" class="helper-text hidden">
+        No qualifications listed yet for this institution — ask an admin to add it to the catalog.
+      </p>
+
+      <label for="yearOfStudy">Your year of study *</label>
+      <select id="yearOfStudy">
+        <option value="" disabled selected>Select your year</option>
+        <option value="1">1st Year</option>
+        <option value="2">2nd Year</option>
+        <option value="3">3rd Year</option>
+        <option value="4">4th Year / Honours</option>
+        <option value="5">Postgraduate (Masters/Doctoral)</option>
+      </select>
+
+      <label for="studentNumber">Student number *</label>
+      <input type="text" id="studentNumber" />
+    </div>
+  </div>
+
+  <h2>Your first tutoring request</h2>
+
+  <div id="schoolRequestSection">
+    <label for="subjectSelect">Subject *</label>
+    <select id="subjectSelect"></select>
+
+    <label for="gradeSelect">Grade *</label>
+    <select id="gradeSelect">
+      <option value="" disabled selected>Select your grade</option>
+      <option value="10">Grade 10</option>
+      <option value="11">Grade 11</option>
+      <option value="12">Grade 12</option>
+    </select>
+  </div>
+
+  <div id="uniRequestSection" class="hidden">
+    <label for="moduleSelect">Module you'd like help with *</label>
+    <p id="moduleSelectFirstNote" class="helper-text">Select your institution and qualification above first.</p>
+    <select id="moduleSelect" class="hidden"></select>
+    <div id="customModuleWrap" class="hidden">
+      <div class="row-2">
+        <div>
+          <label for="customModuleName">Module *</label>
+          <input type="text" id="customModuleName" placeholder="e.g. Advanced Data Structures" />
+        </div>
+        <div>
+          <label for="customModuleYear">Year *</label>
+          <select id="customModuleYear">
+            <option value="" disabled selected>Year</option>
+            <option value="1">1st Year</option>
+            <option value="2">2nd Year</option>
+            <option value="3">3rd Year</option>
+            <option value="4">4th Year / Honours</option>
+            <option value="5">Postgraduate (Masters/Doctoral)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <label for="price">What are you willing to pay? (R) *</label>
+  <input type="number" id="price" min="1" step="1" placeholder="e.g. 250" required />
+
+  <label for="duration">Session duration (minutes, 60 min minimum) *</label>
+  <input type="number" id="duration" min="60" step="15" value="60" required />
+
+  <div class="row-2">
+    <div>
+      <label for="sessionDate">Session date *</label>
+      <input type="date" id="sessionDate" required />
+    </div>
+    <div>
+      <label for="sessionTime">Session time (SAST) *</label>
+      <input type="time" id="sessionTime" required />
+    </div>
+  </div>
+  <div class="hint">Must be at least 24 hours from now.</div>
+
+  <label for="topic">Topic *</label>
+  <input type="text" id="topic" placeholder="e.g. Calculus, Electric Circuits..." required />
+
+  <label for="notes">Additional notes (optional)</label>
+  <textarea id="notes" placeholder="e.g. I'd like help with proofs specifically"></textarea>
+
+  <button type="submit" class="submit" id="submitBtn">Create Account &amp; Request a Tutor</button>
+  <div class="message" id="formMessage"></div>
+</form>
+
+<script>
+const API_BASE_URL = "https://malita-api.onrender.com";
+
+const HIGH_SCHOOL_TUTORING_SUBJECTS = [
+  "Mathematics", "Mathematical Literacy", "Physical Sciences", "Life Sciences",
+  "English Home Language", "English First Additional Language",
+  "Afrikaans Home Language", "Afrikaans First Additional Language",
+  "isiZulu Home Language", "isiZulu First Additional Language",
+  "Life Orientation", "Accounting", "Business Studies", "Economics", "Geography", "History",
+  "Agricultural Sciences", "Consumer Studies", "Computer Applications Technology",
+  "Information Technology", "Tourism", "Hospitality Studies", "Visual Arts", "Dramatic Arts",
+  "Music", "Engineering Graphics and Design", "Religion Studies",
+];
+
+document.getElementById("subjectSelect").innerHTML =
+  HIGH_SCHOOL_TUTORING_SUBJECTS.map((s) => `<option value="${s}">${s}</option>`).join("");
+
+// ---- Mode chips (High School / University) ----
+let isHigherEd = false;
+const chipButtons = document.querySelectorAll(".chip");
+function setMode(mode) {
+  isHigherEd = mode === "uni";
+  chipButtons.forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  document.getElementById("schoolDetailsSection").classList.toggle("hidden", isHigherEd);
+  document.getElementById("uniDetailsSection").classList.toggle("hidden", !isHigherEd);
+  document.getElementById("schoolRequestSection").classList.toggle("hidden", isHigherEd);
+  document.getElementById("uniRequestSection").classList.toggle("hidden", !isHigherEd);
+}
+chipButtons.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+// ---- Higher-ed: institution -> qualification -> module, same catalog ----
+// the account itself registers against (no need to ask institution/
+// qualification twice - the request just needs the specific module).
+let qualifications = [];
+let modules = [];
+let isCustomQualification = false;
+
+fetch(`${API_BASE_URL}/catalog/institutions`)
+  .then((r) => r.json())
+  .then((data) => {
+    const institutions = data.institutions || [];
+    const sel = document.getElementById("institutionSelect");
+    sel.innerHTML = '<option value="" disabled selected>Select your institution</option>' +
+      institutions.map((i) => `<option value="${i.id}">${i.name}</option>`).join("");
+  })
+  .catch(() => {
+    document.getElementById("institutionSelect").innerHTML = '<option value="">Could not load institutions</option>';
+  });
+
+document.getElementById("institutionSelect").addEventListener("change", (e) => {
+  const institutionId = e.target.value;
+  qualifications = [];
+  modules = [];
+  isCustomQualification = false;
+  document.getElementById("customQualificationWrap").classList.add("hidden");
+  document.getElementById("noQualificationsNote").classList.add("hidden");
+  const qSel = document.getElementById("qualificationSelect");
+  qSel.innerHTML = '<option value="" disabled selected>Loading qualifications…</option>';
+  renderModuleField();
+  if (!institutionId) return;
+  fetch(`${API_BASE_URL}/catalog/qualifications?institution_id=${institutionId}`)
+    .then((r) => r.json())
+    .then((data) => {
+      qualifications = data.qualifications || [];
+      qSel.innerHTML = '<option value="" disabled selected>Select your qualification</option>' +
+        qualifications.map((q) => `<option value="${q.id}">${q.name}</option>`).join("") +
+        '<option value="other">Other (not listed)</option>';
+      document.getElementById("noQualificationsNote").classList.toggle("hidden", qualifications.length > 0);
+    })
+    .catch(() => {
+      qSel.innerHTML = '<option value="">Could not load qualifications</option>';
+    });
+});
+
+document.getElementById("qualificationSelect").addEventListener("change", (e) => {
+  const val = e.target.value;
+  isCustomQualification = val === "other";
+  document.getElementById("customQualificationWrap").classList.toggle("hidden", !isCustomQualification);
+  modules = [];
+  if (isCustomQualification || !val) {
+    renderModuleField();
+    return;
+  }
+  document.getElementById("moduleSelectFirstNote").classList.remove("hidden");
+  document.getElementById("moduleSelectFirstNote").textContent = "Loading modules…";
+  fetch(`${API_BASE_URL}/catalog/modules?qualification_id=${val}`)
+    .then((r) => r.json())
+    .then((data) => {
+      modules = data.modules || [];
+      renderModuleField();
+    })
+    .catch(() => {
+      modules = [];
+      renderModuleField();
+      document.getElementById("moduleSelectFirstNote").textContent = "Could not load modules.";
+    });
+});
+
+function renderModuleField() {
+  const moduleSel = document.getElementById("moduleSelect");
+  const firstNote = document.getElementById("moduleSelectFirstNote");
+  const customWrap = document.getElementById("customModuleWrap");
+
+  if (isCustomQualification) {
+    // No catalog to pick a module from once the qualification itself is
+    // custom - go straight to the free-text module fields.
+    moduleSel.classList.add("hidden");
+    firstNote.classList.add("hidden");
+    customWrap.classList.remove("hidden");
+    return;
+  }
+  if (modules.length === 0 && !document.getElementById("qualificationSelect").value) {
+    moduleSel.classList.add("hidden");
+    customWrap.classList.add("hidden");
+    firstNote.classList.remove("hidden");
+    firstNote.textContent = "Select your institution and qualification above first.";
+    return;
+  }
+  firstNote.classList.add("hidden");
+  moduleSel.classList.remove("hidden");
+  moduleSel.innerHTML = '<option value="" disabled selected>Select a module</option>' +
+    modules.map((m) => `<option value="${m.id}">${m.name} (${m.year_level_label})</option>`).join("") +
+    '<option value="other">Other (not listed)</option>';
+  customWrap.classList.add("hidden");
+}
+document.getElementById("moduleSelect").addEventListener("change", (e) => {
+  document.getElementById("customModuleWrap").classList.toggle("hidden", e.target.value !== "other");
+});
+
+// ---- Submit: register, then submit the first tutoring request ----
+document.getElementById("findTutorForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const messageEl = document.getElementById("formMessage");
+  const submitBtn = document.getElementById("submitBtn");
+  messageEl.className = "message";
+  messageEl.textContent = "";
+
+  function fail(msg) {
+    messageEl.className = "message error";
+    messageEl.textContent = msg;
+  }
+
+  const name = document.getElementById("name").value.trim();
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const passwordConfirm = document.getElementById("passwordConfirm").value;
+  const province = document.getElementById("province").value;
+  const cityTown = document.getElementById("cityTown").value.trim();
+  const idNumber = document.getElementById("idNumber").value.trim();
+  const school = document.getElementById("school").value.trim();
+
+  if (!name) return fail("Please enter your full name.");
+  if (!email) return fail("Please enter your email.");
+  if (password.length < 8) return fail("Password must be at least 8 characters long.");
+  if (password !== passwordConfirm) return fail("Passwords don't match.");
+  if (!province) return fail("Please select your province.");
+  if (!cityTown) return fail("Please enter your city or town.");
+  if (!/^\d{13}$/.test(idNumber)) return fail("ID number must be exactly 13 digits.");
+
+  let institutionId = null, qualificationId = null, customQualificationName = "", yearOfStudy = null, studentNumber = "";
+  if (isHigherEd) {
+    institutionId = document.getElementById("institutionSelect").value || null;
+    const qualVal = document.getElementById("qualificationSelect").value;
+    if (!institutionId || (!isCustomQualification && !qualVal)) {
+      return fail("Please select your institution and qualification.");
+    }
+    if (isCustomQualification) {
+      customQualificationName = document.getElementById("customQualificationName").value.trim();
+      if (!customQualificationName) return fail("Please enter the name of your qualification.");
+    } else {
+      qualificationId = qualVal;
+    }
+    yearOfStudy = document.getElementById("yearOfStudy").value;
+    if (!yearOfStudy) return fail("Please select your year of study.");
+    studentNumber = document.getElementById("studentNumber").value.trim();
+    if (!studentNumber) return fail("Please enter your student number.");
+  }
+
+  let subject = "", grade = null, moduleId = null, customModuleName = "", customModuleYearLevel = null;
+  if (isHigherEd) {
+    if (isCustomQualification) {
+      customModuleName = document.getElementById("customModuleName").value.trim();
+      const yearVal = document.getElementById("customModuleYear").value;
+      if (!customModuleName || !yearVal) return fail("Please enter the module you'd like help with.");
+      customModuleYearLevel = parseInt(yearVal, 10);
+    } else {
+      const moduleVal = document.getElementById("moduleSelect").value;
+      if (!moduleVal) return fail("Please select the module you'd like help with.");
+      if (moduleVal === "other") {
+        customModuleName = document.getElementById("customModuleName").value.trim();
+        const yearVal = document.getElementById("customModuleYear").value;
+        if (!customModuleName || !yearVal) return fail("Please enter the module you'd like help with.");
+        customModuleYearLevel = parseInt(yearVal, 10);
+      } else {
+        moduleId = parseInt(moduleVal, 10);
+      }
+    }
+  } else {
+    subject = document.getElementById("subjectSelect").value;
+    const gradeVal = document.getElementById("gradeSelect").value;
+    if (!gradeVal) return fail("Please select your grade.");
+    grade = parseInt(gradeVal, 10);
+  }
+
+  const priceVal = parseFloat(document.getElementById("price").value);
+  if (isNaN(priceVal) || priceVal <= 0) return fail("Please enter a price greater than R0.");
+  const durationVal = parseInt(document.getElementById("duration").value, 10) || 0;
+  if (durationVal < 60) return fail("Sessions must be at least 60 minutes long.");
+  const dateVal = document.getElementById("sessionDate").value;
+  const timeVal = document.getElementById("sessionTime").value;
+  if (!dateVal || !timeVal) return fail("Please select a date and time for your session.");
+  const topic = document.getElementById("topic").value.trim();
+  if (!topic) return fail("Please enter a topic for this session.");
+  const notes = document.getElementById("notes").value.trim();
+
+  // South Africa is a fixed UTC+2 offset year-round (no daylight saving) -
+  // convert the SAST wall-clock time the learner picked into the matching
+  // UTC instant explicitly, same approach as the mobile app's
+  // SessionDateTimePicker, rather than relying on the browser's own
+  // timezone (which may not be SAST at all).
+  const [y, mo, d] = dateVal.split("-").map((v) => parseInt(v, 10));
+  const [h, mi] = timeVal.split(":").map((v) => parseInt(v, 10));
+  const scheduledAtIso = new Date(Date.UTC(y, mo - 1, d, h - 2, mi, 0)).toISOString();
+  if (new Date(scheduledAtIso).getTime() < Date.now() + 24 * 60 * 60 * 1000) {
+    return fail("Sessions must be requested at least 24 hours in advance.");
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Submitting…";
+
+  let token;
+  try {
+    const regRes = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name, email, password, province, city_town: cityTown, id_number: idNumber,
+        school: isHigherEd ? "" : school,
+        account_type: isHigherEd ? "higher_ed" : "high_school",
+        higher_ed_institution_id: isHigherEd ? parseInt(institutionId, 10) : null,
+        higher_ed_qualification_id: isHigherEd && qualificationId ? parseInt(qualificationId, 10) : null,
+        higher_ed_qualification_custom_name: isHigherEd ? customQualificationName : "",
+        higher_ed_year_of_study: isHigherEd ? parseInt(yearOfStudy, 10) : null,
+        student_number: isHigherEd ? studentNumber : "",
+      }),
+    });
+    const regData = await regRes.json().catch(() => ({}));
+    if (!regRes.ok) throw new Error(regData.detail || "Could not create your account. Please try again.");
+    token = regData.token;
+  } catch (err) {
+    fail(err.message || "Could not create your account. Please try again.");
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Create Account & Request a Tutor";
+    return;
+  }
+
+  try {
+    const reqRes = await fetch(`${API_BASE_URL}/tutoring/requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({
+        subject, grade, module_id: moduleId, custom_module_name: customModuleName,
+        custom_module_year_level: customModuleYearLevel,
+        institution_id: isHigherEd ? parseInt(institutionId, 10) : null,
+        qualification_id: isHigherEd && qualificationId ? parseInt(qualificationId, 10) : null,
+        custom_qualification_name: customQualificationName,
+        price_zar: priceVal, scheduled_at: scheduledAtIso, duration_minutes: durationVal,
+        topic, preferred_times_note: notes,
+      }),
+    });
+    const reqData = await reqRes.json().catch(() => ({}));
+    if (!reqRes.ok) throw new Error(reqData.detail || "Could not submit your request. Please try again.");
+
+    messageEl.className = "message success";
+    messageEl.textContent =
+      "Your account's been created and your request is in! We'll email you as soon as a tutor accepts " +
+      "(or proposes a different time), with a secure payment link to confirm the session. Our mobile " +
+      "apps are launching soon for tracking everything in one place — until then, keep an eye on your email.";
+    document.getElementById("findTutorForm").reset();
+    setMode("school");
+    document.getElementById("subjectSelect").value = HIGH_SCHOOL_TUTORING_SUBJECTS[0];
+    document.getElementById("duration").value = "60";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (err) {
+    fail(
+      `Your account was created, but we couldn't submit your tutoring request: ${err.message || "something went wrong"}. ` +
+      "You can try requesting a tutor again once our mobile apps launch, or contact us for help in the meantime."
+    );
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Create Account & Request a Tutor";
+  }
+});
+</script>
+
+</body>
+</html>

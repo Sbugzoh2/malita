@@ -473,6 +473,9 @@ export default function HomeScreen({ navigation }: any) {
               </>
             ) : (
               <>
+                <Text style={styles.aiScopeNote}>
+                  Malita AI is currently only offered for Mathematics & Physical Sciences.
+                </Text>
                 <View style={styles.statCard}>
                   <View style={styles.statCardRow}>
                     {me?.daily_limit != null ? (
@@ -623,6 +626,7 @@ const styles = StyleSheet.create({
   segmentPillActive: { backgroundColor: colors.primary },
   segmentPillText: { fontSize: 13, fontWeight: "700", color: colors.textSecondary },
   segmentPillTextActive: { color: "#fff" },
+  aiScopeNote: { fontSize: 12, color: colors.textSecondary, marginBottom: 14, lineHeight: 17 },
   statCard: { backgroundColor: colors.primaryDark, borderRadius: 20, padding: 18 },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   statLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },

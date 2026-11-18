@@ -12,7 +12,11 @@ import GradientBackground from "../components/GradientBackground";
 // it) - it's how the list gets sub-headers instead of one long flat stack.
 type Tile = { key: string; icon: string; title: string; desc: string; tierNote?: string; color: string; disabled?: boolean; group?: string };
 
-const TILES: Tile[] = [
+// Malita's two product lines, kept on separate tile lists so a high-school
+// account's Home screen can switch between them (see the `segment` state
+// below) instead of mixing the self-study AI tools and the live tutoring
+// marketplace into one screen.
+const AI_TILES: Tile[] = [
   {
     key: "AITutor",
     icon: "calculator",
@@ -27,7 +31,6 @@ const TILES: Tile[] = [
     desc: "A narrated, live-style lesson on any topic you choose.",
     tierNote: "Premium",
     color: "#eda100",
-    group: "Learning Tools",
   },
   {
     key: "PracticeQuestions",
@@ -43,7 +46,6 @@ const TILES: Tile[] = [
     desc: "Browse curated past exam papers by year and subject.",
     tierNote: "Premium",
     color: "#4a3aa7",
-    group: "Learning Tools",
   },
   {
     key: "Collab",
@@ -62,6 +64,9 @@ const TILES: Tile[] = [
     color: "#c0392b",
     group: "Your Account",
   },
+];
+
+const CAMPUS_TILES: Tile[] = [
   {
     key: "RequestTutor",
     icon: "calendarCheck",
@@ -87,20 +92,22 @@ const ADMIN_TILE: Tile = {
   group: "Admin",
 };
 
-// Fixed display order for the Explore list's sub-headers - a tile with no
+// Fixed display order for the AI tab's Explore sub-headers - a tile with no
 // group (e.g. Practice Questions, already a quick action) never reaches
 // this list, so every entry here is expected to match a group above.
-const EXPLORE_GROUP_ORDER = ["Learning Tools", "Your Account", "Admin"];
+const EXPLORE_GROUP_ORDER = ["Learning Tools", "Your Account"];
 
-// The 4 most-used actions get a quick-action square instead of a full list
-// row - everything else (including the admin tile, appended below) lives in
-// the "Explore" list.
-const QUICK_ACTION_KEYS = ["AITutor", "RequestTutor", "BrowseTutors", "PracticeQuestions"];
+// The 4 most-used AI tools get a quick-action square instead of a full list
+// row - the rest live in the AI tab's "Explore" list.
+const AI_QUICK_ACTION_KEYS = ["AITutor", "PracticeQuestions", "AITeacher", "PastPapersLibrary"];
 
-// University/college accounts get ONLY the tutoring marketplace - every
-// other tile above (AI Tutor, past papers, subscription, etc.) is simply
-// never shown, same gating principle as app.py's web equivalent.
-const HIGHER_ED_TILES: Tile[] = TILES.filter((t) => t.key === "RequestTutor" || t.key === "BrowseTutors");
+// University/college accounts get ONLY the tutoring marketplace - every AI
+// tile above (AI Tutor, past papers, subscription, etc.) is simply never
+// shown, same gating principle as app.py's web equivalent. A high-school
+// account sees the same two tiles too, under its "Malita Campus" tab (see
+// `segment` state below) - account-type access itself is unchanged, this
+// just lets one screen present both of Malita's product lines clearly.
+const HIGHER_ED_TILES: Tile[] = CAMPUS_TILES;
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -342,6 +349,10 @@ export default function HomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const firstName = me?.user.name.split(" ")[0] ?? "";
   const [unreadCount, setUnreadCount] = useState(0);
+  // Which of Malita's two product lines the (non-higher-ed) Home screen is
+  // currently showing - defaults to Campus since that's the lead product;
+  // a higher-ed account has no such choice to make (see isHigherEd below).
+  const [segment, setSegment] = useState<"campus" | "ai">("campus");
 
   // Refreshed on focus only (no polling/websocket) - this screen now owns
   // its own header, including the notification bell, rather than relying
@@ -357,11 +368,8 @@ export default function HomeScreen({ navigation }: any) {
   // backend/set_cross_segment_access.py) unlocks the full tile set and
   // subscription UI regardless of the account's own account_type.
   const isHigherEd = me?.user.account_type === "higher_ed" && !me?.user.cross_segment_access;
-  const quickTiles = TILES.filter((t) => QUICK_ACTION_KEYS.includes(t.key));
-  const exploreTiles = [
-    ...TILES.filter((t) => !QUICK_ACTION_KEYS.includes(t.key)),
-    ...(me?.is_admin ? [ADMIN_TILE] : []),
-  ];
+  const quickTiles = AI_TILES.filter((t) => AI_QUICK_ACTION_KEYS.includes(t.key));
+  const exploreTiles = AI_TILES.filter((t) => !AI_QUICK_ACTION_KEYS.includes(t.key));
   const usagePct =
     me?.daily_limit != null ? Math.min(100, Math.round((me.used_today / me.daily_limit) * 100)) : null;
 
@@ -423,66 +431,110 @@ export default function HomeScreen({ navigation }: any) {
       <View style={styles.body}>
         {!isHigherEd ? (
           <>
-            <View style={styles.statCard}>
-              <View style={styles.statCardRow}>
-                {me?.daily_limit != null ? (
-                  <View>
-                    <Text style={styles.statLabel}>Solves today</Text>
-                    <Text style={styles.statValue}>
-                      {me.used_today} <Text style={styles.statValueMax}>/ {me.daily_limit}</Text>
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.statUnlimited}>Unlimited solves on your plan.</Text>
-                )}
-                <Pressable style={styles.planPill} onPress={() => navigation.navigate("Subscription")}>
-                  <Text style={[styles.planPillText, { color: PLAN_PILL_TEXT_COLOR[me?.effective_tier ?? "free"] ?? "#fff" }]}>
-                    {me?.tier_label ?? "Free"} plan
+            <View style={styles.segmentRow}>
+              <Pressable
+                style={[styles.segmentPill, segment === "campus" && styles.segmentPillActive]}
+                onPress={() => setSegment("campus")}
+                accessibilityRole="button"
+                accessibilityLabel="Malita Campus"
+              >
+                <Text style={[styles.segmentPillText, segment === "campus" && styles.segmentPillTextActive]}>
+                  Malita Campus
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.segmentPill, segment === "ai" && styles.segmentPillActive]}
+                onPress={() => setSegment("ai")}
+                accessibilityRole="button"
+                accessibilityLabel="Malita AI"
+              >
+                <Text style={[styles.segmentPillText, segment === "ai" && styles.segmentPillTextActive]}>
+                  Malita AI
+                </Text>
+              </Pressable>
+            </View>
+
+            {segment === "campus" ? (
+              <>
+                <View style={styles.statCard}>
+                  <Text style={styles.statLabel}>Malita Campus</Text>
+                  <Text style={styles.statUnlimited}>Live, 1-on-1 tutoring</Text>
+                  <Text style={styles.higherEdNote}>
+                    Get matched with a vetted tutor for any subject and pay what you're willing to pay — book a
+                    session or browse tutors directly.
                   </Text>
-                  <TileIcon name="chevron" size={12} />
-                </Pressable>
-              </View>
-              {usagePct != null ? (
-                <View style={styles.usageTrack}>
-                  <View style={[styles.usageFill, { width: `${usagePct}%` }]} />
                 </View>
-              ) : null}
-            </View>
-
-            <Text style={styles.sectionLabel}>Quick actions</Text>
-            <View style={styles.quickRow}>
-              {quickTiles.map((tile) => (
-                <Pressable
-                  key={tile.key}
-                  style={styles.quickTile}
-                  onPress={() => !tile.disabled && navigation.navigate(tile.key)}
-                  disabled={tile.disabled}
-                  accessibilityRole="button"
-                  accessibilityLabel={tile.title}
-                >
-                  <View style={[styles.quickTileIcon, { backgroundColor: tile.color }]}>
-                    <TileIcon name={tile.icon} size={24} />
-                  </View>
-                  <Text style={styles.quickTileLabel}>{tile.title}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.sectionLabel}>Explore</Text>
-            {EXPLORE_GROUP_ORDER.map((groupName) => {
-              const tiles = exploreTiles.filter((t) => t.group === groupName);
-              if (tiles.length === 0) return null;
-              return (
-                <View key={groupName} style={styles.exploreGroup}>
-                  <Text style={styles.exploreGroupLabel}>{groupName}</Text>
-                  <View style={styles.listCol}>
-                    {tiles.map((tile) => (
-                      <ListCard key={tile.key} tile={tile} />
-                    ))}
-                  </View>
+                <View style={[styles.listCol, { marginTop: 20 }]}>
+                  {CAMPUS_TILES.map((tile) => (
+                    <ListCard key={tile.key} tile={tile} big />
+                  ))}
+                  {me?.is_admin ? <ListCard tile={ADMIN_TILE} big /> : null}
                 </View>
-              );
-            })}
+              </>
+            ) : (
+              <>
+                <View style={styles.statCard}>
+                  <View style={styles.statCardRow}>
+                    {me?.daily_limit != null ? (
+                      <View>
+                        <Text style={styles.statLabel}>Solves today</Text>
+                        <Text style={styles.statValue}>
+                          {me.used_today} <Text style={styles.statValueMax}>/ {me.daily_limit}</Text>
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.statUnlimited}>Unlimited solves on your plan.</Text>
+                    )}
+                    <Pressable style={styles.planPill} onPress={() => navigation.navigate("Subscription")}>
+                      <Text style={[styles.planPillText, { color: PLAN_PILL_TEXT_COLOR[me?.effective_tier ?? "free"] ?? "#fff" }]}>
+                        {me?.tier_label ?? "Free"} plan
+                      </Text>
+                      <TileIcon name="chevron" size={12} />
+                    </Pressable>
+                  </View>
+                  {usagePct != null ? (
+                    <View style={styles.usageTrack}>
+                      <View style={[styles.usageFill, { width: `${usagePct}%` }]} />
+                    </View>
+                  ) : null}
+                </View>
+
+                <Text style={styles.sectionLabel}>Quick actions</Text>
+                <View style={styles.quickRow}>
+                  {quickTiles.map((tile) => (
+                    <Pressable
+                      key={tile.key}
+                      style={styles.quickTile}
+                      onPress={() => !tile.disabled && navigation.navigate(tile.key)}
+                      disabled={tile.disabled}
+                      accessibilityRole="button"
+                      accessibilityLabel={tile.title}
+                    >
+                      <View style={[styles.quickTileIcon, { backgroundColor: tile.color }]}>
+                        <TileIcon name={tile.icon} size={24} />
+                      </View>
+                      <Text style={styles.quickTileLabel}>{tile.title}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={styles.sectionLabel}>Explore</Text>
+                {EXPLORE_GROUP_ORDER.map((groupName) => {
+                  const tiles = exploreTiles.filter((t) => t.group === groupName);
+                  if (tiles.length === 0) return null;
+                  return (
+                    <View key={groupName} style={styles.exploreGroup}>
+                      <Text style={styles.exploreGroupLabel}>{groupName}</Text>
+                      <View style={styles.listCol}>
+                        {tiles.map((tile) => (
+                          <ListCard key={tile.key} tile={tile} />
+                        ))}
+                      </View>
+                    </View>
+                  );
+                })}
+              </>
+            )}
           </>
         ) : (
           <>
@@ -555,6 +607,22 @@ const styles = StyleSheet.create({
   },
   avatarBadgeText: { fontSize: 15, fontWeight: "800", color: "#fff" },
   body: { padding: 20 },
+  segmentRow: {
+    flexDirection: "row",
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    padding: 4,
+    marginBottom: 18,
+  },
+  segmentPill: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  segmentPillActive: { backgroundColor: colors.primary },
+  segmentPillText: { fontSize: 13, fontWeight: "700", color: colors.textSecondary },
+  segmentPillTextActive: { color: "#fff" },
   statCard: { backgroundColor: colors.primaryDark, borderRadius: 20, padding: 18 },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   statLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },

@@ -99,6 +99,12 @@ module.exports = {
       ],
       "expo-iap",
       "expo-build-properties",
+      // Marks android.hardware.screen.portrait as optional rather than
+      // required, so Google Play doesn't block tablets/desktops/Android XR
+      // from installing the app just because it's locked to portrait on
+      // phones (orientation: "portrait" above) - see the plugin file for
+      // the full explanation.
+      "./plugins/withOptionalHardwareFeatures",
     ],
   },
 };

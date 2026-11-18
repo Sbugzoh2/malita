@@ -93,7 +93,7 @@ from backend.tutoring import (
     delete_institution, delete_qualification, delete_module,
     list_tutor_higher_ed_applications, approve_tutor_higher_ed, reject_tutor_higher_ed,
     edit_tutoring_request, withdraw_tutoring_request, cancel_accepted_session,
-    send_due_reminders, submit_session_recording,
+    send_due_reminders,
     list_notifications, count_unread_notifications, mark_notification_read, mark_all_notifications_read,
     reallocate_after_tutor_cancellation, request_refund_for_cancelled_session,
     submit_refund_bank_details,
@@ -421,9 +421,6 @@ class SessionCancelRequest(BaseModel):
     # an error describing the fee instead of applying it unconfirmed.
     confirm_late_cancellation: bool = False
 
-
-class SessionRecordingRequest(BaseModel):
-    recording_link: str
 
 
 class ReportNoShowRequest(BaseModel):
@@ -1724,18 +1721,6 @@ def tutor_report_no_show(
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
-@app.post("/tutor/sessions/{request_id}/recording")
-def tutor_submit_session_recording(
-    request_id: int, payload: SessionRecordingRequest, authorization: str = Header(None)
-):
-    """The tutor submitting their own manually-recorded Meet link after a
-    session - see submit_session_recording for why this isn't automated."""
-    tutor = _auth_tutor(authorization)
-    try:
-        return submit_session_recording(request_id, tutor["id"], payload.recording_link)
-    except TutoringError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/tutor/notifications")

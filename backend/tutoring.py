@@ -168,6 +168,14 @@ LATE_CANCELLATION_PENALTY_PERCENT = 30
 # by its own reminder_*_sent_at column.
 SESSION_REMINDER_HOURS_BEFORE = 24
 SESSION_REMINDER_MINUTES_BEFORE = 15
+# How long before a CONFIRMED session's scheduled END time (scheduled_at
+# + duration_minutes) to remind both sides to check out and rate each
+# other - see _notify_session_ending_soon/send_due_reminders. Sessions
+# aren't recorded (no Google Workspace plan - see check_in_to_session's
+# docstring), so check-in/check-out is the only presence signal this
+# app has, and confirm_session_by_learner/confirm_session_by_tutor
+# already require a check-out before they'll accept a rating.
+SESSION_REMINDER_MINUTES_BEFORE_END = 15
 # How long before an unpaid match's PAYMENT_DEADLINE_HOURS deadline to
 # warn the learner it's about to lapse.
 PAYMENT_LAPSE_REMINDER_HOURS_BEFORE = 2
@@ -175,18 +183,13 @@ PAYMENT_LAPSE_REMINDER_HOURS_BEFORE = 2
 # match_tutor_to_request) before it automatically reopens - see
 # _expire_stale_admin_proposals.
 ADMIN_PROPOSAL_DEADLINE_HOURS = 12
-# There's no API that can force-start a recording on a regular (non-
-# Google-Workspace) Meet call - see backend/google_calendar.py's docstring
-# for why this project uses a personal Gmail account, not Workspace. So
-# "every session auto-recorded" is, in practice, every tutor asked to
-# click Meet's own one-click "Record" button and then submit the
-# resulting link afterward (see submit_session_recording) - this note is
-# included in every tutor-facing match/reminder email.
-RECORDING_REMINDER_NOTE = (
-    "Reminder: please record this session (click \"Record meeting\" inside "
-    "Google Meet once you're in the call) and share the recording link with "
-    "us from the Tutor app afterward - Malita keeps a recording of every "
-    "session on file."
+# Included in every upcoming-session reminder (both sides) - check-in/
+# check-out is this app's only presence signal (see check_in_to_
+# session's docstring for why there's no recording to fall back on).
+CHECK_IN_REMINDER_NOTE = (
+    "Reminder: please check in once you join the call (tap \"I'm on the call\" "
+    "in the app) - Malita tracks each side's attendance at both ends of a "
+    "session."
 )
 
 
@@ -2462,6 +2465,7 @@ def send_due_reminders() -> None:
     never twice, and never silently skipped."""
     now = dt.datetime.utcnow()
     to_notify_upcoming = []
+    to_notify_ending_soon = []
     to_notify_lapsing = []
     with get_session() as db:
         due_24h = (
@@ -2506,6 +2510,36 @@ def send_due_reminders() -> None:
                     req.subject, req.topic, req.scheduled_at, req.meet_link, "in about 15 minutes",
                 ))
 
+        # A session's scheduled END time isn't its own column - computed
+        # as scheduled_at + duration_minutes - so this can't be filtered
+        # precisely in SQL the way the two reminders above are. Fetch
+        # confirmed sessions that have already started within a
+        # generously wide bound (comfortably covers any real session
+        # length) and filter precisely in Python below.
+        ending_soon_candidates = (
+            db.query(TutoringSessionRequest)
+            .filter(
+                TutoringSessionRequest.status == "confirmed",
+                TutoringSessionRequest.scheduled_at != None,  # noqa: E711
+                TutoringSessionRequest.duration_minutes != None,  # noqa: E711
+                TutoringSessionRequest.scheduled_at <= now,
+                TutoringSessionRequest.scheduled_at >= now - dt.timedelta(hours=6),
+                TutoringSessionRequest.reminder_ending_soon_sent_at.is_(None),
+            )
+            .all()
+        )
+        for req in ending_soon_candidates:
+            ends_at = req.scheduled_at + dt.timedelta(minutes=req.duration_minutes)
+            if now < ends_at <= now + dt.timedelta(minutes=SESSION_REMINDER_MINUTES_BEFORE_END):
+                req.reminder_ending_soon_sent_at = now
+                learner = db.query(User).get(req.learner_user_id)
+                tutor = db.query(TutorAccount).get(req.tutor_id)
+                if learner and tutor:
+                    to_notify_ending_soon.append((
+                        learner.id, learner.name, learner.email, tutor.id, tutor.name, tutor.email,
+                        req.subject, req.topic, ends_at,
+                    ))
+
         lapse_cutoff = now - dt.timedelta(
             hours=PAYMENT_DEADLINE_HOURS - PAYMENT_LAPSE_REMINDER_HOURS_BEFORE
         )
@@ -2543,6 +2577,15 @@ def send_due_reminders() -> None:
             subject=subject, topic=topic, scheduled_at=scheduled_at,
             meet_link=meet_link, when_label=when_label,
         )
+    for (
+        learner_id, learner_name, learner_email, tutor_id, tutor_name, tutor_email,
+        subject, topic, ends_at,
+    ) in to_notify_ending_soon:
+        _notify_session_ending_soon(
+            learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
+            tutor_id=tutor_id, tutor_name=tutor_name, tutor_email=tutor_email,
+            subject=subject, topic=topic, ends_at=ends_at,
+        )
     for learner_id, learner_name, learner_email, tutor_name, subject, topic, hours_left in to_notify_lapsing:
         _notify_payment_lapsing_soon(
             learner_id=learner_id, learner_name=learner_name, learner_email=learner_email,
@@ -2571,6 +2614,7 @@ def _notify_session_upcoming(
                 f"Hi {learner_name},\n\n"
                 f"Your {subject}{topic_str} session with {tutor_name} is {when_label}, "
                 f"scheduled for {when_str}.{link_note}\n\n"
+                f"{CHECK_IN_REMINDER_NOTE}\n\n"
                 "— The Malita team"
             ),
         )
@@ -2581,7 +2625,7 @@ def _notify_session_upcoming(
                 f"Hi {tutor_name},\n\n"
                 f"Your {subject}{topic_str} session with {learner_name} is {when_label}, "
                 f"scheduled for {when_str}.{link_note}\n\n"
-                f"{RECORDING_REMINDER_NOTE}\n\n"
+                f"{CHECK_IN_REMINDER_NOTE}\n\n"
                 "— The Malita team"
             ),
         )
@@ -2595,6 +2639,52 @@ def _notify_session_upcoming(
         )
     except Exception:
         logger.exception("Failed to send an upcoming-session reminder")
+
+
+def _notify_session_ending_soon(
+    *, learner_id: int, learner_name: str, learner_email: str,
+    tutor_id: int, tutor_name: str, tutor_email: str,
+    subject: str, topic: str | None, ends_at: dt.datetime,
+) -> None:
+    """Best-effort - tells BOTH sides a confirmed session is about to
+    end (fired once at SESSION_REMINDER_MINUTES_BEFORE_END, see
+    send_due_reminders), prompting them to check out and rate each
+    other - confirm_session_by_learner/confirm_session_by_tutor won't
+    accept a rating until that side has checked out (see check_out_of_
+    session)."""
+    try:
+        topic_str = f" ({topic})" if topic else ""
+        ends_str = _format_sast(ends_at)
+        send_email(
+            learner_email,
+            "Reminder: your tutoring session is ending soon",
+            (
+                f"Hi {learner_name},\n\n"
+                f"Your {subject}{topic_str} session with {tutor_name} ends around {ends_str}.\n\n"
+                "Once it's done, don't forget to check out and rate your tutor in the app.\n\n"
+                "— The Malita team"
+            ),
+        )
+        send_email(
+            tutor_email,
+            "Reminder: your tutoring session is ending soon",
+            (
+                f"Hi {tutor_name},\n\n"
+                f"Your {subject}{topic_str} session with {learner_name} ends around {ends_str}.\n\n"
+                "Once it's done, don't forget to check out and rate the learner in the app.\n\n"
+                "— The Malita team"
+            ),
+        )
+        create_notification(
+            recipient_kind="user", recipient_id=learner_id, title="Session ending soon",
+            body=f"Your {subject}{topic_str} session is ending soon - check out and rate your tutor once it's done.",
+        )
+        create_notification(
+            recipient_kind="tutor", recipient_id=tutor_id, title="Session ending soon",
+            body=f"Your {subject}{topic_str} session is ending soon - check out and rate the learner once it's done.",
+        )
+    except Exception:
+        logger.exception("Failed to send a session-ending-soon reminder")
 
 
 def _notify_payment_lapsing_soon(
@@ -3552,7 +3642,6 @@ def _notify_match(
                 f"Scheduled: {when_str}\n"
                 f"{meet_line}\n"
                 "We'll confirm the session once the learner has paid.\n\n"
-                f"{RECORDING_REMINDER_NOTE}\n\n"
                 "— The Malita team"
             ),
         )
@@ -4138,80 +4227,6 @@ def admin_dismiss_no_show_report(request_id: int) -> dict:
         req.no_show_resolved_at = dt.datetime.utcnow()
         req.no_show_resolution = "dismissed"
         return {"id": req.id, "status": req.status}
-
-
-def submit_session_recording(request_id: int, tutor_id: int, recording_link: str) -> dict:
-    """The tutor submitting the link to their own manually-recorded Meet
-    session afterward (see RECORDING_REMINDER_NOTE - there's no API that
-    can force a recording on a non-Workspace Meet call, so this is a
-    tutor-submitted link, not an automated one). Emails every admin the
-    link plus the session's full details so it's kept on file. Allowed
-    any time after the session is confirmed/paid - not gated on the
-    scheduled time having passed, since that's the tutor's own call."""
-    recording_link = recording_link.strip()
-    if not recording_link:
-        raise TutoringError("Please paste in the recording link.")
-    with get_session() as db:
-        req = db.query(TutoringSessionRequest).get(request_id)
-        if not req or req.tutor_id != tutor_id:
-            raise TutoringError("Session not found.")
-        if req.status not in ("confirmed", "completed"):
-            raise TutoringError(f"This session is '{req.status}', not yet paid/confirmed.")
-        req.recording_link = recording_link
-        req.recording_shared_at = dt.datetime.utcnow()
-        learner = db.query(User).get(req.learner_user_id)
-        tutor = db.query(TutorAccount).get(req.tutor_id)
-        details = {
-            "learner_name": learner.name if learner else "—",
-            "learner_email": learner.email if learner else "—",
-            "tutor_name": tutor.name if tutor else "—",
-            "tutor_email": tutor.email if tutor else "—",
-            "subject": req.subject, "topic": req.topic,
-            "scheduled_at": req.scheduled_at, "duration_minutes": req.duration_minutes,
-            "price_zar": req.price_zar, "recording_link": recording_link,
-        }
-        result = {"id": req.id, "status": req.status}
-    _notify_admins_of_recording(request_id=request_id, **details)
-    return result
-
-
-def _notify_admins_of_recording(
-    *, request_id: int, learner_name: str, learner_email: str,
-    tutor_name: str, tutor_email: str, subject: str, topic: str | None,
-    scheduled_at: dt.datetime | None, duration_minutes: int | None,
-    price_zar: float | None, recording_link: str,
-) -> None:
-    """Best-effort email to every admin - same pattern as
-    backend/collab.py's _notify_admins_of_report - with the full session
-    details alongside the recording link, so nothing has to be looked up
-    separately to file it away."""
-    try:
-        with get_session() as db:
-            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
-        if not admins:
-            return
-        topic_str = f" ({topic})" if topic else ""
-        when_str = _format_sast(scheduled_at)
-        price_str = f"R{price_zar:.2f}" if price_zar is not None else "—"
-        duration_str = f"{duration_minutes} min" if duration_minutes is not None else "—"
-        body = (
-            f"A tutor shared the recording for session #{request_id}.\n\n"
-            f"Subject: {subject}{topic_str}\n"
-            f"Learner: {learner_name} ({learner_email})\n"
-            f"Tutor: {tutor_name} ({tutor_email})\n"
-            f"Scheduled: {when_str}\n"
-            f"Duration: {duration_str}\n"
-            f"Price: {price_str}\n\n"
-            f"Recording: {recording_link}\n"
-        )
-        for admin_id, email in admins:
-            send_email(email, f"Session recording: {subject}{topic_str}", body)
-            create_notification(
-                recipient_kind="user", recipient_id=admin_id, title="Session recording shared",
-                body=f"{tutor_name} shared the recording for session #{request_id} - {subject}{topic_str}.",
-            )
-    except Exception:
-        logger.exception("Failed to notify admins of session %s's recording", request_id)
 
 
 def cancel_session(request_id: int, reason: str = "") -> None:

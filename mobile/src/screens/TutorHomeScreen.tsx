@@ -17,7 +17,6 @@ import {
   confirmTutoringSessionAsTutor,
   respondToAdminMatch,
   cancelTutoringSessionAsTutor,
-  submitSessionRecording,
   checkInToSessionAsTutor,
   checkOutOfSessionAsTutor,
   reportNoShowAsTutor,
@@ -410,8 +409,8 @@ export default function TutorHomeScreen({ navigation }: any) {
   const [openRequests, setOpenRequests] = useState<TutoringRequest[] | null>(null);
   const [openCutPercent, setOpenCutPercent] = useState<number>(30);
   // Screen-wide (load failures only) - shown at the top. Per-session
-  // action errors (accept, propose, respond, confirm, cancel, submit
-  // recording) use actionErrors below instead: those used to all funnel
+  // action errors (accept, propose, respond, confirm, cancel) use
+  // actionErrors below instead: those used to all funnel
   // into this SAME error, rendered only once at the top of the whole
   // scroll - so e.g. a "can't cancel within 24 hours" triggered by a
   // session far down a long list was invisible unless the tutor scrolled
@@ -438,8 +437,6 @@ export default function TutorHomeScreen({ navigation }: any) {
   const [cancelingId, setCancelingId] = useState<number | null>(null);
   const [cancelReasonId, setCancelReasonId] = useState<number | null>(null);
   const [cancelReason, setCancelReason] = useState("");
-  const [recordingDraft, setRecordingDraft] = useState<Record<number, string>>({});
-  const [submittingRecordingId, setSubmittingRecordingId] = useState<number | null>(null);
   const [sessionGroup, setSessionGroup] = useState<SessionGroup>("active");
   const [jobFilter, setJobFilter] = useState<string>("All");
   const [expandedJobId, setExpandedJobId] = useState<number | null>(null);
@@ -552,25 +549,6 @@ export default function TutorHomeScreen({ navigation }: any) {
       setActionError(requestId, e instanceof ApiError ? e.message : "Could not cancel this session.");
     } finally {
       setCancelingId(null);
-    }
-  }
-
-  async function handleSubmitRecording(requestId: number) {
-    if (!token) return;
-    const link = (recordingDraft[requestId] || "").trim();
-    if (!link) {
-      setActionError(requestId, "Please paste in the recording link.");
-      return;
-    }
-    setSubmittingRecordingId(requestId);
-    setActionError(requestId, null);
-    try {
-      await submitSessionRecording(token, requestId, link);
-      load();
-    } catch (e) {
-      setActionError(requestId, e instanceof ApiError ? e.message : "Could not submit the recording link.");
-    } finally {
-      setSubmittingRecordingId(null);
     }
   }
 
@@ -1006,36 +984,6 @@ export default function TutorHomeScreen({ navigation }: any) {
                       The Google Meet link will be created once the learner's payment is confirmed.
                     </Text>
                   ) : null}
-
-                  {(sess.status === "confirmed" || sess.status === "completed") && (
-                    sess.recording_link ? (
-                      <Text style={styles.cardMeta}>✓ Recording shared with Malita.</Text>
-                    ) : (
-                      <View style={styles.cancelBox}>
-                        <Text style={styles.confirmLabel}>
-                          Please record this session (Meet's own "Record meeting" button) and share the link:
-                        </Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="Paste the recording link (e.g. Google Drive)"
-                          placeholderTextColor={colors.inputPlaceholder}
-                          value={recordingDraft[sess.id] || ""}
-                          onChangeText={(v) => setRecordingDraft((prev) => ({ ...prev, [sess.id]: v }))}
-                        />
-                        <Pressable
-                          style={styles.acceptButton}
-                          onPress={() => handleSubmitRecording(sess.id)}
-                          disabled={submittingRecordingId === sess.id}
-                        >
-                          {submittingRecordingId === sess.id ? (
-                            <ActivityIndicator color="#fff" />
-                          ) : (
-                            <Text style={styles.acceptButtonText}>Submit Recording Link</Text>
-                          )}
-                        </Pressable>
-                      </View>
-                    )
-                  )}
 
                   {sess.status === "admin_proposed" && (
                     <View style={styles.proposalButtonRow}>

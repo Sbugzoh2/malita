@@ -498,6 +498,9 @@ export type TutoringRequest = {
   // isn't lapsed at all. status_label already reflects this - use this
   // field only for a more detailed message (see MyTutoringRequestsScreen).
   lapse_reason: "no_tutor_accepted" | "payment_not_completed" | null;
+  // Retired - sessions are no longer recorded. Null on every session
+  // going forward; only ever set on one submitted before this was
+  // retired, kept purely so admin can still see old history.
   recording_link: string | null;
   recording_shared_at: string | null;
   // Self-reported "I'm on the call" timestamps (see backend/tutoring.py's
@@ -663,18 +666,6 @@ export function submitRefundBankDetails(token: string, requestId: number, detail
     `/tutoring/requests/${requestId}/refund-bank-details`,
     { method: "POST", body: details, token }
   );
-}
-
-// There's no API that can force a recording on a non-Google-Workspace
-// Meet call, so the tutor records manually (Meet's own "Record meeting"
-// button) and submits the resulting link here afterward - Malita emails
-// every admin the link plus the session's full details.
-export function submitSessionRecording(token: string, requestId: number, recordingLink: string) {
-  return request<{ id: number; status: string }>(`/tutor/sessions/${requestId}/recording`, {
-    method: "POST",
-    body: { recording_link: recordingLink },
-    token,
-  });
 }
 
 export type CheckInResult = { id: number; learner_checked_in_at: string | null; tutor_checked_in_at: string | null };

@@ -820,11 +820,17 @@ class TutoringSessionRequest(Base):
     # re-sending the same reminder on every polling pass.
     reminder_24h_sent_at = Column(DateTime, nullable=True)
     reminder_15m_sent_at = Column(DateTime, nullable=True)
+    # Fires SESSION_REMINDER_MINUTES_BEFORE_END minutes before a
+    # session's scheduled END time (scheduled_at + duration_minutes),
+    # prompting both sides to check out and rate each other once it's
+    # done (see _notify_session_ending_soon/send_due_reminders).
+    reminder_ending_soon_sent_at = Column(DateTime, nullable=True)
     lapse_reminder_sent_at = Column(DateTime, nullable=True)
-    # The tutor's own manually-recorded Meet link, submitted after the
-    # session (see submit_session_recording in backend/tutoring.py) -
-    # there's no API that can force a recording on a non-Google-Workspace
-    # Meet call, so this is a tutor-submitted link, not an automated one.
+    # Retired - sessions are no longer recorded (no Google Workspace
+    # plan to actually support it reliably - see check_in_to_session's
+    # docstring). Left in place, unused by any new code, only so a
+    # recording link a tutor already submitted before this was retired
+    # still displays wherever admin looks at old session history.
     recording_link = Column(String, nullable=True)
     recording_shared_at = Column(DateTime, nullable=True)
     # Each side confirms independently that the session actually took
@@ -1179,6 +1185,7 @@ def init_db():
     _ensure_column("tutor_accounts", "account_status_reason", "VARCHAR")
     _ensure_column("tutor_accounts", "account_status_changed_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "reminder_15m_sent_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "reminder_ending_soon_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "lapse_reminder_sent_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "recording_link", "VARCHAR")
     _ensure_column("tutoring_session_requests", "recording_shared_at", "TIMESTAMP")

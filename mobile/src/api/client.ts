@@ -1249,6 +1249,15 @@ export type AdminTutoringSession = {
   recording_link: string | null;
   learner_rating: number | null;
   tutor_rating: number | null;
+  // Self-reported "I'm on the call" timestamps (see backend/tutoring.py's
+  // check_in_to_session) - the only presence signal this app can offer
+  // without a Google Workspace plan.
+  learner_checked_in_at: string | null;
+  tutor_checked_in_at: string | null;
+  no_show_reported_by: "learner" | "tutor" | null;
+  no_show_reported_at: string | null;
+  no_show_resolved_at: string | null;
+  no_show_resolution: "tutor_no_show" | "learner_no_show" | "dismissed" | null;
 };
 
 export function fetchAllTutoringSessionsAdmin(token: string, filter: "upcoming" | "completed" | "all" = "upcoming") {

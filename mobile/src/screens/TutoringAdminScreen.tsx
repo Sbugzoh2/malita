@@ -2059,6 +2059,30 @@ function SessionsSection({ token }: { token: string }) {
             {s.tutor_rating != null ? (
               <Text style={styles.detailLine}>Tutor rated: {s.tutor_rating}/5</Text>
             ) : null}
+            {(s.learner_checked_in_at || s.tutor_checked_in_at) && (
+              <Text style={styles.detailLine}>
+                Check-in: Learner{" "}
+                {s.learner_checked_in_at
+                  ? `✓ ${new Date(s.learner_checked_in_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" })}`
+                  : "— not checked in"}
+                {" · "}Tutor{" "}
+                {s.tutor_checked_in_at
+                  ? `✓ ${new Date(s.tutor_checked_in_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" })}`
+                  : "— not checked in"}
+              </Text>
+            )}
+            {s.no_show_reported_at && (
+              <Text style={[styles.detailLine, { color: colors.error }]}>
+                No-show reported by {s.no_show_reported_by === "learner" ? "the learner" : "the tutor"}
+                {s.no_show_resolved_at
+                  ? ` - resolved as ${s.no_show_resolution === "tutor_no_show"
+                      ? "tutor no-show"
+                      : s.no_show_resolution === "learner_no_show"
+                        ? "learner no-show"
+                        : "dismissed"}`
+                  : " - unresolved, see Needs Attention"}
+              </Text>
+            )}
           </View>
         ))
       )}

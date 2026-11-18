@@ -2543,6 +2543,26 @@ elif mode == "🛠️ Tutoring Admin":
                         st.write(f"Learner rated this session {s['learner_rating']}/5")
                     if s["tutor_rating"] is not None:
                         st.write(f"Tutor rated this session {s['tutor_rating']}/5")
+                    if s["learner_checked_in_at"] or s["tutor_checked_in_at"]:
+                        learner_checkin = (
+                            f"✓ {to_sast_str(s['learner_checked_in_at'])}"
+                            if s["learner_checked_in_at"] else "— not checked in"
+                        )
+                        tutor_checkin = (
+                            f"✓ {to_sast_str(s['tutor_checked_in_at'])}"
+                            if s["tutor_checked_in_at"] else "— not checked in"
+                        )
+                        st.write(f"**Check-in:** Learner {learner_checkin} · Tutor {tutor_checkin}")
+                    if s["no_show_reported_at"]:
+                        who = "the learner" if s["no_show_reported_by"] == "learner" else "the tutor"
+                        if s["no_show_resolved_at"]:
+                            resolution_label = {
+                                "tutor_no_show": "tutor no-show", "learner_no_show": "learner no-show",
+                                "dismissed": "dismissed",
+                            }.get(s["no_show_resolution"], s["no_show_resolution"])
+                            st.write(f"No-show reported by {who} - resolved as {resolution_label}")
+                        else:
+                            st.warning(f"No-show reported by {who} - unresolved, see Needs Attention")
 
         # ---- Approved tutors' standing record (subjects + full session
         # history) - an approved tutor's record never goes away, so an

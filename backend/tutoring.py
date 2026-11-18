@@ -2712,6 +2712,12 @@ def list_all_tutoring_sessions(
                 "learner_rating": r.learner_rating, "tutor_rating": r.tutor_rating,
                 "created_at": _iso_utc(r.created_at), "matched_at": _iso_utc(r.matched_at),
                 "paid_at": _iso_utc(r.paid_at),
+                "learner_checked_in_at": _iso_utc(r.learner_checked_in_at),
+                "tutor_checked_in_at": _iso_utc(r.tutor_checked_in_at),
+                "no_show_reported_by": r.no_show_reported_by,
+                "no_show_reported_at": _iso_utc(r.no_show_reported_at),
+                "no_show_resolved_at": _iso_utc(r.no_show_resolved_at),
+                "no_show_resolution": r.no_show_resolution,
             })
         return result
 

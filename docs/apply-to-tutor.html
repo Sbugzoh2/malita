@@ -33,7 +33,7 @@
     color: #1a1a1a;
   }
   textarea { min-height: 70px; resize: vertical; }
-  .subject-row {
+  .subject-row, .section-card {
     background: #fff;
     border: 1px solid #e4e7eb;
     border-radius: 12px;
@@ -76,18 +76,52 @@
   .message.success { background: #e9f8ef; color: #0a6b3a; display: block; }
   .message.error { background: #fdecec; color: #a3231f; display: block; }
   .file-note { font-size: 0.8em; color: #666; margin-top: 4px; }
+
+  .chip-row { display: flex; gap: 8px; margin-top: 8px; }
+  .chip {
+    flex: 1;
+    border: 1px solid #e1e0d9;
+    background: #fff;
+    color: #1a1a1a;
+    border-radius: 999px;
+    padding: 10px 8px;
+    font-weight: 700;
+    font-size: 0.85em;
+    cursor: pointer;
+    text-align: center;
+  }
+  .chip.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
+
+  .checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; }
+  .checkbox-row input[type=checkbox] { width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; }
+  .checkbox-row .checkbox-label { font-size: 0.92em; font-weight: 600; }
+  .subject-detail { margin-left: 28px; margin-top: 4px; padding-bottom: 6px; }
+  .subject-block { border-top: 1px solid #e4e7eb; padding-top: 10px; margin-top: 10px; }
+  .subject-block:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+  .helper-text { font-size: 0.82em; color: #666; font-style: italic; margin-top: 6px; }
+  .module-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.9em; }
+  .module-row .remove-module { color: #e34948; background: none; border: none; font-weight: 700; cursor: pointer; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
 
 <h1>Apply to Tutor with Malita</h1>
 <p class="intro">
-Tutor Grade 12 learners 1-on-1, on your own schedule. We review every application by hand — you'll
-hear back from us by email once we've checked your matric results and documents. A matric mark of at
-least <strong>65%</strong> in a subject is required to apply to tutor it.
+Tutor learners 1-on-1, from Grade 10 through university/college, on your own schedule. We review
+every application by hand — you'll hear back from us by email once we've checked your documents.
+A matric mark of at least <strong>65%</strong> is required to apply to tutor a high-school subject;
+university/college tutoring is reviewed against your own academic record instead.
 </p>
 
 <form id="tutorApplyForm">
+  <h2>What would you like to tutor?</h2>
+  <div class="chip-row">
+    <button type="button" class="chip active" data-mode="school">High School</button>
+    <button type="button" class="chip" data-mode="uni">University / College</button>
+    <button type="button" class="chip" data-mode="both">Both</button>
+  </div>
+
   <h2>Your details</h2>
   <label for="name">Full name *</label>
   <input type="text" id="name" required />
@@ -99,46 +133,173 @@ least <strong>65%</strong> in a subject is required to apply to tutor it.
   <div class="hint">At least 8 characters — you'll use this to log in later.</div>
   <input type="password" id="password" minlength="8" required />
 
-  <label for="phone">Phone number</label>
-  <input type="tel" id="phone" />
+  <label for="passwordConfirm">Confirm password *</label>
+  <input type="password" id="passwordConfirm" minlength="8" required />
 
-  <label for="idNumber">South African ID number</label>
-  <input type="text" id="idNumber" maxlength="13" />
+  <label for="phone">Phone number *</label>
+  <input type="tel" id="phone" required />
 
-  <label for="bio">A little about you</label>
-  <textarea id="bio" placeholder="Your teaching experience, what you enjoy about tutoring, etc."></textarea>
+  <label for="idNumber">South African ID number *</label>
+  <input type="text" id="idNumber" maxlength="13" required />
+
+  <label for="bio">A little about you *</label>
+  <textarea id="bio" placeholder="Your teaching experience, what you enjoy about tutoring, etc." required></textarea>
 
   <h2>Verification</h2>
-  <label for="idDocument">ID document (photo or scan of your ID/passport)</label>
+  <label for="idDocument">ID document (photo or scan of your ID/passport) *</label>
   <input type="file" id="idDocument" accept="image/*,.pdf" />
   <div class="file-note">Or leave this blank and describe below where we can find it instead.</div>
   <label for="idVerificationNote">ID verification note (optional)</label>
   <input type="text" id="idVerificationNote" placeholder="e.g. a link to where you've already uploaded it" />
 
-  <label for="matricCertificate">Matric (NSC) certificate</label>
+  <label for="matricCertificate">Matric (NSC) certificate *</label>
   <input type="file" id="matricCertificate" accept="image/*,.pdf" />
-  <div class="file-note">Or leave this blank and describe below where we can find it instead.</div>
+  <div class="file-note">Required for every applicant, even if you're only applying to tutor university/college modules.</div>
   <label for="matricCertificateNote">Matric certificate note (optional)</label>
   <input type="text" id="matricCertificateNote" placeholder="e.g. a link to where you've already uploaded it" />
 
-  <label for="cvDocument">CV (one page)</label>
+  <label for="cvDocument">CV (one page) *</label>
   <input type="file" id="cvDocument" accept="image/*,.pdf" />
   <div class="file-note">Or leave this blank and describe below where we can find it instead.</div>
   <label for="cvNote">CV note (optional)</label>
   <input type="text" id="cvNote" placeholder="e.g. a link to where you've already uploaded it" />
 
   <h2>Availability</h2>
-  <label for="availabilityNote">When are you generally available to tutor?</label>
+  <label for="availabilityNote">When are you generally available to tutor? *</label>
   <div class="hint">Days and times that work for you — we'll match sessions around this.</div>
-  <textarea id="availabilityNote" placeholder="e.g. Weekdays after 16:00, Saturday mornings"></textarea>
+  <textarea id="availabilityNote" placeholder="e.g. Weekdays after 16:00, Saturday mornings" required></textarea>
 
-  <label for="bankAccountNote">Bank account details for payouts</label>
-  <div class="hint">Bank name, account number, branch code — used to pay you once we automate payouts; for now we'll confirm this with you directly.</div>
-  <textarea id="bankAccountNote"></textarea>
+  <h2>Bank account details (for payouts)</h2>
+  <label for="bankAccountHolder">Account holder name *</label>
+  <input type="text" id="bankAccountHolder" placeholder="As it appears on your bank statement" required />
 
-  <h2>Subjects you want to tutor</h2>
-  <div id="subjectRows"></div>
-  <button type="button" class="secondary" id="addSubjectBtn">+ Add another subject</button>
+  <label for="bankName">Bank *</label>
+  <select id="bankName" required>
+    <option value="" disabled selected>Select your bank</option>
+    <option>ABSA</option>
+    <option>African Bank</option>
+    <option>Bank Zero</option>
+    <option>Bidvest Bank</option>
+    <option>Capitec Bank</option>
+    <option>Discovery Bank</option>
+    <option>First National Bank (FNB)</option>
+    <option>Investec</option>
+    <option>Nedbank</option>
+    <option>Sasfin Bank</option>
+    <option>Standard Bank</option>
+    <option>TymeBank</option>
+    <option>Other</option>
+  </select>
+  <div id="bankNameOtherWrap" class="hidden">
+    <label for="bankNameOther">Bank name *</label>
+    <input type="text" id="bankNameOther" />
+  </div>
+
+  <div class="row-2">
+    <div>
+      <label for="bankBranchCode">Branch code *</label>
+      <input type="text" id="bankBranchCode" inputmode="numeric" required />
+    </div>
+    <div>
+      <label for="bankAccountNumber">Account number *</label>
+      <input type="text" id="bankAccountNumber" inputmode="numeric" required />
+    </div>
+  </div>
+
+  <label for="bankAccountType">Account type *</label>
+  <select id="bankAccountType" required>
+    <option value="" disabled selected>Select account type</option>
+    <option>Cheque/Current Account</option>
+    <option>Savings Account</option>
+    <option>Transmission Account</option>
+    <option>Other</option>
+  </select>
+  <div id="bankAccountTypeOtherWrap" class="hidden">
+    <label for="bankAccountTypeOther">Account type *</label>
+    <input type="text" id="bankAccountTypeOther" />
+  </div>
+
+  <label for="bankAccountNote">Additional notes (optional)</label>
+  <textarea id="bankAccountNote" placeholder="e.g. a SWIFT code for an international account"></textarea>
+
+  <label for="bankProof">Proof of bank account (statement or confirmation letter) *</label>
+  <input type="file" id="bankProof" accept="image/*,.pdf" />
+
+  <div id="schoolSection">
+    <h2>High School Subjects</h2>
+    <p class="helper-text">Select every subject you're able to tutor:</p>
+    <div id="subjectChecklist"></div>
+  </div>
+
+  <div id="uniSection" class="hidden">
+    <h2>University / College Details</h2>
+    <div class="section-card">
+      <label for="institutionSelect">Institution *</label>
+      <select id="institutionSelect">
+        <option value="" disabled selected>Loading institutions…</option>
+      </select>
+
+      <label for="qualificationSelect">Highest completed qualification, or the one you're currently studying towards *</label>
+      <select id="qualificationSelect">
+        <option value="" disabled selected>Select an institution first</option>
+      </select>
+      <div id="customQualificationWrap" class="hidden">
+        <label for="customQualificationName">Your qualification *</label>
+        <input type="text" id="customQualificationName" placeholder="e.g. BCom Investment Management" />
+      </div>
+      <p id="noQualificationsNote" class="helper-text hidden">
+        No qualifications listed yet for this institution — ask an admin to add it to the catalog.
+      </p>
+
+      <label for="yearOfStudy">Your year of study *</label>
+      <select id="yearOfStudy">
+        <option value="" disabled selected>Select your year</option>
+        <option value="1">1st Year</option>
+        <option value="2">2nd Year</option>
+        <option value="3">3rd Year</option>
+        <option value="4">4th Year / Honours</option>
+        <option value="5">Postgraduate (Masters/Doctoral)</option>
+      </select>
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="qualificationComplete" />
+        <label for="qualificationComplete" class="checkbox-label" style="margin:0;">I've already completed this qualification</label>
+      </div>
+
+      <label for="higherEdAverage">Semester / final average (%) *</label>
+      <input type="number" id="higherEdAverage" min="0" max="100" step="1" />
+
+      <label for="transcriptNote">Transcript note *</label>
+      <textarea id="transcriptNote" placeholder="e.g. anything we should know when reviewing your transcript"></textarea>
+
+      <label for="transcriptFile">Academic transcript *</label>
+      <input type="file" id="transcriptFile" accept="image/*,.pdf" />
+
+      <div id="qualificationCertificateWrap" class="hidden">
+        <label for="qualificationCertificateFile">Qualification certificate / proof of completion *</label>
+        <input type="file" id="qualificationCertificateFile" accept="image/*,.pdf" />
+      </div>
+
+      <label style="margin-top:20px;">Modules you're able to tutor *</label>
+      <p id="moduleSelectFirstNote" class="helper-text">Select a qualification first.</p>
+      <div id="moduleChecklist"></div>
+      <div id="customModulesList"></div>
+      <p id="addModuleFirstNote" class="helper-text hidden">Select your year of study first.</p>
+      <div id="addModuleRow" class="hidden">
+        <div class="row-2" style="margin-top:10px;">
+          <div>
+            <label for="newCustomModuleName">Module</label>
+            <input type="text" id="newCustomModuleName" placeholder="Module name" />
+          </div>
+          <div>
+            <label for="newCustomModuleYear">Year</label>
+            <select id="newCustomModuleYear"></select>
+          </div>
+        </div>
+        <button type="button" class="secondary" id="addModuleBtn">+ Add module</button>
+      </div>
+    </div>
+  </div>
 
   <button type="submit" class="submit" id="submitBtn">Submit Application</button>
   <div class="message" id="formMessage"></div>
@@ -147,44 +308,263 @@ least <strong>65%</strong> in a subject is required to apply to tutor it.
 <script>
 const API_BASE_URL = "https://malita-api.onrender.com";
 
-let subjectRowCount = 0;
-function addSubjectRow() {
-  subjectRowCount += 1;
-  const id = subjectRowCount;
-  const div = document.createElement("div");
-  div.className = "subject-row";
-  div.dataset.rowId = id;
-  div.innerHTML = `
-    ${id > 1 ? '<button type="button" class="remove-btn" data-remove="' + id + '">Remove</button>' : ""}
-    <label>Subject *</label>
-    <select class="subj-subject" required>
-      <option value="Mathematics">Mathematics</option>
-      <option value="Physical Sciences">Physical Sciences</option>
-    </select>
-    <div class="row-2">
-      <div>
-        <label>Your matric mark (%) *</label>
-        <input type="number" class="subj-percentage" min="0" max="100" step="1" required />
-      </div>
-      <div>
-        <label>Asking rate (R/hour)</label>
-        <input type="number" class="subj-rate" min="0" step="10" />
-      </div>
-    </div>
-    <label>Topics you're strongest in (optional)</label>
-    <input type="text" class="subj-topics" placeholder="e.g. Calculus, Trigonometry" />
-  `;
-  document.getElementById("subjectRows").appendChild(div);
-}
-addSubjectRow();
+const HIGH_SCHOOL_TUTORING_SUBJECTS = [
+  "Mathematics", "Mathematical Literacy", "Physical Sciences", "Life Sciences",
+  "English Home Language", "English First Additional Language",
+  "Afrikaans Home Language", "Afrikaans First Additional Language",
+  "isiZulu Home Language", "isiZulu First Additional Language",
+  "Life Orientation", "Accounting", "Business Studies", "Economics", "Geography", "History",
+  "Agricultural Sciences", "Consumer Studies", "Computer Applications Technology",
+  "Information Technology", "Tourism", "Hospitality Studies", "Visual Arts", "Dramatic Arts",
+  "Music", "Engineering Graphics and Design", "Religion Studies",
+];
+const YEAR_LEVEL_LABELS = {
+  1: "1st Year", 2: "2nd Year", 3: "3rd Year", 4: "4th Year / Honours",
+  5: "Postgraduate (Masters/Doctoral)",
+};
 
-document.getElementById("addSubjectBtn").addEventListener("click", addSubjectRow);
-document.getElementById("subjectRows").addEventListener("click", (e) => {
-  if (e.target.dataset.remove) {
-    e.target.closest(".subject-row").remove();
-  }
+// ---- Segment chips (High School / University / Both) ----
+let wantsHighSchool = true;
+let wantsHigherEd = false;
+const chipButtons = document.querySelectorAll(".chip");
+function setMode(mode) {
+  wantsHighSchool = mode === "school" || mode === "both";
+  wantsHigherEd = mode === "uni" || mode === "both";
+  chipButtons.forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  document.getElementById("schoolSection").classList.toggle("hidden", !wantsHighSchool);
+  document.getElementById("uniSection").classList.toggle("hidden", !wantsHigherEd);
+}
+chipButtons.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+// ---- High-school subject checklist ----
+const subjectState = {};
+HIGH_SCHOOL_TUTORING_SUBJECTS.forEach((s) => { subjectState[s] = { selected: false, matric: "", topics: "", rate: "" }; });
+
+function renderSubjectChecklist() {
+  const container = document.getElementById("subjectChecklist");
+  container.innerHTML = "";
+  HIGH_SCHOOL_TUTORING_SUBJECTS.forEach((s) => {
+    const row = document.createElement("div");
+    row.className = "subject-block";
+    const state = subjectState[s];
+    row.innerHTML = `
+      <div class="checkbox-row" style="margin-top:0;">
+        <input type="checkbox" data-subject="${s}" class="subject-toggle" ${state.selected ? "checked" : ""} />
+        <label class="checkbox-label" style="margin:0;">${s}</label>
+      </div>
+      <div class="subject-detail ${state.selected ? "" : "hidden"}" data-detail-for="${s}">
+        <label>Your matric mark (%) *</label>
+        <input type="number" min="0" max="100" step="1" class="subj-matric" data-subject="${s}" value="${state.matric}" />
+        <label>Topics you specialize in *</label>
+        <input type="text" class="subj-topics" data-subject="${s}" value="${state.topics}" />
+        <label>Asking rate (R/hr) *</label>
+        <input type="number" min="0" step="10" class="subj-rate" data-subject="${s}" value="${state.rate}" />
+      </div>
+    `;
+    container.appendChild(row);
+  });
+  container.querySelectorAll(".subject-toggle").forEach((el) => {
+    el.addEventListener("change", (e) => {
+      const subj = e.target.dataset.subject;
+      subjectState[subj].selected = e.target.checked;
+      container.querySelector(`[data-detail-for="${subj}"]`).classList.toggle("hidden", !e.target.checked);
+    });
+  });
+  container.querySelectorAll(".subj-matric").forEach((el) => el.addEventListener("input", (e) => {
+    subjectState[e.target.dataset.subject].matric = e.target.value;
+  }));
+  container.querySelectorAll(".subj-topics").forEach((el) => el.addEventListener("input", (e) => {
+    subjectState[e.target.dataset.subject].topics = e.target.value;
+  }));
+  container.querySelectorAll(".subj-rate").forEach((el) => el.addEventListener("input", (e) => {
+    subjectState[e.target.dataset.subject].rate = e.target.value;
+  }));
+}
+renderSubjectChecklist();
+
+// ---- Bank "Other" escape hatches ----
+document.getElementById("bankName").addEventListener("change", (e) => {
+  document.getElementById("bankNameOtherWrap").classList.toggle("hidden", e.target.value !== "Other");
+});
+document.getElementById("bankAccountType").addEventListener("change", (e) => {
+  document.getElementById("bankAccountTypeOtherWrap").classList.toggle("hidden", e.target.value !== "Other");
 });
 
+// ---- Higher-ed: institutions / qualifications / modules ----
+let institutions = [];
+let qualifications = [];
+let modules = [];
+let isCustomQualification = false;
+const selectedModuleIds = new Set();
+let customModules = [];
+
+fetch(`${API_BASE_URL}/catalog/institutions`)
+  .then((r) => r.json())
+  .then((data) => {
+    institutions = data.institutions || [];
+    const sel = document.getElementById("institutionSelect");
+    sel.innerHTML = '<option value="" disabled selected>Select your institution</option>' +
+      institutions.map((i) => `<option value="${i.id}">${i.name}</option>`).join("");
+  })
+  .catch(() => {
+    document.getElementById("institutionSelect").innerHTML = '<option value="">Could not load institutions</option>';
+  });
+
+document.getElementById("institutionSelect").addEventListener("change", (e) => {
+  const institutionId = e.target.value;
+  qualifications = [];
+  modules = [];
+  selectedModuleIds.clear();
+  isCustomQualification = false;
+  document.getElementById("customQualificationWrap").classList.add("hidden");
+  document.getElementById("noQualificationsNote").classList.add("hidden");
+  const qSel = document.getElementById("qualificationSelect");
+  qSel.innerHTML = '<option value="" disabled selected>Loading qualifications…</option>';
+  renderModuleChecklist();
+  if (!institutionId) return;
+  fetch(`${API_BASE_URL}/catalog/qualifications?institution_id=${institutionId}`)
+    .then((r) => r.json())
+    .then((data) => {
+      qualifications = data.qualifications || [];
+      qSel.innerHTML = '<option value="" disabled selected>Select your qualification</option>' +
+        qualifications.map((q) => `<option value="${q.id}">${q.name}</option>`).join("") +
+        '<option value="other">Other (not listed)</option>';
+      document.getElementById("noQualificationsNote").classList.toggle("hidden", qualifications.length > 0);
+    })
+    .catch(() => {
+      qSel.innerHTML = '<option value="">Could not load qualifications</option>';
+    });
+});
+
+document.getElementById("qualificationSelect").addEventListener("change", (e) => {
+  const val = e.target.value;
+  isCustomQualification = val === "other";
+  document.getElementById("customQualificationWrap").classList.toggle("hidden", !isCustomQualification);
+  modules = [];
+  selectedModuleIds.clear();
+  if (isCustomQualification || !val) {
+    renderModuleChecklist();
+    return;
+  }
+  document.getElementById("moduleChecklist").innerHTML = '<p class="helper-text">Loading modules…</p>';
+  fetch(`${API_BASE_URL}/catalog/modules?qualification_id=${val}`)
+    .then((r) => r.json())
+    .then((data) => {
+      modules = data.modules || [];
+      renderModuleChecklist();
+    })
+    .catch(() => {
+      document.getElementById("moduleChecklist").innerHTML = '<p class="helper-text">Could not load modules.</p>';
+    });
+});
+
+function getYearOfStudy() {
+  const v = document.getElementById("yearOfStudy").value;
+  return v ? parseInt(v, 10) : null;
+}
+function isQualificationComplete() {
+  return document.getElementById("qualificationComplete").checked;
+}
+
+function renderModuleChecklist() {
+  const container = document.getElementById("moduleChecklist");
+  const firstNote = document.getElementById("moduleSelectFirstNote");
+  const yearOfStudy = getYearOfStudy();
+  const complete = isQualificationComplete();
+
+  if (isCustomQualification) {
+    container.innerHTML = "";
+    firstNote.classList.add("hidden");
+  } else if (modules.length === 0 && !document.getElementById("qualificationSelect").value) {
+    container.innerHTML = "";
+    firstNote.classList.remove("hidden");
+    firstNote.textContent = "Select a qualification first.";
+  } else {
+    firstNote.classList.add("hidden");
+    const eligible = modules.filter((m) => complete || (yearOfStudy != null && m.year_level < yearOfStudy));
+    if (eligible.length === 0) {
+      container.innerHTML = '<p class="helper-text">No eligible modules yet - either none are listed for this qualification, or none are behind your selected year of study.</p>';
+    } else {
+      container.innerHTML = eligible.map((m) => `
+        <div class="checkbox-row">
+          <input type="checkbox" class="module-toggle" data-module-id="${m.id}" ${selectedModuleIds.has(m.id) ? "checked" : ""} />
+          <label class="checkbox-label" style="margin:0;">${m.name} (${m.year_level_label})</label>
+        </div>
+      `).join("");
+      container.querySelectorAll(".module-toggle").forEach((el) => {
+        el.addEventListener("change", (e) => {
+          const id = parseInt(e.target.dataset.moduleId, 10);
+          if (e.target.checked) selectedModuleIds.add(id); else selectedModuleIds.delete(id);
+        });
+      });
+    }
+  }
+  renderCustomModulesList();
+  renderAddModuleControls();
+}
+
+function renderCustomModulesList() {
+  const container = document.getElementById("customModulesList");
+  container.innerHTML = customModules.map((m, i) => `
+    <div class="module-row">
+      <span style="flex:1;">${m.name} (${YEAR_LEVEL_LABELS[m.year_level]})</span>
+      <button type="button" class="remove-module" data-index="${i}">✕</button>
+    </div>
+  `).join("");
+  container.querySelectorAll(".remove-module").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      customModules.splice(parseInt(e.target.dataset.index, 10), 1);
+      renderCustomModulesList();
+    });
+  });
+}
+
+function renderAddModuleControls() {
+  const yearOfStudy = getYearOfStudy();
+  const complete = isQualificationComplete();
+  const eligibleYears = Object.entries(YEAR_LEVEL_LABELS).filter(
+    ([k]) => complete || (yearOfStudy != null && parseInt(k, 10) < yearOfStudy)
+  );
+  const addRow = document.getElementById("addModuleRow");
+  const firstNote = document.getElementById("addModuleFirstNote");
+  if (!yearOfStudy && !complete) {
+    addRow.classList.add("hidden");
+    firstNote.classList.remove("hidden");
+    firstNote.textContent = "Select your year of study first.";
+    return;
+  }
+  if (eligibleYears.length === 0) {
+    addRow.classList.add("hidden");
+    firstNote.classList.remove("hidden");
+    firstNote.textContent = "No year level is behind your selected year of study.";
+    return;
+  }
+  firstNote.classList.add("hidden");
+  addRow.classList.remove("hidden");
+  const yearSel = document.getElementById("newCustomModuleYear");
+  yearSel.innerHTML = '<option value="" disabled selected>Year</option>' +
+    eligibleYears.map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+}
+
+document.getElementById("yearOfStudy").addEventListener("change", () => renderModuleChecklist());
+document.getElementById("qualificationComplete").addEventListener("change", (e) => {
+  document.getElementById("qualificationCertificateWrap").classList.toggle("hidden", !e.target.checked);
+  renderModuleChecklist();
+});
+
+document.getElementById("addModuleBtn").addEventListener("click", () => {
+  const nameEl = document.getElementById("newCustomModuleName");
+  const yearEl = document.getElementById("newCustomModuleYear");
+  if (!nameEl.value.trim() || !yearEl.value) return;
+  customModules.push({ name: nameEl.value.trim(), year_level: parseInt(yearEl.value, 10) });
+  nameEl.value = "";
+  yearEl.value = "";
+  renderCustomModulesList();
+});
+
+renderModuleChecklist();
+
+// ---- Submit ----
 document.getElementById("tutorApplyForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const messageEl = document.getElementById("formMessage");
@@ -192,38 +572,144 @@ document.getElementById("tutorApplyForm").addEventListener("submit", async (e) =
   messageEl.className = "message";
   messageEl.textContent = "";
 
-  const subjects = Array.from(document.querySelectorAll(".subject-row")).map((row) => {
-    const pct = row.querySelector(".subj-percentage").value;
-    const rate = row.querySelector(".subj-rate").value;
-    const topics = row.querySelector(".subj-topics").value.trim();
-    return {
-      subject: row.querySelector(".subj-subject").value,
-      matric_percentage: pct ? parseFloat(pct) : null,
-      topics: topics || null,
-      hourly_rate_zar: rate ? parseFloat(rate) : null,
-    };
-  });
+  function fail(msg) {
+    messageEl.className = "message error";
+    messageEl.textContent = msg;
+  }
+
+  const name = document.getElementById("name").value.trim();
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const passwordConfirm = document.getElementById("passwordConfirm").value;
+  const phone = document.getElementById("phone").value.trim();
+  const idNumber = document.getElementById("idNumber").value.trim();
+  const bio = document.getElementById("bio").value.trim();
+  const availabilityNote = document.getElementById("availabilityNote").value.trim();
+  const bankAccountHolder = document.getElementById("bankAccountHolder").value.trim();
+  const bankNameVal = document.getElementById("bankName").value;
+  const bankNameOther = document.getElementById("bankNameOther").value.trim();
+  const bankBranchCode = document.getElementById("bankBranchCode").value.trim();
+  const bankAccountNumber = document.getElementById("bankAccountNumber").value.trim();
+  const bankAccountTypeVal = document.getElementById("bankAccountType").value;
+  const bankAccountTypeOther = document.getElementById("bankAccountTypeOther").value.trim();
+
+  if (!wantsHighSchool && !wantsHigherEd) return fail("Please choose high school, university/college, or both.");
+  if (!name) return fail("Please enter your full name.");
+  if (!email) return fail("Please enter your email.");
+  if (!phone) return fail("Please enter your phone number.");
+  if (password.length < 8) return fail("Password must be at least 8 characters long.");
+  if (password !== passwordConfirm) return fail("Passwords don't match.");
+  if (!bio) return fail("Please enter a short bio.");
+  if (!idNumber) return fail("Please enter your ID number.");
+  if (!availabilityNote) return fail("Please describe when you're available to tutor.");
+  if (!bankAccountHolder) return fail("Please enter the bank account holder's name.");
+  if (!bankNameVal) return fail("Please select your bank.");
+  if (bankNameVal === "Other" && !bankNameOther) return fail("Please enter your bank's name.");
+  if (!bankBranchCode) return fail("Please enter your branch code.");
+  if (!bankAccountNumber) return fail("Please enter your account number.");
+  if (!bankAccountTypeVal) return fail("Please select your account type.");
+  if (bankAccountTypeVal === "Other" && !bankAccountTypeOther) return fail("Please enter your account type.");
+
+  const idDocument = document.getElementById("idDocument").files[0];
+  const cvFile = document.getElementById("cvDocument").files[0];
+  const matricFile = document.getElementById("matricCertificate").files[0];
+  const bankProofFile = document.getElementById("bankProof").files[0];
+  if (!idDocument) return fail("Please upload your ID document.");
+  if (!cvFile) return fail("Please upload your CV.");
+  if (!matricFile) return fail("Please upload your matric certificate.");
+  if (!bankProofFile) return fail("Please upload proof of your bank account.");
+
+  const chosenSubjects = HIGH_SCHOOL_TUTORING_SUBJECTS.filter((s) => subjectState[s].selected);
+  const isBothMode = wantsHighSchool && wantsHigherEd;
+  if (wantsHighSchool && !isBothMode && chosenSubjects.length === 0) {
+    return fail("Please select at least one subject.");
+  }
+  for (const s of chosenSubjects) {
+    const st = subjectState[s];
+    if (st.matric === "" || isNaN(parseFloat(st.matric))) return fail(`Please enter your matric mark for ${s}.`);
+    if (!st.topics.trim()) return fail(`Please enter the topics you specialize in for ${s}.`);
+    if (!st.rate.trim()) return fail(`Please enter your asking rate for ${s}.`);
+  }
+  const effectiveWantsHighSchool = chosenSubjects.length > 0;
+
+  let higherEdInstitutionId = null, higherEdQualificationId = null, higherEdCustomQualName = "";
+  let higherEdYearOfStudy = null, higherEdComplete = false, higherEdAverage = null, higherEdTranscriptNote = "";
+  let transcriptFile = null, qualificationCertificateFile = null;
+
+  if (wantsHigherEd) {
+    higherEdInstitutionId = document.getElementById("institutionSelect").value || null;
+    const qualVal = document.getElementById("qualificationSelect").value;
+    if (!higherEdInstitutionId || (!isCustomQualification && !qualVal)) {
+      return fail("Please select your institution and qualification.");
+    }
+    if (isCustomQualification) {
+      higherEdCustomQualName = document.getElementById("customQualificationName").value.trim();
+      if (!higherEdCustomQualName) return fail("Please enter the name of your qualification.");
+    } else {
+      higherEdQualificationId = qualVal;
+    }
+    higherEdYearOfStudy = getYearOfStudy();
+    if (!higherEdYearOfStudy) return fail("Please select your year of study.");
+    higherEdComplete = isQualificationComplete();
+    const avgRaw = document.getElementById("higherEdAverage").value;
+    if (avgRaw === "" || isNaN(parseFloat(avgRaw))) return fail("Please enter your semester/final average.");
+    higherEdAverage = parseFloat(avgRaw);
+    higherEdTranscriptNote = document.getElementById("transcriptNote").value.trim();
+    if (!higherEdTranscriptNote) return fail("Please enter a transcript note.");
+    if (selectedModuleIds.size === 0 && customModules.length === 0) {
+      return fail("Please select or add at least one module you're able to tutor.");
+    }
+    transcriptFile = document.getElementById("transcriptFile").files[0];
+    if (!transcriptFile) return fail("Please upload your academic transcript.");
+    if (higherEdComplete) {
+      qualificationCertificateFile = document.getElementById("qualificationCertificateFile").files[0];
+      if (!qualificationCertificateFile) return fail("Please upload your qualification certificate / proof of completion.");
+    }
+  }
 
   const formData = new FormData();
-  formData.append("name", document.getElementById("name").value);
-  formData.append("email", document.getElementById("email").value);
-  formData.append("password", document.getElementById("password").value);
-  formData.append("phone", document.getElementById("phone").value);
-  formData.append("bio", document.getElementById("bio").value);
-  formData.append("id_number", document.getElementById("idNumber").value);
-  formData.append("id_verification_note", document.getElementById("idVerificationNote").value);
-  formData.append("matric_certificate_note", document.getElementById("matricCertificateNote").value);
-  formData.append("cv_note", document.getElementById("cvNote").value);
-  formData.append("availability_note", document.getElementById("availabilityNote").value);
-  formData.append("bank_account_note", document.getElementById("bankAccountNote").value);
-  formData.append("subjects", JSON.stringify(subjects));
+  formData.append("name", name);
+  formData.append("email", email);
+  formData.append("password", password);
+  formData.append("phone", phone);
+  formData.append("bio", bio);
+  formData.append("id_number", idNumber);
+  formData.append("id_verification_note", document.getElementById("idVerificationNote").value.trim());
+  formData.append("matric_certificate_note", document.getElementById("matricCertificateNote").value.trim());
+  formData.append("cv_note", document.getElementById("cvNote").value.trim());
+  formData.append("availability_note", availabilityNote);
+  formData.append("bank_account_holder", bankAccountHolder);
+  formData.append("bank_name", bankNameVal === "Other" ? bankNameOther : bankNameVal);
+  formData.append("bank_branch_code", bankBranchCode);
+  formData.append("bank_account_number", bankAccountNumber);
+  formData.append("bank_account_type", bankAccountTypeVal === "Other" ? bankAccountTypeOther : bankAccountTypeVal);
+  formData.append("bank_account_note", document.getElementById("bankAccountNote").value.trim());
+  formData.append("wants_high_school", effectiveWantsHighSchool ? "true" : "false");
+  formData.append("wants_higher_ed", wantsHigherEd ? "true" : "false");
+  formData.append("subjects", JSON.stringify(chosenSubjects.map((s) => ({
+    subject: s,
+    matric_percentage: parseFloat(subjectState[s].matric),
+    topics: subjectState[s].topics.trim() || null,
+    hourly_rate_zar: subjectState[s].rate ? parseFloat(subjectState[s].rate) : null,
+  }))));
+  if (wantsHigherEd) {
+    if (higherEdInstitutionId) formData.append("higher_ed_institution_id", higherEdInstitutionId);
+    if (higherEdQualificationId) formData.append("higher_ed_qualification_id", higherEdQualificationId);
+    formData.append("higher_ed_qualification_custom_name", higherEdCustomQualName);
+    formData.append("higher_ed_year_of_study", higherEdYearOfStudy);
+    formData.append("higher_ed_qualification_complete", higherEdComplete ? "true" : "false");
+    formData.append("higher_ed_average", higherEdAverage);
+    formData.append("higher_ed_transcript_note", higherEdTranscriptNote);
+    formData.append("higher_ed_module_ids", JSON.stringify(Array.from(selectedModuleIds)));
+    formData.append("higher_ed_custom_modules", JSON.stringify(customModules));
+  }
 
-  const idFile = document.getElementById("idDocument").files[0];
-  if (idFile) formData.append("id_document", idFile);
-  const matricFile = document.getElementById("matricCertificate").files[0];
-  if (matricFile) formData.append("matric_certificate", matricFile);
-  const cvFile = document.getElementById("cvDocument").files[0];
-  if (cvFile) formData.append("cv", cvFile);
+  formData.append("id_document", idDocument);
+  formData.append("matric_certificate", matricFile);
+  formData.append("cv", cvFile);
+  formData.append("bank_proof", bankProofFile);
+  if (transcriptFile) formData.append("higher_ed_transcript", transcriptFile);
+  if (qualificationCertificateFile) formData.append("higher_ed_qualification_certificate", qualificationCertificateFile);
 
   submitBtn.disabled = true;
   submitBtn.textContent = "Submitting…";
@@ -233,15 +719,27 @@ document.getElementById("tutorApplyForm").addEventListener("submit", async (e) =
     if (!res.ok) {
       throw new Error(data.detail || "Something went wrong. Please try again.");
     }
+    let successMsg = "Thanks! Your application has been submitted — we'll be in touch by email once we've reviewed it.";
+    const notes = [];
+    for (const s of data.excluded_subjects || []) {
+      notes.push(`${s.subject} (${s.matric_percentage ?? "?"}%) wasn't included - ${s.reason}`);
+    }
+    if (data.excluded_higher_ed_reason) notes.push(data.excluded_higher_ed_reason);
+    if (notes.length > 0) successMsg += " Note: " + notes.join(" ");
     messageEl.className = "message success";
-    messageEl.textContent = "Thanks! Your application has been submitted — we'll be in touch by email once we've reviewed it.";
+    messageEl.textContent = successMsg;
     document.getElementById("tutorApplyForm").reset();
-    document.getElementById("subjectRows").innerHTML = "";
-    subjectRowCount = 0;
-    addSubjectRow();
+    HIGH_SCHOOL_TUTORING_SUBJECTS.forEach((s) => { subjectState[s] = { selected: false, matric: "", topics: "", rate: "" }; });
+    renderSubjectChecklist();
+    customModules = [];
+    selectedModuleIds.clear();
+    setMode("school");
+    document.getElementById("bankNameOtherWrap").classList.add("hidden");
+    document.getElementById("bankAccountTypeOtherWrap").classList.add("hidden");
+    document.getElementById("qualificationCertificateWrap").classList.add("hidden");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
-    messageEl.className = "message error";
-    messageEl.textContent = err.message || "Something went wrong. Please try again.";
+    fail(err.message || "Something went wrong. Please try again.");
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = "Submit Application";

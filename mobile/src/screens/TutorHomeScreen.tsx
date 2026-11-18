@@ -43,6 +43,15 @@ function formatScheduled(iso: string): string {
   });
 }
 
+// Mirrors backend/tutoring.py's cancel_accepted_session, which now
+// rejects a cancellation once a session's scheduled time has passed -
+// hides the button rather than letting someone tap it just to see an
+// error.
+function hasSessionStarted(scheduledAt: string | null): boolean {
+  if (!scheduledAt) return false;
+  return new Date(scheduledAt).getTime() <= Date.now();
+}
+
 function payoutPreview(priceZar: number, cutPercent: number): string {
   return `R${(priceZar * (1 - cutPercent / 100)).toFixed(2)}`;
 }
@@ -1128,7 +1137,8 @@ export default function TutorHomeScreen({ navigation }: any) {
                     <Text style={styles.cardMeta}>You rated this session {sess.tutor_rating}/5 ⭐</Text>
                   )}
 
-                  {(sess.status === "awaiting_payment" || sess.status === "confirmed") && (
+                  {(sess.status === "awaiting_payment" || sess.status === "confirmed") &&
+                    !hasSessionStarted(sess.scheduled_at) && (
                     cancelReasonId === sess.id ? (
                       <View style={styles.cancelBox}>
                         <Text style={styles.label}>Reason (optional)</Text>

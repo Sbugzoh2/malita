@@ -4273,6 +4273,13 @@ def cancel_accepted_session(
             raise TutoringError(f"This session is '{req.status}' and can't be cancelled this way.")
         if not req.scheduled_at:
             raise TutoringError("This session has no scheduled time.")
+        if dt.datetime.utcnow() >= req.scheduled_at:
+            if req.status == "confirmed":
+                raise TutoringError(
+                    "This session has already started - it can no longer be cancelled. "
+                    "If it didn't happen, use \"This didn't happen\" instead."
+                )
+            raise TutoringError("This session has already started - it can no longer be cancelled.")
         was_paid = req.status == "confirmed"
         is_late = dt.datetime.utcnow() > req.scheduled_at - dt.timedelta(hours=CANCELLATION_CUTOFF_HOURS)
         # The fee only ever applies to money that's actually changed

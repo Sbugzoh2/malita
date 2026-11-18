@@ -119,6 +119,30 @@
   .tutor-cta .section-sub { color: #dbe8fb; margin-left: auto; margin-right: auto; }
   .tutor-cta .btn-primary { background: #fff; color: var(--brand-dark); }
 
+  .founder-wrap {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+  .founder-photo {
+    width: 220px;
+    height: 266px;
+    object-fit: cover;
+    border-radius: 16px;
+    flex-shrink: 0;
+  }
+  .founder h2 { margin-bottom: 4px; }
+  .founder-name { font-size: 1.25rem; margin: 0; }
+  .founder-title { color: var(--brand-dark); font-weight: 700; font-size: 0.95rem; margin: 2px 0 14px; }
+  .founder p:not(.founder-title) { color: var(--ink-soft); max-width: 560px; }
+  .founder-linkedin { display: inline-block; margin-top: 10px; font-weight: 700; font-size: 0.92rem; }
+
+  @media (max-width: 640px) {
+    .founder-wrap { flex-direction: column; text-align: center; }
+    .founder p:not(.founder-title) { max-width: none; }
+  }
+
   footer {
     border-top: 1px solid var(--border);
     padding: 36px 0;
@@ -274,6 +298,25 @@
       <div><strong>CAPS</strong><span>Curriculum aligned</span></div>
       <div><strong>🎓</strong><span>School &amp; university covered</span></div>
       <div><strong>🇿🇦</strong><span>Proudly South African</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="founder">
+  <div class="wrap founder-wrap">
+    <img src="founder-sibusiso-gumede.jpg" alt="Sibusiso Gumede, Founder &amp; CEO of Malita" class="founder-photo" />
+    <div>
+      <h2>Meet the Founder</h2>
+      <h3 class="founder-name">Sibusiso Gumede</h3>
+      <p class="founder-title">Founder &amp; CEO, Malita (Pty) Ltd</p>
+      <p>
+        Sibusiso holds a Master of Science in Statistics from the University of KwaZulu-Natal and brings
+        over 8 years of experience in data analytics, machine learning and AI — across academia, government
+        and industry. He built Malita to put that same data-driven approach to work closing the tutoring gap
+        for South African learners and students, pairing AI-powered study tools with a fair, accessible
+        live tutoring marketplace.
+      </p>
+      <a href="https://www.linkedin.com/in/sibusiso-gumede-3b8319116/" class="founder-linkedin">View LinkedIn profile →</a>
     </div>
   </div>
 </section>

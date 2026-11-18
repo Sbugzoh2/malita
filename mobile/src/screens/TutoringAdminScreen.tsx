@@ -2118,17 +2118,26 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   seedButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
   seedResultText: { fontSize: 12, color: colors.textSecondary, marginBottom: 16, lineHeight: 17 },
-  sectionRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 16 },
+  // Equal-width grid (2 per row) instead of pill chips that wrapped
+  // raggedly at different widths depending on each label's length (a
+  // short "Tutors" next to a long "Higher-Ed Applications" left the
+  // row heights/edges misaligned) - fixed width + space-between keeps
+  // every row's left/right edges lined up regardless of label length.
+  sectionRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 10, marginBottom: 16 },
   sectionChip: {
+    width: "48.5%",
+    minHeight: 44,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sectionChipActive: { backgroundColor: colors.primary, borderColor: "transparent" },
-  sectionChipText: { color: colors.text, fontSize: 13, fontWeight: "600" },
+  sectionChipText: { color: colors.text, fontSize: 13, fontWeight: "600", textAlign: "center" },
   sectionChipTextActive: { color: "#fff" },
   error: { color: colors.error, marginTop: 10, marginBottom: 6 },
   empty: { fontSize: 14, color: colors.textSecondary, marginTop: 16 },

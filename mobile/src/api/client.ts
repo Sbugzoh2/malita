@@ -507,6 +507,11 @@ export type TutoringRequest = {
   // to compute whether a no-show report can auto-resolve.
   learner_checked_in_at: string | null;
   tutor_checked_in_at: string | null;
+  // The other half of the same signal - required before that side can
+  // confirm/rate the session (see backend/tutoring.py's check_out_of_
+  // session). No deadline, unlike check-in.
+  learner_checked_out_at: string | null;
+  tutor_checked_out_at: string | null;
   no_show_reported_by: "learner" | "tutor" | null;
   no_show_reported_at: string | null;
   no_show_reason: string | null;
@@ -683,6 +688,25 @@ export function checkInToSessionAsLearner(token: string, requestId: number) {
 
 export function checkInToSessionAsTutor(token: string, requestId: number) {
   return request<CheckInResult>(`/tutor/sessions/${requestId}/check-in`, { method: "POST", token });
+}
+
+export type CheckOutResult = {
+  id: number;
+  learner_checked_in_at: string | null;
+  tutor_checked_in_at: string | null;
+  learner_checked_out_at: string | null;
+  tutor_checked_out_at: string | null;
+};
+
+// Either side tapping "Check out" once their session is actually done -
+// required before that side can confirm/rate the session (see backend/
+// tutoring.py's check_out_of_session).
+export function checkOutOfSessionAsLearner(token: string, requestId: number) {
+  return request<CheckOutResult>(`/tutoring/requests/${requestId}/check-out`, { method: "POST", token });
+}
+
+export function checkOutOfSessionAsTutor(token: string, requestId: number) {
+  return request<CheckOutResult>(`/tutor/sessions/${requestId}/check-out`, { method: "POST", token });
 }
 
 export type ReportNoShowResult = {
@@ -1254,6 +1278,8 @@ export type AdminTutoringSession = {
   // without a Google Workspace plan.
   learner_checked_in_at: string | null;
   tutor_checked_in_at: string | null;
+  learner_checked_out_at: string | null;
+  tutor_checked_out_at: string | null;
   no_show_reported_by: "learner" | "tutor" | null;
   no_show_reported_at: string | null;
   no_show_resolved_at: string | null;

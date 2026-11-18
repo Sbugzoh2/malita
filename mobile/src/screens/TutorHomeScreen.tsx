@@ -19,6 +19,7 @@ import {
   cancelTutoringSessionAsTutor,
   submitSessionRecording,
   checkInToSessionAsTutor,
+  checkOutOfSessionAsTutor,
   reportNoShowAsTutor,
   YEAR_LEVEL_LABELS,
 } from "../api/client";
@@ -610,6 +611,20 @@ export default function TutorHomeScreen({ navigation }: any) {
     }
   }
 
+  async function handleCheckOut(requestId: number) {
+    if (!token) return;
+    setCheckingInId(requestId);
+    setActionError(requestId, null);
+    try {
+      await checkOutOfSessionAsTutor(token, requestId);
+      load();
+    } catch (e) {
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not check you out.");
+    } finally {
+      setCheckingInId(null);
+    }
+  }
+
   function confirmReportNoShow(requestId: number) {
     Alert.alert(
       "Report that the learner didn't show up?",
@@ -1040,18 +1055,23 @@ export default function TutorHomeScreen({ navigation }: any) {
                     </View>
                   )}
 
-                  {sess.status === "confirmed" && !sess.no_show_reported_at && !sess.tutor_checked_in_at && (
+                  {sess.status === "confirmed" && !sess.no_show_reported_at && !sess.tutor_checked_out_at && (
                     <Pressable
                       style={[styles.acceptButton, styles.proposalDeclineButton]}
-                      onPress={() => handleCheckIn(sess.id)}
+                      onPress={() => (sess.tutor_checked_in_at ? handleCheckOut(sess.id) : handleCheckIn(sess.id))}
                       disabled={checkingInId === sess.id}
                     >
                       {checkingInId === sess.id ? (
                         <ActivityIndicator color={colors.primary} />
                       ) : (
-                        <Text style={styles.proposalDeclineButtonText}>I'm on the call</Text>
+                        <Text style={styles.proposalDeclineButtonText}>
+                          {sess.tutor_checked_in_at ? "Check Out" : "I'm on the call"}
+                        </Text>
                       )}
                     </Pressable>
+                  )}
+                  {sess.tutor_checked_out_at && (
+                    <Text style={styles.cardMeta}>✓ Checked out at {formatScheduled(sess.tutor_checked_out_at)}</Text>
                   )}
                   {sess.status === "confirmed" && !sess.no_show_reported_at && (
                     <Pressable style={styles.proposeLinkButton} onPress={() => confirmReportNoShow(sess.id)}>
@@ -1071,7 +1091,10 @@ export default function TutorHomeScreen({ navigation }: any) {
                     </Text>
                   )}
 
-                  {sess.status === "confirmed" && !sess.tutor_confirmed && !sess.no_show_reported_at && (
+                  {sess.status === "confirmed" && !sess.tutor_confirmed && !sess.no_show_reported_at && !sess.tutor_checked_out_at && (
+                    <Text style={styles.cardMeta}>Check out once your session is done to rate the learner.</Text>
+                  )}
+                  {sess.status === "confirmed" && !sess.tutor_confirmed && !sess.no_show_reported_at && sess.tutor_checked_out_at && (
                     <View style={styles.confirmBox}>
                       <Text style={styles.confirmLabel}>Did this session happen? Rate the learner:</Text>
                       <StarPicker
@@ -1202,7 +1225,9 @@ export default function TutorHomeScreen({ navigation }: any) {
                 ) : (
                   payouts.map((p) => (
                     <View key={p.id} style={styles.card}>
-                      <Text style={styles.cardTitle}>Session #{p.session_id}</Text>
+                      <Text style={styles.cardTitle}>
+                        {p.subject ?? `Session #${p.session_id}`}{p.topic ? ` · ${p.topic}` : ""}
+                      </Text>
                       <Text
                         style={[
                           styles.cardStatus,
@@ -1211,7 +1236,20 @@ export default function TutorHomeScreen({ navigation }: any) {
                       >
                         {p.status === "paid" ? "Paid" : "Pending"}
                       </Text>
-                      <Text style={styles.cardMeta}>R{p.amount_zar.toFixed(2)}</Text>
+                      {p.learner_name ? (
+                        <Text style={styles.cardMeta}>Learner: {p.learner_name}</Text>
+                      ) : null}
+                      {p.scheduled_at ? (
+                        <Text style={styles.cardMeta}>Session: {formatScheduled(p.scheduled_at)}</Text>
+                      ) : null}
+                      {p.price_zar != null ? (
+                        <Text style={styles.cardMeta}>
+                          R{p.price_zar.toFixed(2)} total before Malita's fee
+                        </Text>
+                      ) : null}
+                      <Text style={[styles.cardMeta, styles.payoutAmount]}>
+                        R{p.amount_zar.toFixed(2)} {p.status === "paid" ? "paid to you" : "payout"}
+                      </Text>
                       {p.payment_reference ? (
                         <Text style={styles.cardMeta}>Reference: {p.payment_reference}</Text>
                       ) : null}
@@ -1308,7 +1346,7 @@ const styles = StyleSheet.create({
   },
   statCardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   statLabel: { fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4 },
-  statValue: { fontSize: 28, color: "#fff", fontWeight: "800", marginTop: 4 },
+  statValue: { fontSize: 28, color: colors.success, fontWeight: "800", marginTop: 4 },
   statValuePayout: { fontSize: 22, color: colors.success, fontWeight: "800", marginTop: 4 },
   statValueLost: { fontSize: 22, color: colors.error, fontWeight: "800", marginTop: 4 },
   statValueDate: { fontSize: 20, color: "#fff", fontWeight: "800", marginTop: 4 },
@@ -1405,6 +1443,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
   cardStatus: { fontSize: 13, fontWeight: "700", color: colors.primary, marginTop: 4 },
   cardMeta: { fontSize: 13, color: colors.textSecondary, marginTop: 6 },
+  payoutAmount: { fontSize: 16, fontWeight: "700", color: colors.success, marginTop: 10 },
   label: { fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginTop: 10, marginBottom: 6 },
   input: {
     borderWidth: 1,

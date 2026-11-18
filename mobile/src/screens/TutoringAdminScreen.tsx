@@ -2071,6 +2071,18 @@ function SessionsSection({ token }: { token: string }) {
                   : "— not checked in"}
               </Text>
             )}
+            {(s.learner_checked_out_at || s.tutor_checked_out_at) && (
+              <Text style={styles.detailLine}>
+                Check-out: Learner{" "}
+                {s.learner_checked_out_at
+                  ? `✓ ${new Date(s.learner_checked_out_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" })}`
+                  : "— not checked out"}
+                {" · "}Tutor{" "}
+                {s.tutor_checked_out_at
+                  ? `✓ ${new Date(s.tutor_checked_out_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" })}`
+                  : "— not checked out"}
+              </Text>
+            )}
             {s.no_show_reported_at && (
               <Text style={[styles.detailLine, { color: colors.error }]}>
                 No-show reported by {s.no_show_reported_by === "learner" ? "the learner" : "the tutor"}

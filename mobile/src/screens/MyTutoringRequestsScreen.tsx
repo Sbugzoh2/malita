@@ -20,6 +20,7 @@ import {
   requestRefundForCancelledSession,
   submitRefundBankDetails,
   checkInToSessionAsLearner,
+  checkOutOfSessionAsLearner,
   reportNoShowAsLearner,
   TutoringRequest,
   Badge,
@@ -512,6 +513,20 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
     }
   }
 
+  async function handleCheckOut(requestId: number) {
+    if (!token) return;
+    setCheckingInId(requestId);
+    setActionError(requestId, null);
+    try {
+      await checkOutOfSessionAsLearner(token, requestId);
+      load();
+    } catch (e) {
+      setActionError(requestId, e instanceof ApiError ? e.message : "Could not check you out.");
+    } finally {
+      setCheckingInId(null);
+    }
+  }
+
   function confirmReportNoShow(requestId: number) {
     Alert.alert(
       "Report that your tutor didn't show up?",
@@ -943,18 +958,23 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
               </Text>
             )}
 
-            {r.status === "confirmed" && !r.no_show_reported_at && !r.learner_checked_in_at && (
+            {r.status === "confirmed" && !r.no_show_reported_at && !r.learner_checked_out_at && (
               <Pressable
                 style={styles.secondaryButton}
-                onPress={() => handleCheckIn(r.id)}
+                onPress={() => (r.learner_checked_in_at ? handleCheckOut(r.id) : handleCheckIn(r.id))}
                 disabled={checkingInId === r.id}
               >
                 {checkingInId === r.id ? (
                   <ActivityIndicator color={colors.primary} />
                 ) : (
-                  <Text style={styles.secondaryButtonText}>I'm on the call</Text>
+                  <Text style={styles.secondaryButtonText}>
+                    {r.learner_checked_in_at ? "Check Out" : "I'm on the call"}
+                  </Text>
                 )}
               </Pressable>
+            )}
+            {r.learner_checked_out_at && (
+              <Text style={styles.cardMeta}>✓ Checked out at {formatDate(r.learner_checked_out_at)}</Text>
             )}
             {r.status === "confirmed" && !r.no_show_reported_at && (
               <Pressable style={styles.dangerLinkButton} onPress={() => confirmReportNoShow(r.id)}>
@@ -974,7 +994,10 @@ export default function MyTutoringRequestsScreen({ navigation, route }: any) {
               </Text>
             )}
 
-            {r.status === "confirmed" && !r.learner_confirmed && !r.no_show_reported_at && (
+            {r.status === "confirmed" && !r.learner_confirmed && !r.no_show_reported_at && !r.learner_checked_out_at && (
+              <Text style={styles.cardMeta}>Check out once your session is done to rate your tutor.</Text>
+            )}
+            {r.status === "confirmed" && !r.learner_confirmed && !r.no_show_reported_at && r.learner_checked_out_at && (
               <View style={styles.confirmBox}>
                 <Text style={styles.confirmLabel}>Did this session happen? Rate your tutor:</Text>
                 <StarPicker

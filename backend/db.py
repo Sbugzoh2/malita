@@ -847,6 +847,13 @@ class TutoringSessionRequest(Base):
     # record admin can compare against a no-show report below.
     learner_checked_in_at = Column(DateTime, nullable=True)
     tutor_checked_in_at = Column(DateTime, nullable=True)
+    # The other half of the same presence signal - checking OUT once the
+    # session is actually done (see check_out_of_session). Required
+    # before that side can confirm the session happened/rate the other
+    # (see confirm_session_by_learner/confirm_session_by_tutor) - unlike
+    # check-in, there's no deadline on when check-out itself can happen.
+    learner_checked_out_at = Column(DateTime, nullable=True)
+    tutor_checked_out_at = Column(DateTime, nullable=True)
     # A "this session didn't happen" report from either side (see
     # report_no_show) - resolved either automatically (the reporter
     # waited NO_SHOW_MIN_CHECKED_IN_MINUTES+ and the accused side never
@@ -1140,6 +1147,8 @@ def init_db():
     _ensure_column("tutoring_session_requests", "tutor_rating_comment", "VARCHAR")
     _ensure_column("tutoring_session_requests", "learner_checked_in_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "tutor_checked_in_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "learner_checked_out_at", "TIMESTAMP")
+    _ensure_column("tutoring_session_requests", "tutor_checked_out_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "no_show_reported_by", "VARCHAR(10)")
     _ensure_column("tutoring_session_requests", "no_show_reported_at", "TIMESTAMP")
     _ensure_column("tutoring_session_requests", "no_show_reason", "VARCHAR")

@@ -2714,6 +2714,8 @@ def list_all_tutoring_sessions(
                 "paid_at": _iso_utc(r.paid_at),
                 "learner_checked_in_at": _iso_utc(r.learner_checked_in_at),
                 "tutor_checked_in_at": _iso_utc(r.tutor_checked_in_at),
+                "learner_checked_out_at": _iso_utc(r.learner_checked_out_at),
+                "tutor_checked_out_at": _iso_utc(r.tutor_checked_out_at),
                 "no_show_reported_by": r.no_show_reported_by,
                 "no_show_reported_at": _iso_utc(r.no_show_reported_at),
                 "no_show_resolved_at": _iso_utc(r.no_show_resolved_at),
@@ -2835,6 +2837,8 @@ def _serialize_request(r: TutoringSessionRequest) -> dict:
         "recording_shared_at": _iso_utc(r.recording_shared_at),
         "learner_checked_in_at": _iso_utc(r.learner_checked_in_at),
         "tutor_checked_in_at": _iso_utc(r.tutor_checked_in_at),
+        "learner_checked_out_at": _iso_utc(r.learner_checked_out_at),
+        "tutor_checked_out_at": _iso_utc(r.tutor_checked_out_at),
         "no_show_reported_by": r.no_show_reported_by,
         "no_show_reported_at": _iso_utc(r.no_show_reported_at),
         "no_show_reason": r.no_show_reason,
@@ -3711,7 +3715,11 @@ def confirm_session_by_learner(
 ) -> dict:
     """The learner confirming a paid session actually took place, and
     rating the tutor - see _maybe_finalize_session for what happens once
-    the tutor has also confirmed."""
+    the tutor has also confirmed. Requires the learner to have already
+    checked out (see check_out_of_session) - confirming/rating a
+    session you never marked yourself as having finished doesn't make
+    sense, and this is the one place that's actually enforced rather
+    than just encouraged."""
     _validate_rating(rating)
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
@@ -3719,6 +3727,8 @@ def confirm_session_by_learner(
             raise TutoringError("Session not found.")
         if req.status not in ("confirmed", "completed"):
             raise TutoringError(f"This session is '{req.status}', not yet paid/confirmed.")
+        if req.learner_checked_out_at is None:
+            raise TutoringError("Please check out of the session before confirming it happened.")
         if req.learner_confirmed_at:
             raise TutoringError("You've already confirmed this session.")
         req.learner_confirmed_at = dt.datetime.utcnow()
@@ -3732,7 +3742,8 @@ def confirm_session_by_tutor(
     request_id: int, tutor_id: int, rating: int, comment: str = "",
 ) -> dict:
     """The tutor confirming a paid session actually took place, and
-    rating the learner."""
+    rating the learner. Requires the tutor to have already checked out
+    (see confirm_session_by_learner's docstring - same reasoning)."""
     _validate_rating(rating)
     with get_session() as db:
         req = db.query(TutoringSessionRequest).get(request_id)
@@ -3740,6 +3751,8 @@ def confirm_session_by_tutor(
             raise TutoringError("Session not found.")
         if req.status not in ("confirmed", "completed"):
             raise TutoringError(f"This session is '{req.status}', not yet paid/confirmed.")
+        if req.tutor_checked_out_at is None:
+            raise TutoringError("Please check out of the session before confirming it happened.")
         if req.tutor_confirmed_at:
             raise TutoringError("You've already confirmed this session.")
         req.tutor_confirmed_at = dt.datetime.utcnow()
@@ -3757,6 +3770,19 @@ def confirm_session_by_tutor(
 # AT ALL (see report_no_show).
 NO_SHOW_MIN_CHECKED_IN_MINUTES = 15
 
+# How long after a session's scheduled start either side can still
+# check in - both sides are expected to check in before the session
+# starts, but a few minutes' grace covers someone joining slightly
+# late rather than locking them out entirely. Past this, check_in_to_
+# session rejects the attempt outright - which, combined with report_
+# no_show's own logic, is exactly what should happen: miss the window
+# and you're indistinguishable from someone who never checked in at
+# all. A SEPARATE constant from NO_SHOW_MIN_CHECKED_IN_MINUTES even
+# though both are currently 15 - one gates when you can check IN at
+# all, the other gates when a REPORT about someone else auto-resolves;
+# nothing requires they stay equal.
+CHECK_IN_GRACE_PERIOD_MINUTES = 15
+
 
 def check_in_to_session(request_id: int, *, by: str, person_id: int) -> dict:
     """Either side tapping "I'm on the call" once they've joined - the
@@ -3768,7 +3794,9 @@ def check_in_to_session(request_id: int, *, by: str, person_id: int) -> dict:
     timestamp later and understate how early someone actually joined.
     This is self-reported, not cryptographic proof - same trust level as
     everything else admin reviews manually in this app (bank details,
-    cancellation reasons, etc.)."""
+    cancellation reasons, etc.). Must happen before the session starts
+    or within CHECK_IN_GRACE_PERIOD_MINUTES after - there's no limit on
+    checking in early."""
     if by not in ("learner", "tutor"):
         raise TutoringError("Invalid check-in.")
     with get_session() as db:
@@ -3781,6 +3809,14 @@ def check_in_to_session(request_id: int, *, by: str, person_id: int) -> dict:
             raise TutoringError("Session not found.")
         if req.status != "confirmed":
             raise TutoringError(f"This session is '{req.status}', not a paid session you can check into.")
+        already_checked_in = req.learner_checked_in_at if by == "learner" else req.tutor_checked_in_at
+        if already_checked_in is None and req.scheduled_at:
+            check_in_deadline = req.scheduled_at + dt.timedelta(minutes=CHECK_IN_GRACE_PERIOD_MINUTES)
+            if dt.datetime.utcnow() > check_in_deadline:
+                raise TutoringError(
+                    f"Check-in closes {CHECK_IN_GRACE_PERIOD_MINUTES} minutes after the session's scheduled "
+                    "start - you can no longer check in to this session."
+                )
         if by == "learner":
             if req.learner_checked_in_at is None:
                 req.learner_checked_in_at = dt.datetime.utcnow()
@@ -3790,6 +3826,45 @@ def check_in_to_session(request_id: int, *, by: str, person_id: int) -> dict:
         return {
             "id": req.id, "learner_checked_in_at": _iso_utc(req.learner_checked_in_at),
             "tutor_checked_in_at": _iso_utc(req.tutor_checked_in_at),
+        }
+
+
+def check_out_of_session(request_id: int, *, by: str, person_id: int) -> dict:
+    """Either side tapping "Check out" once their session is actually
+    done - the second half of check_in_to_session's presence signal.
+    Required before that side can confirm the session happened and
+    rate the other (see confirm_session_by_learner/confirm_session_by_
+    tutor) - same self-reported trust level as check-in, but no
+    deadline on when it can happen, since there's no "session's
+    starting" moment to measure lateness against on the way out."""
+    if by not in ("learner", "tutor"):
+        raise TutoringError("Invalid check-out.")
+    with get_session() as db:
+        req = db.query(TutoringSessionRequest).get(request_id)
+        if not req:
+            raise TutoringError("Session not found.")
+        if by == "learner" and req.learner_user_id != person_id:
+            raise TutoringError("Session not found.")
+        if by == "tutor" and req.tutor_id != person_id:
+            raise TutoringError("Session not found.")
+        if req.status != "confirmed":
+            raise TutoringError(f"This session is '{req.status}', not a paid session you can check out of.")
+        if by == "learner":
+            if req.learner_checked_in_at is None:
+                raise TutoringError("Check in before you can check out.")
+            if req.learner_checked_out_at is None:
+                req.learner_checked_out_at = dt.datetime.utcnow()
+        else:
+            if req.tutor_checked_in_at is None:
+                raise TutoringError("Check in before you can check out.")
+            if req.tutor_checked_out_at is None:
+                req.tutor_checked_out_at = dt.datetime.utcnow()
+        return {
+            "id": req.id,
+            "learner_checked_in_at": _iso_utc(req.learner_checked_in_at),
+            "tutor_checked_in_at": _iso_utc(req.tutor_checked_in_at),
+            "learner_checked_out_at": _iso_utc(req.learner_checked_out_at),
+            "tutor_checked_out_at": _iso_utc(req.tutor_checked_out_at),
         }
 
 

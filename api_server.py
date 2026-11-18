@@ -100,7 +100,7 @@ from backend.tutoring import (
     admin_suggest_refund, admin_mark_refund_processing, mark_refund_processed, list_requests_needing_attention,
     suspend_tutor, block_tutor, reinstate_tutor, list_tutors_for_admin,
     update_tutor_profile, update_tutor_study_details, set_tutor_accepting_new_sessions,
-    check_in_to_session, report_no_show,
+    check_in_to_session, check_out_of_session, report_no_show,
     admin_resolve_no_show_as_tutor_no_show, admin_resolve_no_show_as_learner_no_show,
     admin_dismiss_no_show_report,
 )
@@ -1701,6 +1701,17 @@ def tutor_check_in(request_id: int, authorization: str = Header(None)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/tutor/sessions/{request_id}/check-out")
+def tutor_check_out(request_id: int, authorization: str = Header(None)):
+    """The tutor tapping "Check out" once their session is done (see
+    check_out_of_session) - required before they can confirm/rate it."""
+    tutor = _auth_tutor(authorization)
+    try:
+        return check_out_of_session(request_id, by="tutor", person_id=tutor["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/tutor/sessions/{request_id}/report-no-show")
 def tutor_report_no_show(
     request_id: int, payload: ReportNoShowRequest, authorization: str = Header(None)
@@ -2071,6 +2082,17 @@ def tutoring_check_in(request_id: int, authorization: str = Header(None)):
     user = _auth_user(authorization)
     try:
         return check_in_to_session(request_id, by="learner", person_id=user["id"])
+    except TutoringError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tutoring/requests/{request_id}/check-out")
+def tutoring_check_out(request_id: int, authorization: str = Header(None)):
+    """The learner tapping "Check out" once their session is done (see
+    check_out_of_session) - required before they can confirm/rate it."""
+    user = _auth_user(authorization)
+    try:
+        return check_out_of_session(request_id, by="learner", person_id=user["id"])
     except TutoringError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

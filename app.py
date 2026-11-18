@@ -2553,6 +2553,16 @@ elif mode == "🛠️ Tutoring Admin":
                             if s["tutor_checked_in_at"] else "— not checked in"
                         )
                         st.write(f"**Check-in:** Learner {learner_checkin} · Tutor {tutor_checkin}")
+                    if s["learner_checked_out_at"] or s["tutor_checked_out_at"]:
+                        learner_checkout = (
+                            f"✓ {to_sast_str(s['learner_checked_out_at'])}"
+                            if s["learner_checked_out_at"] else "— not checked out"
+                        )
+                        tutor_checkout = (
+                            f"✓ {to_sast_str(s['tutor_checked_out_at'])}"
+                            if s["tutor_checked_out_at"] else "— not checked out"
+                        )
+                        st.write(f"**Check-out:** Learner {learner_checkout} · Tutor {tutor_checkout}")
                     if s["no_show_reported_at"]:
                         who = "the learner" if s["no_show_reported_by"] == "learner" else "the tutor"
                         if s["no_show_resolved_at"]:

@@ -594,20 +594,40 @@ def reinstate_user(user_id: int) -> dict:
     return _set_account_standing(user_id, "active", "")
 
 
-def list_users_for_admin(search: str = "", limit: int = 50) -> list[dict]:
+def list_users_for_admin(search: str = "", limit: int = 50, account_type: str | None = None) -> list[dict]:
     """A plain, searchable list of learner accounts for the admin console's
-    new Accounts tab - nothing like this existed before (the only admin
+    Accounts tab - nothing like this existed before (the only admin
     account-management view was tutor-specific), since suspending/blocking
     a learner needs a way to actually find the account first. `search`
     matches name or email, case-insensitively; empty search returns the
-    most recently created accounts first."""
+    most recently created accounts first. `account_type`, when given,
+    restricts to just "high_school" or "higher_ed" accounts.
+
+    Also carries the signup-profile fields (school/grade, province,
+    city/town, and the higher-ed institution/qualification/year/student
+    number) so this view works as an actual directory of who's signed up,
+    not just an account-standing tool - a join against Institution/
+    Qualification to resolve their names rather than leaving an admin
+    looking at bare IDs."""
     search = (search or "").strip().lower()
     with get_session() as db:
         q = db.query(User)
         if search:
             like = f"%{search}%"
             q = q.filter((User.name.ilike(like)) | (User.email.ilike(like)))
+        if account_type:
+            q = q.filter(User.account_type == account_type)
         users = q.order_by(User.created_at.desc()).limit(limit).all()
+
+        institution_ids = {u.higher_ed_institution_id for u in users if u.higher_ed_institution_id}
+        qualification_ids = {u.higher_ed_qualification_id for u in users if u.higher_ed_qualification_id}
+        institution_names = {
+            i.id: i.name for i in db.query(Institution).filter(Institution.id.in_(institution_ids)).all()
+        } if institution_ids else {}
+        qualification_names = {
+            q_.id: q_.name for q_ in db.query(Qualification).filter(Qualification.id.in_(qualification_ids)).all()
+        } if qualification_ids else {}
+
         return [
             {
                 "id": u.id, "name": u.name, "email": u.email,
@@ -616,6 +636,15 @@ def list_users_for_admin(search: str = "", limit: int = 50) -> list[dict]:
                 "account_status_label": ACCOUNT_STANDING_LABELS.get(u.account_status, u.account_status),
                 "account_status_reason": u.account_status_reason,
                 "created_at": u.created_at.isoformat() if u.created_at else None,
+                "school": u.school, "grade": u.grade,
+                "province": u.province, "city_town": u.city_town,
+                "higher_ed_institution_name": institution_names.get(u.higher_ed_institution_id),
+                "higher_ed_qualification_name": (
+                    qualification_names.get(u.higher_ed_qualification_id)
+                    or u.higher_ed_qualification_custom_name
+                ),
+                "higher_ed_year_of_study": u.higher_ed_year_of_study,
+                "student_number": u.student_number,
             }
             for u in users
         ]

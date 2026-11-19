@@ -930,15 +930,16 @@ def update_my_personal_info(payload: PersonalInfoUpdateRequest, authorization: s
 
 
 @app.get("/admin/accounts")
-def admin_list_accounts(search: str = "", authorization: str = Header(None)):
+def admin_list_accounts(search: str = "", account_type: str | None = None, authorization: str = Header(None)):
     """Admin console's Accounts tab - a plain, searchable list of learner
     accounts, so an admin can actually find one to suspend/block (there
     was no account-management view at all before this - every other
-    admin screen is tutoring-marketplace-specific)."""
+    admin screen is tutoring-marketplace-specific). account_type
+    optionally restricts to "high_school" or "higher_ed"."""
     user = _auth_user(authorization)
     if not is_user_admin(user["id"]):
         raise HTTPException(status_code=403, detail="Admin access required.")
-    return {"users": list_users_for_admin(search)}
+    return {"users": list_users_for_admin(search, account_type=account_type)}
 
 
 @app.post("/admin/accounts/{user_id}/suspend")

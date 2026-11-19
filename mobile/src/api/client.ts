@@ -1677,10 +1677,21 @@ export type AdminAccountSummary = {
   account_status_label: string;
   account_status_reason: string | null;
   created_at: string | null;
+  school: string | null;
+  grade: number | null;
+  province: string | null;
+  city_town: string | null;
+  higher_ed_institution_name: string | null;
+  higher_ed_qualification_name: string | null;
+  higher_ed_year_of_study: number | null;
+  student_number: string | null;
 };
 
-export function fetchAdminAccounts(token: string, search: string = "") {
-  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+export function fetchAdminAccounts(token: string, search: string = "", accountType?: "high_school" | "higher_ed") {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (accountType) params.set("account_type", accountType);
+  const qs = params.toString() ? `?${params.toString()}` : "";
   return request<{ users: AdminAccountSummary[] }>(`/admin/accounts${qs}`, { token });
 }
 

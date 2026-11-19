@@ -1476,9 +1476,30 @@ const ACCOUNT_STATUS_COLOR: Record<string, string> = {
   active: colors.success, suspended: colors.textSecondary, blocked: colors.error,
 };
 
+// A learner's school/grade or higher-ed institution/qualification/year,
+// whichever applies - the one detail line that actually makes this
+// "Learners" view useful as a directory rather than just an
+// account-standing tool.
+function learnerProfileLine(a: AdminAccountSummary): string {
+  if (a.account_type === "higher_ed") {
+    const parts = [a.higher_ed_institution_name, a.higher_ed_qualification_name].filter(Boolean);
+    const yearLabel = a.higher_ed_year_of_study ? YEAR_LEVEL_LABELS[a.higher_ed_year_of_study] : null;
+    if (yearLabel) parts.push(yearLabel);
+    if (a.student_number) parts.push(`Student #${a.student_number}`);
+    return parts.length > 0 ? parts.join(" · ") : "University/college - no details on file";
+  }
+  const parts = [a.school, a.grade ? `Grade ${a.grade}` : null].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : "High school - no details on file";
+}
+
 function AccountsSection({ token }: { token: string }) {
   const [kind, setKind] = useState<"user" | "tutor">("user");
   const [search, setSearch] = useState("");
+  // Learners only - "Tutors" has no account_type to filter by (a tutor
+  // can tutor either or both segments, see wants_high_school/
+  // wants_higher_ed on TutorAccount, so splitting the Tutors list the
+  // same way wouldn't mean the same thing).
+  const [accountTypeFilter, setAccountTypeFilter] = useState<"high_school" | "higher_ed" | undefined>(undefined);
   const [accounts, setAccounts] = useState<AdminAccountSummary[] | null>(null);
   const [tutorAccounts, setTutorAccounts] = useState<AdminTutorAccountSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1487,7 +1508,7 @@ function AccountsSection({ token }: { token: string }) {
 
   const load = useCallback(() => {
     if (kind === "user") {
-      fetchAdminAccounts(token, search)
+      fetchAdminAccounts(token, search, accountTypeFilter)
         .then((res) => setAccounts(res.users))
         .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load accounts."));
     } else {
@@ -1495,7 +1516,7 @@ function AccountsSection({ token }: { token: string }) {
         .then((res) => setTutorAccounts(res.tutors))
         .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load tutor accounts."));
     }
-  }, [token, search, kind]);
+  }, [token, search, kind, accountTypeFilter]);
 
   useEffect(() => {
     load();
@@ -1545,7 +1566,9 @@ function AccountsSection({ token }: { token: string }) {
 
   // Normalize both AdminAccountSummary (learner) and AdminTutorAccountSummary
   // (tutor) to the same shape, so the list below renders either one with
-  // one chunk of markup instead of two near-duplicate branches.
+  // one chunk of markup instead of two near-duplicate branches. Learner-
+  // only detail (account type, profile line, join date) rides along as
+  // `learnerDetail`, left undefined for a tutor row.
   const rows = (kind === "user" ? accounts : tutorAccounts)?.map((a) => ({
     id: a.id,
     name: a.name,
@@ -1554,6 +1577,15 @@ function AccountsSection({ token }: { token: string }) {
     account_status_label: a.account_status_label,
     account_status_reason: a.account_status_reason,
     isAdmin: kind === "user" ? (a as AdminAccountSummary).is_admin : false,
+    learnerDetail:
+      kind === "user"
+        ? {
+            accountTypeLabel: (a as AdminAccountSummary).account_type === "higher_ed" ? "University/College" : "High School",
+            profileLine: learnerProfileLine(a as AdminAccountSummary),
+            location: [(a as AdminAccountSummary).city_town, (a as AdminAccountSummary).province].filter(Boolean).join(", "),
+            createdAt: (a as AdminAccountSummary).created_at,
+          }
+        : undefined,
   })) ?? null;
 
   return (
@@ -1573,6 +1605,25 @@ function AccountsSection({ token }: { token: string }) {
           </Pressable>
         ))}
       </View>
+      {kind === "user" && (
+        <View style={styles.sectionRow}>
+          {([
+            { key: undefined, label: "All" },
+            { key: "high_school" as const, label: "High School" },
+            { key: "higher_ed" as const, label: "University/College" },
+          ]).map((f) => (
+            <Pressable
+              key={f.label}
+              style={[styles.sectionChip, accountTypeFilter === f.key && styles.sectionChipActive]}
+              onPress={() => setAccountTypeFilter(f.key)}
+            >
+              <Text style={[styles.sectionChipText, accountTypeFilter === f.key && styles.sectionChipTextActive]}>
+                {f.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
       <TextInput
         style={styles.searchInput}
         placeholder="Search by name or email..."
@@ -1590,6 +1641,21 @@ function AccountsSection({ token }: { token: string }) {
           <View key={a.id} style={styles.card}>
             <Text style={styles.cardTitle}>{a.name}</Text>
             <Text style={styles.cardSubtitle}>{a.email}</Text>
+            {a.learnerDetail ? (
+              <>
+                <Text style={styles.detailLine}>
+                  {a.learnerDetail.accountTypeLabel} · {a.learnerDetail.profileLine}
+                </Text>
+                {a.learnerDetail.location ? (
+                  <Text style={styles.detailLine}>{a.learnerDetail.location}</Text>
+                ) : null}
+                {a.learnerDetail.createdAt ? (
+                  <Text style={styles.detailLine}>
+                    Joined {new Date(a.learnerDetail.createdAt).toLocaleDateString()}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
             <View style={[styles.accountStatusPill, { backgroundColor: ACCOUNT_STATUS_COLOR[a.account_status] }]}>
               <Text style={styles.accountStatusPillText}>{a.account_status_label}</Text>
             </View>

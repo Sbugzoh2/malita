@@ -1333,12 +1333,47 @@ def apply_as_tutor(
                     tutor_id=tutor.id, name=entry["name"], year_level=entry["year_level"],
                 ))
 
-        return {
+        result = {
             "id": tutor.id, "status": tutor.status, "higher_ed_status": tutor.higher_ed_status,
             "excluded_subjects": excluded_subjects,
             "excluded_higher_ed_reason": higher_ed_excluded_reason if wants_higher_ed is False else None,
             "excluded_modules": excluded_modules,
         }
+        tutor_id, tutor_name = tutor.id, tutor.name
+
+    _notify_admins_of_new_tutor_application(
+        tutor_id=tutor_id, name=tutor_name, wants_high_school=wants_high_school, wants_higher_ed=wants_higher_ed,
+    )
+    return result
+
+
+def _notify_admins_of_new_tutor_application(
+    *, tutor_id: int, name: str, wants_high_school: bool, wants_higher_ed: bool,
+) -> None:
+    """Best-effort email to every admin - same "nobody checks the
+    console on a schedule" reasoning as _notify_admins_of_refund_request.
+    Fires once per application regardless of how many segments it
+    covers, rather than once per segment."""
+    try:
+        segments = ", ".join(
+            s for s, wants in (("high school", wants_high_school), ("university/college", wants_higher_ed)) if wants
+        ) or "no segment that qualified"
+        with get_session() as db:
+            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admins:
+            return
+        body = (
+            f"{name} just applied to tutor on Malita ({segments}).\n\n"
+            "Open the admin console's Tutoring Applications tab to review their documents and approve or reject it.\n"
+        )
+        for admin_id, email in admins:
+            send_email(email, f"New tutor application: {name}", body)
+            create_notification(
+                recipient_kind="user", recipient_id=admin_id, title="New tutor application",
+                body=f"{name} applied to tutor ({segments}).",
+            )
+    except Exception:
+        logger.exception("Failed to notify admins of tutor %s's new application", tutor_id)
 
 
 def list_tutor_applications(status: str | None = None) -> list[dict]:
@@ -2160,7 +2195,43 @@ def request_tutoring_session(
             subject=subject, topic=topic, price_zar=price_zar,
             duration_minutes=duration_minutes, scheduled_at=scheduled_at,
         )
+    _notify_admins_of_new_tutoring_request(
+        request_id=result["id"], learner_name=learner_name, subject=subject, topic=topic,
+        price_zar=price_zar, scheduled_at=scheduled_at, is_directed=bool(preferred_tutor_id),
+    )
     return result
+
+
+def _notify_admins_of_new_tutoring_request(
+    *, request_id: int, learner_name: str, subject: str, topic: str | None,
+    price_zar: float, scheduled_at: dt.datetime, is_directed: bool,
+) -> None:
+    """Best-effort email to every admin - same "nobody checks the
+    console on a schedule" reasoning as _notify_admins_of_refund_request.
+    Fires for every new request (broadcast or directed) - a broadcast one
+    is normally picked up by a tutor on their own, but admin still gets a
+    heads-up in case nobody does and it needs a manual match."""
+    try:
+        with get_session() as db:
+            admins = [(u.id, u.email) for u in db.query(User).filter(User.is_admin.is_(True)).all()]
+        if not admins:
+            return
+        topic_str = f" ({topic})" if topic else ""
+        when_str = _format_sast(scheduled_at)
+        directed_note = " - directed at a specific tutor" if is_directed else " - open to any matching tutor"
+        body = (
+            f"{learner_name} requested a tutor for {subject}{topic_str} at R{price_zar:.2f}, "
+            f"for {when_str}{directed_note}.\n\n"
+            "Open the admin console's Tutoring tab if this needs a manual match.\n"
+        )
+        for admin_id, email in admins:
+            send_email(email, f"New tutoring request: {subject}{topic_str}", body)
+            create_notification(
+                recipient_kind="user", recipient_id=admin_id, title="New tutoring request",
+                body=f"{learner_name} requested {subject}{topic_str} at R{price_zar:.2f}.",
+            )
+    except Exception:
+        logger.exception("Failed to notify admins of new tutoring request %s", request_id)
 
 
 def edit_tutoring_request(

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, TextInput, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, TextInput, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
@@ -16,10 +16,20 @@ import {
   fetchProvinces,
   updateStudyDetails,
   updatePersonalInfo,
+  createMySupportTicket,
   Institution,
   Qualification,
   YEAR_LEVEL_LABELS,
 } from "../api/client";
+
+// Same wording as docs/delete-account.html's published policy, so a
+// learner sees one consistent promise whichever path they use to ask -
+// account deletion itself stays a manual, admin-verified step (same
+// reasoning as that page: it touches billing/fraud records that have
+// their own retention rules), not something this button does instantly.
+const DELETE_ACCOUNT_TICKET_SUBJECT = "Delete my account";
+const DELETE_ACCOUNT_TICKET_MESSAGE =
+  "I'm requesting that my Malita account and personal data be deleted, in line with the published account-deletion policy.";
 
 const ACCOUNT_TYPE_LABEL: Record<string, string> = {
   high_school: "High School",
@@ -45,6 +55,7 @@ export default function AccountScreen({ navigation }: any) {
   const [institutions, setInstitutions] = useState<Institution[] | null>(null);
   const [qualifications, setQualifications] = useState<Qualification[] | null>(null);
   const [sessionsCompleted, setSessionsCompleted] = useState<number | null>(null);
+  const [requestingDeletion, setRequestingDeletion] = useState(false);
 
   // Editing study details (institution/qualification/year/student number)
   // - lets a learner fill these in themselves if they're missing (e.g. an
@@ -181,6 +192,35 @@ export default function AccountScreen({ navigation }: any) {
       setPersonalInfoError(e instanceof ApiError ? e.message : "Could not save your personal info.");
     } finally {
       setSavingPersonalInfo(false);
+    }
+  }
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      "Delete your account?",
+      "This can't be undone. We'll verify your request and permanently delete your account and personal " +
+        "data within 7 business days, and email you once it's done - some billing and fraud-prevention " +
+        "records may be kept longer where we're required to by law.",
+      [
+        { text: "Never mind", style: "cancel" },
+        { text: "Delete my account", style: "destructive", onPress: handleRequestDeleteAccount },
+      ]
+    );
+  }
+
+  async function handleRequestDeleteAccount() {
+    if (!token) return;
+    setRequestingDeletion(true);
+    try {
+      await createMySupportTicket(token, DELETE_ACCOUNT_TICKET_SUBJECT, DELETE_ACCOUNT_TICKET_MESSAGE);
+      Alert.alert(
+        "Request received",
+        "We'll verify your request and delete your account within 7 business days, and email you once it's done."
+      );
+    } catch (e) {
+      Alert.alert("Error", e instanceof ApiError ? e.message : "Could not submit your deletion request. Please try again.");
+    } finally {
+      setRequestingDeletion(false);
     }
   }
 
@@ -436,6 +476,18 @@ export default function AccountScreen({ navigation }: any) {
         <Text style={styles.supportCardChevron}>›</Text>
       </Pressable>
 
+      <Pressable
+        style={styles.deleteAccountCard}
+        onPress={confirmDeleteAccount}
+        disabled={requestingDeletion}
+      >
+        {requestingDeletion ? (
+          <ActivityIndicator color={colors.error} />
+        ) : (
+          <Text style={styles.deleteAccountCardText}>Delete My Account</Text>
+        )}
+      </Pressable>
+
       <Pressable style={styles.logoutButton} onPress={logout}>
         <Text style={styles.logoutText}>Log Out</Text>
       </Pressable>
@@ -519,6 +571,16 @@ const styles = StyleSheet.create({
   },
   supportCardText: { fontSize: 14, fontWeight: "700", color: colors.text },
   supportCardChevron: { fontSize: 16, color: colors.textSecondary },
+  deleteAccountCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  deleteAccountCardText: { fontSize: 14, fontWeight: "700", color: colors.error },
   logoutButton: {
     marginTop: 28,
     alignSelf: "center",

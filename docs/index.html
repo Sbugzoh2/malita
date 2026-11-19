@@ -7,47 +7,117 @@
 <title>Malita — AI study tools &amp; live tutoring, Grade 10 to university</title>
 <meta name="description" content="Malita is a South African study platform combining AI-powered self-study tools for Grade 12 Maths &amp; Physical Sciences with a live 1-on-1 tutoring marketplace covering every CAPS subject (Grade 10-12) and university/college modules — get matched with a vetted tutor, set your own price, and meet live over Google Meet." />
 <style>
+  /* Palette matches the Malita app exactly (mobile/src/theme.ts) - a dark
+     indigo-to-violet gradient with a purple accent, rather than a
+     separate "marketing site" palette that looked nothing like the
+     product itself. */
   :root {
-    --brand: #2a78d6;
-    --brand-dark: #184f95;
-    --ink: #1a1a1a;
-    --ink-soft: #475569;
-    --bg-soft: #f6f7f9;
-    --border: #e4e7eb;
+    --bg: #140b2e;
+    --bg-mid: #2c1a5c;
+    --bg-glow: #55288f;
+    --primary: #8b5cf6;
+    --primary-dark: #6d28d9;
+    --success: #34d399;
+    --text: #ffffff;
+    --text-soft: rgba(255,255,255,0.72);
+    --text-muted: rgba(255,255,255,0.52);
+    --surface: rgba(255,255,255,0.07);
+    --surface-strong: rgba(255,255,255,0.12);
+    --border: rgba(255,255,255,0.14);
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     margin: 0;
-    color: var(--ink);
+    color: var(--text);
     line-height: 1.6;
+    background: var(--bg);
+    overflow-x: hidden;
   }
-  a { color: var(--brand); }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--primary); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* Fixed full-viewport backdrop (gradient + soft floating glow orbs) -
+     independent of document height, so the gradient never gets stretched
+     thin or washed-out flat on a long page like a body-level gradient
+     would. Everything else renders above it (z-index:1 on .wrap). */
+  .bg-fixed {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: linear-gradient(165deg, var(--bg) 0%, var(--bg-mid) 55%, var(--bg-glow) 100%);
+    overflow: hidden;
+  }
+  .glow {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.55;
+    animation: float 16s ease-in-out infinite;
+  }
+  .glow-1 { width: 420px; height: 420px; background: #8b5cf6; top: -120px; left: -100px; animation-delay: 0s; }
+  .glow-2 { width: 360px; height: 360px; background: #c4b5fd; bottom: 8%; right: -80px; animation-delay: -5s; }
+  .glow-3 { width: 320px; height: 320px; background: #6d28d9; top: 45%; left: 55%; animation-delay: -10s; }
+  @keyframes float {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(30px, -40px) scale(1.08); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .glow { animation: none; }
+    html { scroll-behavior: auto; }
+  }
 
   header.top {
-    padding: 20px 0;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    padding: 16px 0;
+    transition: background 0.25s ease, backdrop-filter 0.25s ease, border-color 0.25s ease;
+    border-bottom: 1px solid transparent;
+  }
+  header.top.scrolled {
+    background: rgba(20, 11, 46, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--border);
   }
-  header.top .wrap { display: flex; align-items: center; gap: 12px; }
-  header.top img { width: 36px; height: 36px; border-radius: 9px; }
-  header.top .wordmark { font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; }
-
-  .hero {
-    background: linear-gradient(135deg, #0d2a52 0%, var(--brand) 100%);
-    color: #fff;
-    padding: 72px 0 84px;
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .brand img { width: 34px; height: 34px; border-radius: 9px; }
+  .brand .wordmark { font-weight: 800; font-size: 1.2rem; letter-spacing: -0.02em; color: var(--text); }
+  .nav-links { display: flex; align-items: center; gap: 26px; }
+  .nav-links a { color: var(--text-soft); text-decoration: none; font-size: 0.92rem; font-weight: 600; transition: color 0.15s ease; }
+  .nav-links a:hover { color: var(--text); }
+  .nav-links a.btn-primary { color: var(--primary-dark); }
+  .nav-toggle {
+    display: none;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 1.1rem;
+    padding: 6px 11px;
+    cursor: pointer;
   }
+
+  .hero { padding: 88px 0 96px; }
   .hero .wrap { text-align: center; }
   .hero h1 {
-    font-size: clamp(2rem, 4.5vw, 3rem);
-    margin: 0 0 14px;
+    font-size: clamp(2.1rem, 4.6vw, 3.1rem);
+    margin: 0 0 16px;
     font-weight: 800;
     letter-spacing: -0.02em;
   }
+  .hero h1 .grad {
+    background: linear-gradient(90deg, #c4b5fd, #8b5cf6 60%, #34d399);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
   .hero p.lead {
     font-size: 1.15rem;
-    color: #dbe8fb;
+    color: var(--text-soft);
     max-width: 620px;
     margin: 0 auto 32px;
   }
@@ -59,20 +129,23 @@
     font-weight: 700;
     text-decoration: none;
     font-size: 0.98rem;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
   }
-  .btn-primary { background: #fff; color: var(--brand-dark); }
-  .btn-ghost { background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.4); }
+  .btn:hover { transform: translateY(-2px); }
+  .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 8px 24px rgba(139,92,246,0.35); }
+  .btn-primary:hover { background: var(--primary-dark); box-shadow: 0 10px 30px rgba(139,92,246,0.5); }
+  .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--surface-strong); }
   .badge-soon {
     display: inline-block;
-    margin-top: 18px;
+    margin-top: 22px;
     font-size: 0.85rem;
-    color: #c6d9f4;
+    color: var(--text-muted);
   }
 
-  section { padding: 64px 0; }
-  section.alt { background: var(--bg-soft); }
-  h2 { font-size: 1.6rem; margin: 0 0 8px; letter-spacing: -0.01em; }
-  .section-sub { color: var(--ink-soft); margin: 0 0 36px; max-width: 640px; }
+  section { padding: 76px 0; }
+  h2 { font-size: 1.65rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .section-sub { color: var(--text-soft); margin: 0 0 36px; max-width: 640px; }
 
   .grid {
     display: grid;
@@ -80,56 +153,83 @@
     gap: 20px;
   }
   .card {
-    background: #fff;
+    background: var(--surface);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 22px;
+    border-radius: 16px;
+    padding: 24px;
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease;
   }
-  .card .icon { font-size: 1.6rem; margin-bottom: 10px; }
+  .card:hover {
+    transform: translateY(-5px);
+    border-color: rgba(139,92,246,0.55);
+    background: var(--surface-strong);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.3);
+  }
+  .card .icon-badge {
+    width: 46px; height: 46px;
+    border-radius: 13px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.35rem;
+    background: linear-gradient(135deg, rgba(139,92,246,0.35), rgba(139,92,246,0.08));
+    border: 1px solid rgba(139,92,246,0.4);
+    margin-bottom: 14px;
+  }
   .card h3 { font-size: 1.05rem; margin: 0 0 6px; }
-  .card p { color: var(--ink-soft); font-size: 0.92rem; margin: 0; }
+  .card p { color: var(--text-soft); font-size: 0.92rem; margin: 0; }
   .card .tag {
     display: inline-block;
-    margin-top: 10px;
+    margin-top: 12px;
     font-size: 0.72rem;
     font-weight: 700;
-    color: var(--brand-dark);
-    background: #e9f1fc;
+    color: #ffffff;
+    background: var(--primary-dark);
     padding: 3px 10px;
     border-radius: 999px;
   }
 
-  .about p { color: var(--ink-soft); max-width: 700px; }
+  .about p { color: var(--text-soft); max-width: 700px; }
   .about .facts {
     display: flex;
-    gap: 36px;
+    gap: 20px;
     flex-wrap: wrap;
     margin-top: 28px;
   }
-  .about .facts div { min-width: 140px; }
-  .about .facts strong { display: block; font-size: 1.5rem; color: var(--brand-dark); }
-  .about .facts span { color: var(--ink-soft); font-size: 0.88rem; }
+  .about .facts div {
+    min-width: 150px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+  .about .facts strong { display: block; font-size: 1.6rem; color: var(--text); }
+  .about .facts span { color: var(--text-soft); font-size: 0.85rem; }
 
   .tutor-cta {
-    background: linear-gradient(135deg, var(--brand-dark) 0%, var(--brand) 100%);
-    color: #fff;
     text-align: center;
+    position: relative;
+  }
+  .tutor-cta .panel {
+    background: linear-gradient(135deg, rgba(139,92,246,0.28), rgba(109,40,217,0.18));
+    border: 1px solid rgba(139,92,246,0.4);
+    border-radius: 24px;
+    padding: 56px 32px;
   }
   .tutor-cta h2 { color: #fff; }
-  .tutor-cta .section-sub { color: #dbe8fb; margin-left: auto; margin-right: auto; }
-  .tutor-cta .btn-primary { background: #fff; color: var(--brand-dark); }
+  .tutor-cta .section-sub { margin-left: auto; margin-right: auto; }
 
-  /* Used on a light (.alt) section background, unlike the hero/tutor-cta's
-     white-on-dark button - needs its own solid fill to still read as the
-     primary action. */
   .section-cta { text-align: center; margin: 32px 0 0; }
-  .section-cta .btn-primary { background: var(--brand); color: #fff; }
 
   .founder-wrap {
     display: flex;
     align-items: center;
     gap: 40px;
     flex-wrap: wrap;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 36px;
   }
   .founder-photo {
     width: 220px;
@@ -137,23 +237,44 @@
     object-fit: cover;
     border-radius: 16px;
     flex-shrink: 0;
+    border: 1px solid var(--border);
   }
   .founder h2 { margin-bottom: 4px; }
   .founder-name { font-size: 1.25rem; margin: 0; }
-  .founder-title { color: var(--brand-dark); font-weight: 700; font-size: 0.95rem; margin: 2px 0 14px; }
-  .founder p:not(.founder-title) { color: var(--ink-soft); max-width: 560px; }
+  .founder-title { color: var(--primary); font-weight: 700; font-size: 0.95rem; margin: 2px 0 14px; }
+  .founder p:not(.founder-title) { color: var(--text-soft); max-width: 560px; }
   .founder-linkedin { display: inline-block; margin-top: 10px; font-weight: 700; font-size: 0.92rem; }
 
   @media (max-width: 640px) {
-    .founder-wrap { flex-direction: column; text-align: center; }
+    .founder-wrap { flex-direction: column; text-align: center; padding: 28px; }
     .founder p:not(.founder-title) { max-width: none; }
   }
+
+  /* ---- Contact ---- */
+  .contact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+  }
+  .contact-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+    text-decoration: none;
+    display: block;
+    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  }
+  .contact-card:hover { transform: translateY(-4px); border-color: rgba(139,92,246,0.55); background: var(--surface-strong); }
+  .contact-card .icon-badge { margin-bottom: 12px; }
+  .contact-card strong { display: block; color: var(--text); font-size: 0.95rem; margin-bottom: 4px; }
+  .contact-card span { color: var(--text-soft); font-size: 0.88rem; }
 
   footer {
     border-top: 1px solid var(--border);
     padding: 36px 0;
     font-size: 0.88rem;
-    color: var(--ink-soft);
+    color: var(--text-soft);
   }
   footer .wrap {
     display: flex;
@@ -161,26 +282,89 @@
     flex-wrap: wrap;
     gap: 16px;
   }
-  footer a { color: var(--ink-soft); text-decoration: none; margin-right: 18px; }
-  footer a:hover { color: var(--brand); }
+  footer a { color: var(--text-soft); text-decoration: none; margin-right: 18px; }
+  footer a:hover { color: var(--text); }
 
   @media (max-width: 560px) {
     footer .wrap { flex-direction: column; }
   }
+
+  @media (max-width: 760px) {
+    .nav-links { display: none; }
+    .nav-toggle { display: inline-flex; }
+    .nav-links.open {
+      display: flex;
+      flex-direction: column;
+      position: absolute;
+      top: 100%;
+      left: 16px;
+      right: 16px;
+      background: rgba(20, 11, 46, 0.96);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      gap: 14px;
+      backdrop-filter: blur(14px);
+    }
+  }
+
+  /* ---- Scroll-reveal ---- */
+  .reveal { opacity: 0; transform: translateY(22px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+  }
+
+  /* ---- Back to top ---- */
+  .to-top {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    z-index: 60;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    font-size: 1.1rem;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 8px 22px rgba(139,92,246,0.45);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(10px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  .to-top.visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
 </style>
 </head>
 <body>
 
-<header class="top">
+<div class="bg-fixed" aria-hidden="true">
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+  <div class="glow glow-3"></div>
+</div>
+
+<header class="top" id="topHeader">
   <div class="wrap">
-    <img src="favicon.png" alt="Malita logo" />
-    <span class="wordmark">Malita</span>
+    <a href="index.html" class="brand">
+      <img src="favicon.png" alt="Malita logo" />
+      <span class="wordmark">Malita</span>
+    </a>
+    <nav class="nav-links" id="navLinks">
+      <a href="#features">Self-Study</a>
+      <a href="#tutoring">Tutoring</a>
+      <a href="apply-to-tutor.html">Tutor With Us</a>
+      <a href="find-a-tutor.html" class="btn btn-primary" style="padding:9px 20px;">Find a Tutor</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Open menu">☰</button>
   </div>
 </header>
 
 <div class="hero">
   <div class="wrap">
-    <h1>Study smarter on your own,<br>or get matched with a real tutor.</h1>
+    <h1>Study smarter on your own,<br><span class="grad">or get matched with a real tutor.</span></h1>
     <p class="lead">
       Malita pairs AI-powered self-study tools for Grade 12 Maths &amp; Physical Sciences with a live
       1-on-1 tutoring marketplace — any CAPS subject, Grade 10 to 12, plus university and college
@@ -197,37 +381,37 @@
 
 <section id="features">
   <div class="wrap">
-    <h2>Self-study, AI-powered</h2>
-    <p class="section-sub">Mathematics and Physical Sciences, Paper 1 and Paper 2, worked the way a good teacher would.</p>
+    <h2 class="reveal">Self-study, AI-powered</h2>
+    <p class="section-sub reveal">Mathematics and Physical Sciences, Paper 1 and Paper 2, worked the way a good teacher would.</p>
     <div class="grid">
-      <div class="card">
-        <div class="icon">🧮</div>
+      <div class="card reveal">
+        <div class="icon-badge">🧮</div>
         <h3>AI Tutor</h3>
         <p>Type a question, snap a photo, or upload a PDF — solved step by step, with the reasoning shown at every stage.</p>
       </div>
-      <div class="card">
-        <div class="icon">🧑‍🏫</div>
+      <div class="card reveal">
+        <div class="icon-badge">🧑‍🏫</div>
         <h3>AI Teacher</h3>
         <p>A full narrated lesson on any topic you choose — explained, worked through, and read aloud like a real class.</p>
         <span class="tag">Premium</span>
       </div>
-      <div class="card">
-        <div class="icon">📝</div>
+      <div class="card reveal">
+        <div class="icon-badge">📝</div>
         <h3>Practice Questions</h3>
         <p>Curated Grade 12 questions by topic, with hints and complete worked solutions.</p>
       </div>
-      <div class="card">
-        <div class="icon">🗂️</div>
+      <div class="card reveal">
+        <div class="icon-badge">🗂️</div>
         <h3>Past Papers Library</h3>
         <p>Real NSC past exam papers, organised by year and subject, ready to download and work through.</p>
       </div>
-      <div class="card">
-        <div class="icon">🤝</div>
+      <div class="card reveal">
+        <div class="icon-badge">🤝</div>
         <h3>Collaboration Forum</h3>
         <p>Ask a question or help another learner — a study community built around the same CAPS topics.</p>
       </div>
-      <div class="card">
-        <div class="icon">🎯</div>
+      <div class="card reveal">
+        <div class="icon-badge">🎯</div>
         <h3>Learner Profile</h3>
         <p>Track your progress, badges, and solved-question history as you work through each subject.</p>
       </div>
@@ -235,64 +419,66 @@
   </div>
 </section>
 
-<section class="alt" id="tutoring">
+<section id="tutoring">
   <div class="wrap">
-    <h2>Live 1-on-1 tutoring, matched to you</h2>
-    <p class="section-sub">
+    <h2 class="reveal">Live 1-on-1 tutoring, matched to you</h2>
+    <p class="section-sub reveal">
       Beyond self-study — request a real tutor for any CAPS subject (Grade 10-12) or a university/college
       module, and meet live over Google Meet.
     </p>
     <div class="grid">
-      <div class="card">
-        <div class="icon">🙋</div>
+      <div class="card reveal">
+        <div class="icon-badge">🙋</div>
         <h3>Request a tutor</h3>
         <p>Any CAPS subject from Grade 10-12, or a university/college module — tell us what you need help with and when.</p>
       </div>
-      <div class="card">
-        <div class="icon">💰</div>
+      <div class="card reveal">
+        <div class="icon-badge">💰</div>
         <h3>Set your own price</h3>
         <p>You name the price you're comfortable paying when you request a session — no hidden fees, no surprise rates.</p>
       </div>
-      <div class="card">
-        <div class="icon">✅</div>
+      <div class="card reveal">
+        <div class="icon-badge">✅</div>
         <h3>Matched with a vetted tutor</h3>
         <p>Every tutor is reviewed by hand before approval — academic results, ID and qualification documents checked.</p>
       </div>
-      <div class="card">
-        <div class="icon">🎥</div>
+      <div class="card reveal">
+        <div class="icon-badge">🎥</div>
         <h3>Meet live, over Google Meet</h3>
         <p>Your session happens over a real video call, with a link generated automatically once you're matched and paid.</p>
       </div>
-      <div class="card">
-        <div class="icon">🎓</div>
+      <div class="card reveal">
+        <div class="icon-badge">🎓</div>
         <h3>School &amp; university, covered</h3>
         <p>Malita (Grade 10-12) and Malita Campus (university/college) — the same marketplace, matched to where you study.</p>
       </div>
-      <div class="card">
-        <div class="icon">🛡️</div>
+      <div class="card reveal">
+        <div class="icon-badge">🛡️</div>
         <h3>Fair cancellation &amp; refunds</h3>
         <p>Plans change — cancel ahead of time at no cost, with a clear, fair policy if something falls through close to the session.</p>
       </div>
     </div>
-    <p class="section-cta"><a class="btn btn-primary" href="find-a-tutor.html">Find a Tutor →</a></p>
+    <p class="section-cta reveal"><a class="btn btn-primary" href="find-a-tutor.html">Find a Tutor →</a></p>
   </div>
 </section>
 
 <section class="tutor-cta">
   <div class="wrap">
-    <h2>Know your subject? Tutor with Malita.</h2>
-    <p class="section-sub">
-      Earn money tutoring learners and students on your own schedule — high school, university, or both.
-      We review every application by hand.
-    </p>
-    <a class="btn btn-primary" href="apply-to-tutor.html">Apply to Tutor →</a>
+    <div class="panel reveal">
+      <h2>Know your subject? Tutor with Malita.</h2>
+      <p class="section-sub">
+        Earn money tutoring learners and students on your own schedule — high school, university, or both.
+        We review every application by hand.
+      </p>
+      <a class="btn btn-primary" href="apply-to-tutor.html">Apply to Tutor →</a>
+    </div>
   </div>
 </section>
 
-<section class="alt about">
+<section class="about">
   <div class="wrap">
-    <h2>Built for South African learners and students</h2>
-    <p>
+    <h2 class="reveal">Built for South African learners and students</h2>
+    <p class="reveal">
       Malita is developed by Malita (Pty) Ltd, a South African company. Self-study AI tools follow
       the CAPS curriculum's exact conventions for Grade 12 Maths and Physical Sciences — degrees,
       not radians; South African terminology; real past exam questions. The live tutoring
@@ -300,8 +486,8 @@
       university and college modules, through two apps built for where you study: Malita for
       school, Malita Campus for higher education.
     </p>
-    <div class="facts">
-      <div><strong>27+</strong><span>Subjects tutored, Grade 10-12</span></div>
+    <div class="facts reveal">
+      <div><strong data-count="27" data-suffix="+">0</strong><span>Subjects tutored, Grade 10-12</span></div>
       <div><strong>CAPS</strong><span>Curriculum aligned</span></div>
       <div><strong>🎓</strong><span>School &amp; university covered</span></div>
       <div><strong>🇿🇦</strong><span>Proudly South African</span></div>
@@ -310,20 +496,51 @@
 </section>
 
 <section class="founder">
-  <div class="wrap founder-wrap">
-    <img src="founder-sibusiso-gumede.jpg" alt="Sibusiso Gumede, Founder &amp; CEO of Malita" class="founder-photo" />
-    <div>
-      <h2>Meet the Founder</h2>
-      <h3 class="founder-name">Sibusiso Gumede</h3>
-      <p class="founder-title">Founder &amp; CEO, Malita (Pty) Ltd</p>
-      <p>
-        Sibusiso holds a Master of Science in Statistics from the University of KwaZulu-Natal and brings
-        over 8 years of experience in data analytics, machine learning and AI — across academia, government
-        and industry. He built Malita to put that same data-driven approach to work closing the tutoring gap
-        for South African learners and students, pairing AI-powered study tools with a fair, accessible
-        live tutoring marketplace.
-      </p>
-      <a href="https://www.linkedin.com/in/sibusiso-gumede-3b8319116/" class="founder-linkedin">View LinkedIn profile →</a>
+  <div class="wrap">
+    <div class="founder-wrap reveal">
+      <img src="founder-sibusiso-gumede.jpg" alt="Sibusiso Gumede, Founder &amp; CEO of Malita" class="founder-photo" />
+      <div>
+        <h2>Meet the Founder</h2>
+        <h3 class="founder-name">Sibusiso Gumede</h3>
+        <p class="founder-title">Founder &amp; CEO, Malita (Pty) Ltd</p>
+        <p>
+          Sibusiso holds a Master of Science in Statistics from the University of KwaZulu-Natal and brings
+          over 8 years of experience in data analytics, machine learning and AI — across academia, government
+          and industry. He built Malita to put that same data-driven approach to work closing the tutoring gap
+          for South African learners and students, pairing AI-powered study tools with a fair, accessible
+          live tutoring marketplace.
+        </p>
+        <a href="https://www.linkedin.com/in/sibusiso-gumede-3b8319116/" class="founder-linkedin">View LinkedIn profile →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="contact">
+  <div class="wrap">
+    <h2 class="reveal">Get in touch</h2>
+    <p class="section-sub reveal">Questions about Malita, a partnership, or anything else — we'd love to hear from you.</p>
+    <div class="contact-grid reveal">
+      <a class="contact-card" href="mailto:sbugzoh2@gmail.com">
+        <div class="icon-badge">✉️</div>
+        <strong>Email</strong>
+        <span>sbugzoh2@gmail.com</span>
+      </a>
+      <a class="contact-card" href="tel:+27796352332">
+        <div class="icon-badge">📞</div>
+        <strong>Phone</strong>
+        <span>+27 79 635 2332</span>
+      </a>
+      <a class="contact-card" href="https://www.facebook.com/share/1EGgDzJ5va/?mibextid=wwXIfr" target="_blank" rel="noopener">
+        <div class="icon-badge">📘</div>
+        <strong>Facebook</strong>
+        <span>Malita Tech</span>
+      </a>
+      <div class="contact-card" style="cursor: default;">
+        <div class="icon-badge">📍</div>
+        <strong>Address</strong>
+        <span>Shemula Area, Ingwavuma 3968<br>KwaZulu-Natal, South Africa</span>
+      </div>
     </div>
   </div>
 </section>
@@ -335,11 +552,75 @@
       <a href="delete-account.html">Delete My Account</a>
       <a href="find-a-tutor.html">Find a Tutor</a>
       <a href="apply-to-tutor.html">Apply to Tutor</a>
-      <a href="mailto:sbugzoh2@gmail.com">Contact</a>
+      <a href="#contact">Contact</a>
+      <a href="https://www.facebook.com/share/1EGgDzJ5va/?mibextid=wwXIfr" target="_blank" rel="noopener">Facebook</a>
     </div>
     <div>Malita (Pty) Ltd · Reg. No. 2026/660069/07 · © 2026</div>
   </div>
 </footer>
+
+<button class="to-top" id="toTop" aria-label="Back to top">↑</button>
+
+<script>
+  // Sticky header gets a solid/blurred background once scrolled, instead
+  // of always being transparent-on-dark (which otherwise looks identical
+  // to the page behind it).
+  const header = document.getElementById('topHeader');
+  const toTop = document.getElementById('toTop');
+  window.addEventListener('scroll', () => {
+    const scrolled = window.scrollY > 10;
+    header.classList.toggle('scrolled', scrolled);
+    toTop.classList.toggle('visible', window.scrollY > 500);
+  }, { passive: true });
+
+  document.getElementById('toTop').addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // Mobile nav toggle.
+  const navToggle = document.getElementById('navToggle');
+  const navLinks = document.getElementById('navLinks');
+  navToggle.addEventListener('click', () => navLinks.classList.toggle('open'));
+  navLinks.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => navLinks.classList.remove('open')));
+
+  // Scroll-reveal: fade/slide each .reveal element in once, the first
+  // time it enters the viewport - observer disconnects per-element after
+  // triggering so nothing keeps re-animating on scroll-back.
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => revealObserver.observe(el));
+
+  // Animated count-up for the stat number(s) marked with data-count -
+  // starts once, the moment it scrolls into view.
+  function animateCount(el) {
+    const target = parseInt(el.dataset.count, 10);
+    const suffix = el.dataset.suffix || '';
+    const duration = 900;
+    const start = performance.now();
+    function tick(now) {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      el.textContent = Math.round(eased * target) + suffix;
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  const countObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        animateCount(entry.target);
+        countObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.5 });
+  document.querySelectorAll('[data-count]').forEach((el) => countObserver.observe(el));
+</script>
 
 </body>
 </html>
